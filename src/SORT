@@ -1,0 +1,142 @@
+/*
+ * Qsort routine from Bentley & McIlroy's "Engineering a Sort Function".
+ */
+
+#define min(a, b)       (a) < (b) ? a : b
+
+#define swapcode(TYPE, parmi, parmj, n) {               \
+        long i = (n) / sizeof (TYPE);                   \
+        REGISTER TYPE *pi = (TYPE *) (parmi);           \
+        REGISTER TYPE *pj = (TYPE *) (parmj);           \
+        do {                                            \
+                REGISTER TYPE   t = *pi;                \
+                *pi++ = *pj;                            \
+                *pj++ = t;                              \
+        } while (--i > 0);                              \
+}
+
+#define SWAPINIT(a) swaptype = ((char *)a - (char *)0) % sizeof(long) || \
+        sizeof(GPTYPE) % sizeof(long) ? 2 : sizeof(GPTYPE) == sizeof(long)? 0 : 1;
+
+static inline void swapfunc(void *a, void *b, int n, int swaptype)
+{
+  if (swaptype <= 1) swapcode(long, a, b, n)
+    else              swapcode(char, a, b, n)
+    }
+
+#define swap(a, b)                                      \
+        if (swaptype == 0) {                            \
+                long t = *(long *)(a);                  \
+                *(long *)(a) = *(long *)(b);            \
+                *(long *)(b) = t;                       \
+        } else                                          \
+                swapfunc(a, b, sizeof(GPTYPE), swaptype)
+
+#define vecswap(a, b, n)        if ((n) > 0) swapfunc(a, b, n, swaptype)
+
+/* XXXX: Sort by words and if the words match sort by GP.  */
+static int inline MemIndexCompare (const void *a, const void *b, const void *base)
+{
+#if 0
+  return memcmp((char *)base+(*((PGPTYPE)(a))), (char *)base+(*((PGPTYPE)(b))), StringCompLength);
+#else
+  REGISTER int result;
+  if ((result = strncmp((const char *)base+(*((PGPTYPE)(a))),
+                        (const char *)base+(*((PGPTYPE)(b))), StringCompLength)) == 0)
+    result = *((PGPTYPE)(a)) - *((PGPTYPE)(b));
+  return result;
+#endif
+}
+
+#define med3(a,b,c) \
+  ( MemIndexCompare(a, b, base) < 0 ? (MemIndexCompare(b, c, base) < 0 ? b : \
+  ( MemIndexCompare(a, c, base) < 0 ? c : a )) :(MemIndexCompare(b, c, base) > 0 ? b : \
+  ( MemIndexCompare(a, c, base) < 0 ? a : c )))
+
+void INDEX::TermSort(const void *base, void *a, size_t n) const
+{
+    char *pa, *pb, *pc, *pd, *pl, *pm, *pn;
+    int d, r, swaptype, swap_cnt;
+
+loop:   SWAPINIT(a);
+    swap_cnt = 0;
+    if (n < 7)
+      {
+        for (pm = (char *)a + sizeof(GPTYPE); pm < (char *)a + n * sizeof(GPTYPE); pm += sizeof(GPTYPE))
+          for (pl = pm; pl > (char *)a && MemIndexCompare(pl - sizeof(GPTYPE), pl, base) > 0; pl -= sizeof(GPTYPE))
+            swap(pl, pl - sizeof(GPTYPE));
+        return;
+      }
+    pm = (char *)a + (n / 2) * sizeof(GPTYPE);
+    if (n > 7)
+      {
+        pl = (char *)a;
+        pn = (char *)a + (n - 1) * sizeof(GPTYPE);
+        if (n > 40)
+          {
+            d = (n / 8) * sizeof(GPTYPE);
+            pl = (char *)med3(pl, pl + d, pl + 2 * d);
+            pm = (char *)med3(pm - d, pm, pm + d);
+            pn = (char *)med3(pn - 2 * d, pn - d, pn);
+          }
+        pm = (char *)med3(pl, pm, pn);
+      }
+    swap(a, pm);
+    pa = pb = (char *)a + sizeof(GPTYPE);
+
+    pc = pd = (char *)a + (n - 1) * sizeof(GPTYPE);
+    for (;;)
+      {
+        while (pb <= pc && (r = MemIndexCompare(pb, a, base)) <= 0)
+          {
+            if (r == 0)
+              {
+                swap_cnt = 1;
+                swap(pa, pb);
+                pa += sizeof(GPTYPE);
+              }
+            pb += sizeof(GPTYPE);
+          }
+        while (pb <= pc && (r = MemIndexCompare(pc, a, base)) >= 0)
+          {
+            if (r == 0)
+              {
+                swap_cnt = 1;
+                swap(pc, pd);
+                pd -= sizeof(GPTYPE);
+              }
+            pc -= sizeof(GPTYPE);
+          }
+        if (pb > pc)
+          break;
+        swap(pb, pc);
+        swap_cnt = 1;
+        pb += sizeof(GPTYPE);
+        pc -= sizeof(GPTYPE);
+      }
+    if (swap_cnt == 0)    /* Switch to insertion sort */
+      {
+        for (pm = (char *)a + sizeof(GPTYPE); pm < (char *)a + n * sizeof(GPTYPE); pm += sizeof(GPTYPE))
+          for (pl = pm; pl > (char *)a && MemIndexCompare(pl - sizeof(GPTYPE), pl, base) > 0;
+               pl -= sizeof(GPTYPE))
+            swap(pl, pl - sizeof(GPTYPE));
+        return;
+      }
+
+    pn = (char *)a + n * sizeof(GPTYPE);
+    r = min(pa - (char *)a, pb - pa);
+    vecswap(a, pb - r, r);
+    r = min(pd - pc, pn - pd - (off_t)sizeof(GPTYPE));
+    vecswap(pb, pn - r, r);
+    if ((r = pb - pa) > (off_t)sizeof(GPTYPE))
+      TermSort(base, a, r / sizeof(GPTYPE));
+    if ((r = pd - pc) > (off_t)sizeof(GPTYPE))
+      {
+        /* Iterate rather than recurse to save stack space */
+        a = pn - r;
+        n = r / sizeof(GPTYPE);
+        goto loop;
+      }
+    /*              TermSort(base, pn - r, r / sizeof(GPTYPE));*/
+}
+

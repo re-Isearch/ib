@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────
+# macOS Runtime Shared Library Paths (RPATH)
+# ─────────────────────────────────────────────
+if(APPLE AND BUILD_VECTOR_INDEX)
+    # Get the concrete directory where the schmate/bert libraries are generated
+    if(TARGET ${SCHMATE_LIB})
+        # If it's a target, extract its build directory location dynamically
+        get_target_property(SCHMATE_LIB_LOCATION ${SCHMATE_LIB} LIBRARY_OUTPUT_DIRECTORY)
+        if(NOT SCHMATE_LIB_LOCATION)
+            # Fallback if output directory isn't explicitly overridden on the target
+            set(SCHMATE_LIB_LOCATION "${SCHMATE_LIB_DIR}")
+        endif()
+    else()
+        set(SCHMATE_LIB_LOCATION "${SCHMATE_LIB_DIR}")
+    endif()
+
+    # Inject the runtime paths into all compiled ib executables
+    foreach(exe Iindex Isearch Iutil quarry Idelete)
+        if(TARGET ${exe})
+            set_target_properties(${exe} PROPERTIES
+                # 1. Ensure the executable retains RPATH flags when running out of the build directory
+                CMAKE_SKIP_BUILD_RPATH FALSE
+                # 2. Automatically clean up rpaths when installed to system paths
+                CMAKE_BUILD_WITH_INSTALL_RPATH FALSE
+                # 3. Append the physical Schmate build directory to dyld's search path
+                APPEND PROPERTY CMAKE_BUILD_RPATH "${SCHMATE_LIB_LOCATION}"
+            )
+            message(STATUS "[macOS RPATH Pass] Injecting runtime search lane into ${exe}: ${SCHMATE_LIB_LOCATION}")
+        endif()
+    endforeach()
+endif()
