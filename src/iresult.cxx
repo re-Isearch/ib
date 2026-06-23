@@ -102,8 +102,11 @@ IRESULT::IRESULT(const IRESULT& OtherIresult)
 }
 
 
-IRESULT& IRESULT::operator=(const IRESULT& OtherIresult)
+IRESULT& IRESULT::operator=(const IRESULT& OtherIresult) 
 {
+#ifdef DEBUG_MEMORY
+  __IB_IRESULT_allocated_count++;
+#endif
   Index     = OtherIresult.Index;
   SortIndex = OtherIresult.SortIndex;
   HitCount  = OtherIresult.HitCount;
@@ -138,6 +141,62 @@ IRESULT& IRESULT::operator=(const IRESULT& OtherIresult)
 
   return *this;
 }
+
+IRESULT::IRESULT(IRESULT&& Other) noexcept
+{
+#ifdef DEBUG_MEMORY
+  __IB_IRESULT_allocated_count++;
+#endif
+  Index             = Other.Index;
+  SortIndex         = Other.SortIndex;
+  HitCount          = Other.HitCount;
+  AuxCount          = Other.AuxCount;
+  Date              = Other.Date;
+  Score             = Other.Score;
+#if USE_GEOSCORE
+  gScore            = Other.gScore;
+#endif
+  HitTable          = std::move(Other.HitTable);   // assumes FCT has a cheap/move-capable assignment; see note below
+  Mdt               = Other.Mdt;
+
+  TermHitsVector    = Other.TermHitsVector;   // steal pointer, no alloc/copy
+  maxTermHitsVector = Other.maxTermHitsVector;
+
+  Other.TermHitsVector    = nullptr;          // so ~IRESULT() on Other is a no-op free
+  Other.maxTermHitsVector = 0;
+  Other.AuxCount          = 0;
+}
+
+IRESULT& IRESULT::operator=(IRESULT&& Other) noexcept
+{
+  if (this == &Other) return *this;
+
+  Index     = Other.Index;
+  SortIndex = Other.SortIndex;
+  HitCount  = Other.HitCount;
+  AuxCount  = Other.AuxCount;
+  Date      = Other.Date;
+  Score     = Other.Score;
+#if USE_GEOSCORE
+  gScore    = Other.gScore;
+#endif
+  HitTable  = std::move(Other.HitTable);
+  Mdt       = Other.Mdt;
+
+  if (TermHitsVector) free(TermHitsVector);   // drop our own buffer first
+
+  TermHitsVector    = Other.TermHitsVector;   // steal
+  maxTermHitsVector = Other.maxTermHitsVector;
+
+  Other.TermHitsVector    = nullptr;
+  Other.maxTermHitsVector = 0;
+  Other.AuxCount          = 0;
+
+  return *this;
+}
+
+
+
 
 /*
 void IRESULT::SetHitTable(const FC& Fc)

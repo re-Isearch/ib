@@ -2296,6 +2296,8 @@ bool STRING::IsTelephoneNumber() const
 
 #endif
 
+
+// Dot number needs two:  1.2.4 or 1:3:4
 bool STRING::IsDotNumber() const
 {
   const size_t length = Len();
@@ -2309,7 +2311,6 @@ bool STRING::IsDotNumber() const
       if (ptr[i] == ':')
 	{
 	  hex++;
-	  dots++;
 	}
       else if (ptr[i] == '.')
 	{
@@ -2317,14 +2318,18 @@ bool STRING::IsDotNumber() const
 	    return(false); // .. is not allowed, probably is a range
 	  dots++;
 	}
+      else if (dots && !_ib_isdigit(ptr[i]))
+	return false; // Needs digit is saw .
       else if (!_ib_isxdigit(ptr[i]))
 	{
 	  if (i > 0) return(false);
 	}
       else saw_digit++;
     }
-  if ((saw_digit > 1) && ((dots > 1) || (hex == dots)))
-    return true;
+  if (saw_digit > 1) {
+    if (dots && hex) return false; // Can't mix . and :
+    if (dots > 2 || hex > 2) return true;
+  }
   return false;
 }
 

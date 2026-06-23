@@ -4,6 +4,10 @@
 #include "common.hxx"
 #include "index.hxx"
 
+
+// We let the intrinsics and compiler optimizer handle the SIMD lifting
+//
+
 template <size_t N>
 struct alignas(64) SIMDVariableTermKey {
     unsigned char text[N];     // Must be unsigned char for clean array indexing
@@ -22,7 +26,7 @@ void RadixSortMSDCore(SIMDVariableTermKey<N>* src, SIMDVariableTermKey<N>* dst,
                       size_t count, size_t digit) 
 {
     // Base Case: If the slice is small or we finished scanning text bytes,
-    // break any remaining ties using the legacy GPTYPE value.
+    // break any remaining ties using the GPTYPE value (implicitly encodes indexing order).
     if (count < 16 || digit >= N) {
         std::sort(src, src + count, [digit](const SIMDVariableTermKey<N>& x, const SIMDVariableTermKey<N>& y) {
             if (digit < N) {
@@ -133,7 +137,7 @@ void INDEX::TermSort_SIMD(const void *base, void *a, size_t n) const
         case 32: 
             ExecuteTemplatedSort<32>(base, a, n);
             break;
-        case 64:  // standard CoreQuarry default
+        case 64:  // standard ib default
             ExecuteTemplatedSort<64>(base, a, n);
             break;
         case 128: // ANGIS / Standard Genomic Token window
@@ -145,7 +149,7 @@ void INDEX::TermSort_SIMD(const void *base, void *a, size_t n) const
         default:
             // SAFEST RUNTIME FALLBACK:
             // If they need an arbitrary long length not optimized by a template slot,
-            // we fall back directly to your highly trusted original Bentley-McIlroy sort
+            // we fall back directly to the trusted original Bentley-McIlroy sort
             // which safely scales to infinity using the text buffer directly!
             TermSort(base, a, n); 
             break;

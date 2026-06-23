@@ -246,8 +246,13 @@ public:
   virtual size_t MdtLookupKey (const STRING&) const { return 0; }
   virtual void   MdtSetUniqueKey(PRECORD, const STRING&) { }
 
-  virtual void   SetOverride(bool) {  }
+  virtual void SetOverride(bool) {  }
   virtual bool GetOverride() const { return false; }
+
+  virtual bool DeleteByIndex (const INT Index) { return false;}
+  virtual bool DeleteByKey(const STRING& Key) { return false;}
+  virtual bool UndeleteByIndex (const INT Index) { return false;}
+  virtual bool UndeleteByKey(const STRING& Key) { return false;}
 
   virtual size_t Scan(PSTRLIST, const STRING&, const size_t = 0, const INT =-1) const { return 0;};
   virtual size_t Scan(PSTRLIST, const STRING&, const STRING&, const INT) const { return 0;};

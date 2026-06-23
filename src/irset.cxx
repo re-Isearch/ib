@@ -71,6 +71,78 @@ static int iIndexCompare(const void *x, const void *y)
   return (int)(*((_index_id_t *)x) - (_index_id_t)(((IRESULT *)y)->GetIndex()) );
 }
 
+#define FindByIndexFast FindByIndexGalloping
+
+// Fast, inlinable binary search that searches by raw _index_id_t directly,
+// no IRESULT key object needed.
+static inline IRESULT *FindByIndexBinary(IRESULT *Table, size_t Count, _index_id_t target)
+{
+  size_t lo = 0, hi = Count;
+  while (lo < hi)
+    {
+      size_t mid = lo + (hi - lo) / 2;
+      const _index_id_t midVal = (_index_id_t)Table[mid].GetIndex();
+      if (midVal < target)
+        lo = mid + 1;
+      else if (midVal > target)
+        hi = mid;
+      else
+        return Table + mid;
+    }
+  return NULL;
+}
+
+static inline IRESULT *FindByIndexInterp(IRESULT *Table, size_t Count, _index_id_t target)
+{
+  if (Count == 0) return NULL;
+  _index_id_t lo = 0, hi = Count - 1;
+  _index_id_t loVal = Table[lo].GetIndex();
+  _index_id_t hiVal = Table[hi].GetIndex();
+
+  while (lo <= hi && target >= loVal && target <= hiVal)
+    {
+      if (loVal == hiVal)
+        return (Table[lo].GetIndex() == target) ? Table + lo : NULL;
+
+      // Interpolate probe position
+      size_t mid = lo + (size_t)(((double)(hi - lo) * (target - loVal)) / (hiVal - loVal));
+
+      _index_id_t midVal = Table[mid].GetIndex();
+      if (midVal == target)
+        return Table + mid;
+      if (midVal < target)
+        { lo = mid + 1; loVal = (lo <= hi) ? (_index_id_t)Table[lo].GetIndex() : loVal; }
+      else
+        { if (mid == 0) break; hi = mid - 1; hiVal = (hi >= lo) ? (_index_id_t)Table[hi].GetIndex() : hiVal; }
+    }
+  return NULL;
+}
+
+
+static inline IRESULT *FindByIndexGalloping(IRESULT *Table, size_t Count, _index_id_t target)
+{
+  if (Count == 0) return NULL;
+
+  // Exponential probe to bracket the target
+  size_t bound = 1;
+  while (bound < Count && Table[bound].GetIndex() < target)
+    bound *= 2;
+
+  size_t lo = bound / 2;
+  size_t hi = (bound < Count) ? bound : Count - 1;
+
+  // Branchless binary search within [lo, hi]
+  while (lo < hi)
+    {
+      size_t mid = lo + (hi - lo) / 2;
+      if (Table[mid].GetIndex() < target)
+        lo = mid + 1;
+      else
+        hi = mid;
+    }
+  return (lo < Count && Table[lo].GetIndex() == target) ? Table + lo : NULL;
+}
+
 atomicIRSET::atomicIRSET (const PIDBOBJ DbParent, size_t Reserve)
 {
   allocs           = 0;
@@ -595,7 +667,11 @@ size_t atomicIRSET::FindByMdtIndex(size_t Index) const
   if (Sort == ByIndex && TotalEntries > 3)
     {
       // Binary search...
+#if 1
+      IRESULT *ptr = FindByIndexFast(Table, TotalEntries, (_index_id_t)Index);
+#else
       IRESULT *ptr = (IRESULT *)bsearch(&Index, (const void *)Table, TotalEntries, sizeof(IRESULT), iIndexCompare);
+#endif
       if (ptr)
 	{
 	  return (size_t)(ptr - Table) + 1;
@@ -872,10 +948,14 @@ void atomicIRSET::Resize (const size_t Entries)
 	return;
       }
 
-//#pragma omp parallel for
+// NOT #pragma omp parallel for — heap-owning move triggers lock-contended frees
       for (size_t i = 0; i < NewTotal; i++)
 	{
+#if 1
+          NewTable[i] = std::move(Table[i]);   // steals TermHitsVector pointer, zero alloc
+#else
 	  NewTable[i] = Table[i];
+#endif
 	}
       if (Table) delete [] Table;
       Table = NewTable;
@@ -1007,9 +1087,14 @@ OPOBJ *atomicIRSET::Not ( )
     {
      Index.SetMdtIndex(i);
      _index_id_t index = Index;
-     if (OldTotal == 0 ||
-	(ptr = (IRESULT *)bsearch(&index, (const void *)(OldTable + offset), OldTotal-offset,
-		sizeof(IRESULT), iIndexCompare)) == NULL)
+     if (OldTotal == 0 || (
+#if 1
+	ptr = FindByIndexFast(OldTable + offset, OldTotal - offset, (_index_id_t)index)
+#else
+	ptr = (IRESULT *)bsearch(&index, (const void *)(OldTable + offset), OldTotal-offset,
+		sizeof(IRESULT), iIndexCompare)
+#endif
+		) == NULL)
         {
 	  Table[TotalEntries].SetIndex (Index);
 	  Table[TotalEntries].SetHitCount (1);
@@ -1182,8 +1267,14 @@ OPOBJ *atomicIRSET::Not (const STRING& FieldName)
       Index.SetMdtIndex(i);
       _index_id_t index = Index;
       if (OldTotal == 0 ||
-	(ptr = (IRESULT *)bsearch(&index, (const void *)(OldTable + offset), OldTotal-offset,
-		sizeof(IRESULT), iIndexCompare)) == NULL)
+	(
+#if 1
+	  ptr = FindByIndexFast(OldTable + offset, OldTotal - offset, (_index_id_t)index)
+#else
+	  ptr = (IRESULT *)bsearch(&index, (const void *)(OldTable + offset), OldTotal-offset,
+		sizeof(IRESULT), iIndexCompare)
+#endif
+	) == NULL)
         {
 	  if (Mdt->GetEntry(i, &mdtrec))
 	    {
@@ -1971,8 +2062,12 @@ OPOBJ *atomicIRSET::_And (const OPOBJ& OtherIrset, size_t Limit)
     {
       OtherIrset.GetEntry(x, &OtherIresult);
       // NOTE: With the bsearch can increment the start point since Index is also sorted!
+#if 1
+      IRESULT *match = FindByIndexFast(Table + offset, TotalEntries - offset, OtherIresult.GetIndex());
+#else
       IRESULT *match = (IRESULT*)bsearch((const void *)&OtherIresult,
                 (const void *)(Table + offset), TotalEntries - offset, sizeof(IRESULT), IrsetIndexCompare);
+#endif
       if (match != NULL)
         {
           if (OtherSorted)

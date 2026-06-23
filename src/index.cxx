@@ -793,6 +793,120 @@ static inline INT _strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
 }
 
 
+// ---------------------------------------------------------------------------
+// _utf_strncasecmp
+//
+//   Compare at most n UTF-8 codepoints of term p1 against phrase/buffer p2,
+//   case-insensitively, with the same whitespace- and punctuation-collapsing
+//   semantics as the ASCII _strncasecmp.
+//
+//   Parameters
+//     p1       – term (the pattern), scanned for exactly n codepoints
+//     p2       – buffer / phrase being searched
+//     n        – number of codepoints in p1 to match
+//     look     – if non-NULL, set to true when p2 still sits on a term char
+//                after the match (i.e. the match landed mid-term)
+//     p2_bytes – if non-NULL and diff==0, receives the byte length consumed
+//                from p2  (== p2_end - p2_start - 1, matching original)
+//
+//   Returns 0 on a case-insensitive match, non-zero otherwise.  On mismatch
+//   the value is the signed UCS-32 codepoint difference (lo1 - lo2) at the
+//   first diverging position, giving true Unicode ordering.  When p2 is
+//   exhausted before n codepoints the full UCS-32 value of the next p1
+//   codepoint is returned as a positive integer.
+// ---------------------------------------------------------------------------
+#if 0
+// Term, Buffer, Codepoint-count
+static inline INT _utf_strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
+// Whether more term chars follow in p2 after the match, byte-length of p2 match
+                                   bool *look = NULL, size_t *p2_bytes = NULL)
+{
+    const UCHR *p2_Start = p2;
+    int         diff = 0;
+    int         q    = 0;     // true when both sides are whitespace
+    INT         x    = 0;     // codepoints consumed from p1
+
+    while (*p1 && *p2)
+    {
+        // ---- classify the current positions --------------------------------
+        // For whitespace / punctuation checks we only care about the lead byte;
+        // multi-byte sequences are never whitespace or ASCII punctuation.
+        int p1_ascii = ((*p1 & 0x80) == 0); // single-byte (ASCII) codepoint
+        int p2_ascii = ((*p2 & 0x80) == 0);
+
+        q = 0;
+
+        if (p1_ascii && p2_ascii)
+        {
+            q = (IsTermWhite(*p1) && IsTermWhite(*p2));
+
+            if (!q)
+            {
+                // Both punctuation collapsing: '.' or ','
+                int p1_dot = (*p1 == '.' || *p1 == ',');
+                int p2_dot = (*p2 == '.' || *p2 == ',');
+                if (p1_dot && p2_dot)
+                {
+                    p1++; p2++; x++;
+                    if (x >= n) break;
+                    continue;
+                }
+
+                // Both non-term (but not whitespace and not dot): skip together
+                if (!IsTermChar(*p1) && !IsTermChar(*p2))
+                {
+                    p1++; p2++; x++;
+                    if (x >= n) break;
+                    continue;
+                }
+            }
+        }
+
+        if (q)
+        {
+            // Collapse any run of whitespace on each side independently
+            do { p2++; } while (IsTermWhite(*p2));
+            do { p1++; x++; } while (x < n && IsTermWhite(*p1));
+        }
+        else
+        {
+            // General case: read one full codepoint from each side,
+            // lowercase both, compare byte-by-byte.
+            UCHR lo1[5], lo2[5];
+            int  len1 = _utf8_lower_cp(p1, lo1);
+            int  len2 = _utf8_lower_cp(p2, lo2);
+
+            // Compare as UCS-32 codepoints so the return value has real
+            // Unicode ordering meaning, not an accident of UTF-8 byte layout.
+            uint32_t ucs1 = _utf8_to_ucs32(lo1);
+            uint32_t ucs2 = _utf8_to_ucs32(lo2);
+            diff = (ucs1 > ucs2) ? (int)(ucs1 - ucs2) : -(int)(ucs2 - ucs1);
+
+            if (diff != 0)
+                break;
+
+            p1 += len1;
+            p2 += len2;
+            x++;
+        }
+
+        if (x >= n)
+            break;
+    }
+
+    // Did p1 run out before n codepoints but p2 still has content?
+    if (diff == 0 && x < n && *p2 == '\0')
+        diff = (int)_utf8_to_ucs32(p1); // p1 has more; full codepoint as mismatch signal
+
+    if (look)     *look     = (bool)IsTermChar(*p2);
+    if (diff == 0 && p2_bytes) *p2_bytes = (size_t)(p2 - p2_Start - 1);
+
+    return (INT)diff;
+}
+
+#endif
+
+
 INT INDEX::GpFwrite (const GPTYPE Gp, FILE *Stream) const
 {
 #if USE_PLATFORM_IND_INX
@@ -840,6 +954,103 @@ INT INDEX::GpFwrite (const GPTYPE * const Ptr, size_t NumElements, FILE *Stream)
 #endif
   }
 
+
+// Inline helper — use alongside FPT-pooled FILE*:
+//   FILE *fpi = ffopen(IndexFileName, "rb");
+//   int   fd  = IndexFd(fpi);          // borrow fd, no extra open
+//   ... GpFread(pos, fd) in parallel ...
+//   ffclose(fpi);                       // pool returns it normally
+static inline int IndexFd(FILE *fp)
+{
+#ifdef _WIN32
+    return _fileno(fp);
+#else
+    return fileno(fp);
+#endif
+}
+
+
+// ============================================================
+// pread()-based parallel-safe GpFread variants
+// These take an fd + explicit offset; no seek state is touched.
+// Safe to call concurrently on the same fd (or a dup'd fd).
+// ============================================================
+
+// Read a single GPTYPE at byte offset PositionOf(Pos).
+// Returns (GPTYPE)-1 on error (matches existing convention).
+GPTYPE INDEX::GpFread(off_t Pos, int fd) const
+{
+    GPTYPE gp = (GPTYPE)(-1);
+    const off_t off = (off_t)PositionOf(Pos);
+
+#ifdef _WIN32
+    // Windows has no pread(); fall back to a locked seek+read.
+    // For true parallelism on Windows, use dup()+_lseeki64 per thread.
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    OVERLAPPED ov = {};
+    ov.Offset     = (DWORD)(off & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD)(off >> 32);
+    DWORD nread = 0;
+    if (!ReadFile(h, &gp, sizeof(GPTYPE), &nread, &ov) || nread != sizeof(GPTYPE)) {
+        message_log(LOG_ERRNO, "Can't pread at %I64d in index.", (__int64)off);
+        Parent->SetErrorCode(2);
+        return (GPTYPE)-1;
+    }
+#else
+    ssize_t n = pread(fd, &gp, sizeof(GPTYPE), off);
+    if (n != (ssize_t)sizeof(GPTYPE)) {
+        message_log(LOG_ERRNO, "Can't pread at %lld in index.", (long long)off);
+        Parent->SetErrorCode(2);
+        return (GPTYPE)-1;
+    }
+#endif
+    if (wrongEndian) GpSwab(&gp);
+    return gp;
+}
+
+
+// Read NumElements GPTYPEs starting at byte offset PositionOf(Pos).
+// Returns number of elements successfully read.
+INT INDEX::GpFread(GPTYPE *Ptr, size_t NumElements, off_t Pos, int fd) const
+{
+    const off_t off = (off_t)PositionOf(Pos);
+    size_t      len = 0;
+
+#ifdef _WIN32
+    HANDLE   h  = (HANDLE)_get_osfhandle(fd);
+    off_t    cur = off;
+    while (len < NumElements) {
+        OVERLAPPED ov = {};
+        ov.Offset     = (DWORD)(cur & 0xFFFFFFFF);
+        ov.OffsetHigh = (DWORD)(cur >> 32);
+        DWORD nread = 0;
+        if (!ReadFile(h, &Ptr[len], sizeof(GPTYPE), &nread, &ov) || nread == 0)
+            break;
+        len++;
+        cur += sizeof(GPTYPE);
+    }
+#else
+    // pread loop — mirrors the fread loop in the FILE* overload
+    size_t remaining = NumElements;
+    while (remaining > 0) {
+        ssize_t n = pread(fd,
+                          (char *)Ptr + len * sizeof(GPTYPE),
+                          remaining * sizeof(GPTYPE),
+                          off + (off_t)(len * sizeof(GPTYPE)));
+        if (n <= 0)
+            break;
+        size_t got = (size_t)n / sizeof(GPTYPE);
+        len       += got;
+        remaining -= got;
+    }
+#endif
+
+    if (len && wrongEndian) {
+        for (size_t y = 0; y < len; y++)
+            GpSwab(Ptr + y);
+    }
+    return (INT)len;
+}
 
 INT INDEX::GpFread (GPTYPE *Ptr, FILE *Stream) const
   {
@@ -2400,7 +2611,7 @@ memory_allocation: // This is where we try to get memory
           if (MemoryIndexLength)
             {
 //	      clock_t start    = clock();
-              TermSort (MemoryData, MemoryIndex, MemoryIndexLength);
+              TermSort_SIMD (MemoryData, MemoryIndex, MemoryIndexLength); // USE SIMD CODE
 //	      clock_t end      = clock();
 //	      static const double factor = sqrt(CLOCKS_PER_SEC);
 //	      message_log (LOG_INFO, "Processed %.2f words/s (%.4f) CPU.",
@@ -4379,6 +4590,8 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
       if (!MemoryMap.Ok())
         continue;
 
+      int fpi_d = IndexFd(fpi); // get file number 
+
       MemoryMap.Advise(MapRandom);
       const char *Map = (char *)MemoryMap.Ptr();
       const size_t size = MemoryMap.Size();
@@ -4462,7 +4675,7 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
                     }
                   // Read the GPs..
                   if (nhits)
-                    num_hits = GpFread(gplist, nhits, start, fpi); /* @@ */
+                    num_hits = GpFread(gplist, nhits, start, fpi_d); /* @@ */
 
                   // Now sort..
                   // if (num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
@@ -4620,6 +4833,9 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
         }
       if (!MemoryMap.Ok())
         continue;
+
+      int fpi_d = IndexFd(fpi); // get file number 
+
       MemoryMap.Advise(MapRandom);
       const char *Map = (char *)MemoryMap.Ptr();
       const size_t size = MemoryMap.Size();
@@ -4701,7 +4917,7 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
                     }
                   // Read the GPs..
                   if (nhits)
-                    num_hits = GpFread(gplist, nhits, start, fpi); /* @@ */
+                    num_hits = GpFread(gplist, nhits, start, fpi_d); /* @@ */
 
                   // Now sort..
                   // if (num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
@@ -4848,6 +5064,9 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
 
       if (!MemoryMap.Ok())
         continue;
+
+      int fpi_d = IndexFd(fpi); // get file number 
+
       // Advise the memory manager that we want random access for binary search..
       MemoryMap.Advise(MapRandom); // Randon access
       const char *Map = (char *)MemoryMap.Ptr();
@@ -4901,7 +5120,7 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
                   gplist = new GPTYPE[gplist_siz];
                 }
               // Read the GPs..
-              num_hits = GpFread(gplist, nhits, start, fpi);	/* @@ */
+              num_hits = GpFread(gplist, nhits, start, fpi_d);	/* @@ */
               // Now sort..
               // if ((size_t)num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
 
@@ -5106,6 +5325,9 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
 
       if (!MemoryMap.Ok())
         continue;
+
+      int fpi_d = IndexFd(fpi); // get file number 
+
       // Advise the memory manager that we want random access for binary search..
       MemoryMap.Advise(MapRandom); // Randon access
       const char *Map = (char *)MemoryMap.Ptr();
@@ -5159,7 +5381,7 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
                   gplist = new GPTYPE[gplist_siz];
                 }
               // Read the GPs..
-              num_hits = GpFread(gplist, nhits, start, fpi);	/* @@ */
+              num_hits = GpFread(gplist, nhits, start, fpi_d);	/* @@ */
               // Now sort..
               // if ((size_t)num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
 
@@ -5308,6 +5530,9 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& FieldName, bool 
 
       if (!MemoryMap.Ok())
         continue;
+
+      int fpi_d = IndexFd(fpi); // get file number 
+
       // Advise the memory manager that we want random access for binary search..
       MemoryMap.Advise(MapRandom); // Randon access
       const char *Map = (char *)MemoryMap.Ptr();
@@ -5363,7 +5588,7 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& FieldName, bool 
                     }
                 }
               // Read the GPs..
-              num_hits += GpFread(gplist+num_hits, nhits, start, fpi);	/* @@ */
+              num_hits += GpFread(gplist+num_hits, nhits, start, fpi_d);	/* @@ */
             }
         } /* for */
       // Now sort..
@@ -5631,9 +5856,24 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
 //  if (off) SetGlobalCharset( (BYTE)Map[1] );
       const size_t    maxLength = TermLength < compLength ? TermLength : compLength;
 
+      // Lowercase the term
+#if 1
       for (length = 0; length < maxLength && Term[length]; length++)
         n[length + 2] = Charset.ib_tolower(Term[length]);
       n[length + 2] = '\0';       // ASCIIZ
+#elif CHARSET_UTF8
+      // Copy the term into the buffer first (may contain multi-byte sequences),
+      // then lowercase in-place over exactly those bytes.
+      // _utf_StrToLower with a byte length is safe across term boundaries
+      // and never changes sequence length (see LENGTH-STABILITY CONTRACT).
+      length = 0;
+      while (length < maxLength && Term[length])
+          n[length + 2] = Term[length], length++;
+      n[length + 2] = '\0';                         // ASCIIZ sentinel
+      _utf_StrToLower(n + 2, false, length);  
+
+#endif
+
       n[1] = (unsigned char) length;
 
       // Term is longer than SIS than ALWAYS handle as truncated search
@@ -5898,6 +6138,7 @@ class HITLIST {
 };
 
 
+// The main engine to search for a TERM in the SIS Cache and ... 
 PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& fieldName, enum MATCH Typ )
 {
   float           Cost = 1.0; // Cost of this caculation
@@ -6178,9 +6419,6 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 
     for ( INT jj = NumberOfIndexes ? 1 : 0; jj <= NumberOfIndexes; jj++ )
       {
-
-
-
         Term        = savedTerm;
         Term_length = savedTerm_length;
 
@@ -6200,6 +6438,8 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
           }
         if ( fpi == NULL )
           continue;		// Next
+
+        int fpi_d = IndexFd(fpi); // get file number 
 
         // Determine the size of the index
         const off_t      Size = GetFileSize ( fpi );
@@ -6347,7 +6587,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
               {
                 oip = ip;
 
-                if ( ( gp = GpFread ( ip, fpi ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( ip, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
                   {
                     // Do we match?
                     if ( ( z = first_char - ( UCHR ) _ib_tolower ( Buffer[0] ) ) == 0 &&
@@ -6391,7 +6631,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
             nomatch = 0;
             do
               {
-                if ( ( gp = GpFread ( first, fpi ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
                   {
                     // Do we match?
                     z = Compare ( Term, Buffer, Term_length, NULL );
@@ -6424,7 +6664,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
               {
                 if ( first > 0 )
                   first--;
-                if ( ( gp = GpFread ( first, fpi ) ) != ((GPTYPE)-1) && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != ((GPTYPE)-1) && GetIndirectBuffer ( gp, Buffer ) > 0)
                   {
                     // Do we match?
                     z = Compare ( Term, Buffer, Term_length, NULL);
@@ -6445,7 +6685,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
             nomatch = maxip;
             do
               {
-                if ( ( gp = GpFread ( last, fpi ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
                   {
                     // Do we match?
                     z = Compare ( Term, Buffer, Term_length, NULL );
@@ -6482,7 +6722,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
               {
                 if ( last < maxip )
                   last++;
-                if ( ( gp = GpFread ( last, fpi ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
                   {
                     // Do we match?
                     z = Compare ( Term, Buffer, Term_length, NULL );
@@ -6548,10 +6788,10 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
             continue;
           }
 
-        x = GpFread ( gplist, x, ( off_t ) first, fpi );
+        x = GpFread ( gplist, x, ( off_t ) first, fpi_d );
         ffclose ( fpi );		// Was fclose but ...
 
-        fpi = NULL;
+        fpi = NULL; 
 
         if ( x == 0 )
           {
@@ -7411,7 +7651,7 @@ loop:   SWAPINIT(a);
     r = min(pd - pc, pn - pd - (off_t)sizeof(GPTYPE));
     vecswap(pb, pn - r, r);
     if ((r = pb - pa) > (off_t)sizeof(GPTYPE))
-      TermSort(base, a, r / sizeof(GPTYPE));
+      TermSort(base, a, r / sizeof(GPTYPE)); // Recursive
     if ((r = pd - pc) > (off_t)sizeof(GPTYPE))
       {
         /* Iterate rather than recurse to save stack space */

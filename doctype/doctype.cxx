@@ -2675,11 +2675,18 @@ void DOCTYPE::HandleSpecialFields(RECORD* NewRecord, const STRING& FieldName, co
     }
   else if (FieldName ^= KeyField)
     {
-      if (strncasecmp(Buffer, "urn:uuid:", 9) == 0 && strlen(Buffer)>(DocumentKeySize-8))
-	Buffer += 10;
-      STRING Key (Buffer);
-      // URLs are NOT persistent so we don't use as keys
-      if (!Key.SearchAny("://")) {
+      STRING Key;
+      // Special case for E$ keys
+      STRING currentKey = NewRecord->GetKey() ;
+      if (currentKey.Compare ("E$", 2)== 0) {
+	Key = currentKey.Left('@') + "@" + Buffer;
+      } else {
+        if (strncasecmp(Buffer, "urn:uuid:", 9) == 0 && strlen(Buffer)>(DocumentKeySize-8))
+  	  Buffer += 10;
+          Key = Buffer;
+       }
+      // URLs are NOT persistent (except ipfs) so we don't use as keys
+      if (!Key.SearchAny("://") || Key.Compare("ipfs:", 5) == 0) {
         if (Db->KeyLookup (Key)) {
 	  if (trustKey)
 	    Db->MdtSetUniqueKey(NewRecord, Key);
@@ -2737,3 +2744,23 @@ bool DOCTYPE::PluginExists(const STRING& doctype)
   return Db ? Db->DoctypePluginExists(doctype) : false;
 }
 
+
+bool DOCTYPE::SetKey(RECORD* NewRecord, const STRING& Key)
+{
+  if (NewRecord && !Key.IsEmpty())
+    {
+      if (Db->KeyLookup (Key))
+        {
+          message_log (LOG_WARN, "%s Record used a non-unique key '%s' (%strusted)",
+		Doctype.c_str(), Key.c_str(), trustKey ? "" : "un");
+	  if (trustKey)
+            Db->MdtSetUniqueKey(NewRecord, Key);
+	  else
+	    return false;
+        }
+      else
+        NewRecord->SetKey (Key);
+      return true;
+    }
+  return false;
+}

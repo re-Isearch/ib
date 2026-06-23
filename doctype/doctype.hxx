@@ -206,6 +206,8 @@ public:
   const char *c_str() const { return Doctype.c_str(); }
 
 protected:
+
+   bool SetKey(RECORD* NewRecord, const STRING& Key);
    bool PluginExists(const STRING& doctype);
 
    bool _write_resource_path (const STRING& file,

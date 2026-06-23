@@ -325,3 +325,21 @@ void FCLIST::MergeEntries()
     }
 }
 
+
+FCLIST::FCLIST(FCLIST&& Other) noexcept : VLIST(std::move(Other))
+{
+#ifdef DEBUG_MEMORY
+  __IB_FCLIST_allocated_count++;
+#endif
+  // Fc itself is a small POD (two GPTYPEs) — trivial copy is fine,
+  // but the sentinel node's own Fc value is irrelevant/unused (only chained nodes carry data).
+}
+
+FCLIST& FCLIST::operator=(FCLIST&& Other) noexcept
+{
+  if (this != &Other)
+    {
+      VLIST::operator=(std::move(Other));
+    }
+  return *this;
+}

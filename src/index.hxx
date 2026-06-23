@@ -278,10 +278,13 @@ public:
 
   GPTYPE GpFread(FILE *Stream) const;
   GPTYPE GpFread(off_t Position, FILE *Stream) const;
+  GPTYPE GpFread(off_t Position, int fd) const;
 
   INT GpFread(GPTYPE *Ptr, FILE *Stream) const;
   INT GpFread(GPTYPE *Ptr, size_t NumElements, FILE* Stream) const;
   INT GpFread(GPTYPE *Ptr, size_t NumElements, off_t Position, FILE *Stream) const;
+  INT GpFread(GPTYPE *Ptr, size_t NumElements, off_t Position, int fd) const;
+
 
   bool MergeIndexFiles();
   bool CollapseIndexFiles();

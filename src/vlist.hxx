@@ -14,6 +14,11 @@ Description:	Class VLIST - Doubly Linked Circular List Base Class
 class VLIST {
 public:
   VLIST();
+
+  VLIST(VLIST&& Other) noexcept;
+  VLIST& operator=(VLIST&& Other) noexcept;
+  void StealRing(VLIST& Other) noexcept;   // shared splice helper
+
   virtual bool IsEmpty() const;
   virtual void   Clear();
   virtual void   Empty() { Clear(); };

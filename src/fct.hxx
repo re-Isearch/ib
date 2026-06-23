@@ -22,6 +22,9 @@ public:
   FCLIST(const FCLIST& OtherFct);
   FCLIST(const FC& Fc);
 
+  FCLIST(FCLIST&& Other) noexcept;
+  FCLIST& operator=(FCLIST&& Other) noexcept;
+
   FCLIST& operator  =(const FCLIST& OtherFct);
   FCLIST& operator  =(const FC& Fc);
 

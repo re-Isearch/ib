@@ -34,10 +34,6 @@ extern "C" {
   extern const OCTET _ib_ctype_ASCII[256];
 }
 
-static unsigned char* _utf_StrToLower(unsigned char* pString, bool clean=false);
-static unsigned char* _utf_StrToUpper(unsigned char* pString, bool clean=false);
-
-
 // Threaded safe..
 // Explicitly JUST for 8-bit character sets
 static inline int compareFunc(const void *s1, const void *s2, const OCTET *tab,
@@ -52,6 +48,49 @@ static inline int compareFunc(const void *s1, const void *s2, const OCTET *tab,
       p1++, p2++;
     }
   return diff;
+}
+
+
+// UTF-8 lexicographic comparison — codepoint order.
+//
+// Cannot use compareFunc/tab[] here: that model maps single bytes through a
+// 256-entry table, which is correct for 8-bit charsets but wrong for UTF-8
+// where meaning is carried by multi-byte sequences.  For UTF-8:
+//   - ASCII bytes (0x00-0x7f) compare identically to the 8859 ASCII table
+//   - Multi-byte lead bytes (0xc0-0xff) sort after all ASCII by value,
+//     which is exactly codepoint order since UTF-8 byte order == codepoint order
+//   - No table needed: the encoding itself guarantees correct ordering
+//
+// The ISO8859[] tables map each charset's byte values to their Unicode
+// codepoints for ordering.  For UTF-8 the bytes already ARE the Unicode
+// codepoint encoding, so decoding to UCS-32 and comparing gives the
+// equivalent result without a table.
+//
+// len is a byte count (matches the convention of the 8859 comparators).
+static int CompareUTF8(const void *s1, const void *s2, size_t len)
+{
+    const UCHR *p1 = (const UCHR *)s1;
+    const UCHR *p2 = (const UCHR *)s2;
+    size_t       x  = 0;
+
+    while (x < len)
+    {
+        // Decode one codepoint from each side
+        uint32_t cp1 = _utf8_to_ucs32(p1);
+        uint32_t cp2 = _utf8_to_ucs32(p2);
+
+        if (cp1 != cp2)
+            return (cp1 > cp2) ? 1 : -1;
+
+        if (cp1 == 0)
+            return 0;   // both NUL — equal
+
+        int step = _utf8_codepoint_len(p1);
+        p1 += step;
+        p2 += step;     // same step: equal codepoints have equal encoding length
+        x  += step;
+    }
+    return 0;
 }
 
 /// TODO: 
@@ -82,1235 +121,55 @@ static int SIScompareFunc(const void *node1, const void *node2, const OCTET *tab
   return diff;
 }
 
+// UTF-8 equivalent of SIScompareFunc.
+// Node layout is identical to the 8-bit version:
+//   node1[0]  = match length (bytes)
+//   node1[1]  = string length (bytes)
+//   &node1[2] = lowercased UTF-8 term  (lowercased by _utf_StrToLower)
+//   node2[0]  = term length (bytes)
+//   &node2[1] = raw UTF-8 buffer being searched
+//
+// memcmp is correct here: _utf_StrToLower's LENGTH-STABILITY CONTRACT
+// guarantees the lowercased bytes in node1 have the same byte length and
+// layout as the corresponding lowercased bytes in node2 would have, so a
+// byte-for-byte equality test is valid without decoding codepoints.
+//
+// The mismatch and boundary paths do need UTF-8 awareness:
+//   - diff returns the UCS-32 codepoint difference, not a raw byte value
+//   - the term boundary check must not land mid-sequence
 
-/***** UTF ***/
-// Covert a UTF string to lowercase
-// clean zaps non term characters
-
-#if 0
-
-static unsigned char *_utf_StrToLower(STRING& String, bool clean)
+// NOTE:   SIS_UTF8 = SIScompareFuncUTF8 since we don't have a tab!
+static int SIScompareFuncUTF8(const void *node1, const void *node2)
 {
-    size_t len = String.length();
-    if (len > 0) {
-        unsigned char* p = (unsigned char *)String.stealData();
-        unsigned char* pExtChar = 0;
-        while (len--) {
-            if ((*p >= 0x41) && (*p <= 0x5a)) // US ASCII
-                (*p) += 0x20;
-            else if (*p > 0xc0) {
-                pExtChar = p;
-                p++;
-                switch (*pExtChar) {
-                case 0xc3: // Latin 1
-                    if ((*p >= 0x80)
-                        && (*p <= 0x9e)
-                        && (*p != 0x97))
-                        (*p) += 0x20; // US ASCII shift
-                    break;
-                case 0xc4: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0xb7)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbf) {
-                        *pExtChar = 0xc5;
-                        (*p) = 0x80;
-                    }
-                    break;
-                case 0xc5: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x88)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xb7)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xc6: // Latin Exteneded
-                    switch (*p) {
-                    case 0x82:
-                    case 0x84:
-                    case 0x87:
-                    case 0x8b:
-                    case 0x91:
-                    case 0x98:
-                    case 0xa0:
-                    case 0xa2:
-                    case 0xa4:
-                    case 0xa7:
-                    case 0xac:
-                    case 0xaf:
-                    case 0xb3:
-                    case 0xb5:
-                    case 0xb8:
-                    case 0xbc:
-                        (*p)++; // Next char is lwr
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xc7: // Latin Exteneded
-                    if (*p == 0x84)
-                        (*p) = 0x86;
-                    else if (*p == 0x85)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0x87)
-                        (*p) = 0x89;
-                    else if (*p == 0x88)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0x8a)
-                        (*p) = 0x8c;
-                    else if (*p == 0x8b)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8d)
-                        && (*p <= 0x9c)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x9e)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb1)
-                        (*p) = 0xb3;
-                    else if (*p == 0xb2)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb4)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb8)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xba)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbc)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbe)
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xc8: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x9f)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xa2)
-                        && (*p <= 0xb3)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbb)
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xcd: // Greek & Coptic
-                    switch (*p) {
-                    case 0xb0:
-                    case 0xb2:
-                    case 0xb6:
-                        (*p)++; // Next char is lwr
-                        break;
-                    default:
-                        if (*p == 0xbf) {
-                            *pExtChar = 0xcf;
-                            (*p) = 0xb3;
-                        }
-                        break;
-                    }
-                    break;
-                case 0xce: // Greek & Coptic
-                    if (*p == 0x86)
-                        (*p) = 0xac;
-                    else if (*p == 0x88)
-                        (*p) = 0xad;
-                    else if (*p == 0x89)
-                        (*p) = 0xae;
-                    else if (*p == 0x8a)
-                        (*p) = 0xaf;
-                    else if (*p == 0x8c) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8c;
-                    }
-                    else if (*p == 0x8e) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8d;
-                    }
-                    else if (*p == 0x8f) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8e;
-                    }
-                    else if ((*p >= 0x91)
-                        && (*p <= 0x9f))
-                        (*p) += 0x20; // US ASCII shift
-                    else if ((*p >= 0xa0)
-                        && (*p <= 0xab)
-                        && (*p != 0xa2)) {
-                        *pExtChar = 0xcf;
-                        (*p) -= 0x20;
-                    }
-                    break;
-                case 0xcf: // Greek & Coptic
-                    if (*p == 0x8f)
-                        (*p) = 0xb4;
-                    else if (*p == 0x91)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x98)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb4)
-                        (*p) = 0x91;
-                    else if (*p == 0xb7)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb9)
-                        (*p) = 0xb2;
-                    else if (*p == 0xbb)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbd) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbb;
-                    }
-                    else if (*p == 0xbe) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbc;
-                    }
-                    else if (*p == 0xbf) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbd;
-                    }
+    const size_t         stringLen = *((const unsigned char *)node1 + 1);
+    const unsigned char *p1        = ((const unsigned char *)node1) + 2;
+    const unsigned char *p2        = ((const unsigned char *)node2) + 1;
 
-                    break;
-                case 0xd0: // Cyrillic
-                    if ((*p >= 0x80)
-                        && (*p <= 0x8f)) {
-                        *pExtChar = 0xd1;
-                        (*p) += 0x10;
-                    }
-                    else if ((*p >= 0x90)
-                        && (*p <= 0x9f))
-                        (*p) += 0x20; // US ASCII shift
-                    else if ((*p >= 0xa0)
-                        && (*p <= 0xaf)) {
-                        *pExtChar = 0xd1;
-                        (*p) -= 0x20;
-                    }
-                    break;
-                case 0xd1: // Cyrillic supplement
-                    if ((*p >= 0xa0)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd2: // Cyrillic supplement
-                    if (*p == 0x80)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd3: // Cyrillic supplement
-                    if ((*p >= 0x81)
-                        && (*p <= 0x8e)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x90)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd4: // Cyrillic supplement & Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb1)
-                        && (*p <= 0xbf)) {
-                        *pExtChar = 0xd5;
-                        (*p) -= 0x10;
-                    }
-                    break;
-                case 0xd5: // Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0x96)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xe1: // Three byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x82: // Georgian
-                        if ((*p >= 0xa0)
-                            && (*p <= 0xbf)) {
-                            *pExtChar = 0x83;
-                            (*p) -= 0x10;
-                        }
-                        break;
-                    case 0x83: // Georgian
-                        if ((*p >= 0x80)
-                            && ((*p <= 0x85)
-                                || (*p == 0x87))
-                            || (*p == 0x8d))
-                            (*p) += 0x30;
-                        break;
-                    case 0xb8: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xb9: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xba: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x94)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        else if ((*p >= 0x9e)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xbb: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xbc: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbd: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8d))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbe: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0xb9))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbf: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8c))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9b))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xac))
-                            (*p) -= 0x08;
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xf0: // Four byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x90:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0x92: // Osage 
-                            if ((*p >= 0xb0)
-                                && (*p <= 0xbf)) {
-                                *pExtChar = 0x93;
-                                (*p) -= 0x18;
-                            }
-                            break;
-                        case 0x93: // Osage 
-                            if ((*p >= 0x80)
-                                && (*p <= 0x93))
-                                (*p) += 0x18;
-                            break;
-                        default:
-                            break;
-                        }
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                    case 0x9E:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0xA4: // Adlam
-                            if ((*p >= 0x80)
-                                && (*p <= 0xA1))
-                                (*p) += 0x22;
-                            break;
-                        default:
-                            break;
-                        }
-                    break;
-                default:
-                    break;
-                }
-                pExtChar = 0;
+    int diff = memcmp(p1, p2, stringLen); // byte-equal iff already case-folded
+    if (diff == 0)
+    {
+        const size_t matchLen = *((const unsigned char *)node1);
+        if (matchLen)
+        {
+            const unsigned char *boundary = p2 + matchLen;
+
+            // Guard: matchLen must not point into the middle of a multi-byte
+            // sequence.  A continuation byte (10xxxxxx) means the index was
+            // built with a misaligned length — treat as a non-boundary so the
+            // match is rejected, same as IsTermChr would reject it.
+            const bool midSequence = ((*boundary & 0xc0) == 0x80);
+
+            if (!midSequence && IsTermChr(boundary))
+            {
+                // Boundary lands on the start of a term character that was not
+                // part of the match — reject by returning the full UCS-32 value
+                // of that codepoint (positive, non-zero, meaningful magnitude).
+                diff = -(int)_utf8_to_ucs32(boundary);
             }
-            p++;
         }
     }
-  return String.c_str();
+    return diff;
 }
-
-
-#else
-
-static unsigned char *_utf_StrToLower(unsigned char *pString, bool clean)
-{
-    if (pString && *pString) {
-        unsigned char *p = pString;
-        unsigned char *pExtChar = 0;
-        while (*p) {
-            if ((*p >= 0x41) && (*p <= 0x5a)) // US ASCII
-                (*p) += 0x20;
-            else if (*p > 0xc0) {
-                pExtChar = p;
-                p++;
-                switch (*pExtChar) {
-                case 0xc3: // Latin 1
-                    if ((*p >= 0x80)
-                        && (*p <= 0x9e)
-                        && (*p != 0x97))
-                        (*p) += 0x20; // US ASCII shift
-                    break;
-                case 0xc4: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0xb7)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbf) {
-                        *pExtChar = 0xc5;
-                        (*p) = 0x80;
-                    }
-                    break;
-                case 0xc5: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x88)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xb7)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xc6: // Latin Exteneded
-                    switch (*p) {
-                    case 0x82:
-                    case 0x84:
-                    case 0x87:
-                    case 0x8b:
-                    case 0x91:
-                    case 0x98:
-                    case 0xa0:
-                    case 0xa2:
-                    case 0xa4:
-                    case 0xa7:
-                    case 0xac:
-                    case 0xaf:
-                    case 0xb3:
-                    case 0xb5:
-                    case 0xb8:
-                    case 0xbc:
-                        (*p)++; // Next char is lwr
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xc7: // Latin Exteneded
-                    if (*p == 0x84)
-                        (*p) = 0x86;
-                    else if (*p == 0x85)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0x87)
-                        (*p) = 0x89;
-                    else if (*p == 0x88)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0x8a)
-                        (*p) = 0x8c;
-                    else if (*p == 0x8b)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8d)
-                        && (*p <= 0x9c)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x9e)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb1)
-                        (*p) = 0xb3;
-                    else if (*p == 0xb2)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb4)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb8)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xba)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbc)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbe)
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xc8: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x9f)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xa2)
-                        && (*p <= 0xb3)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbb)
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xcd: // Greek & Coptic
-                    switch (*p) {
-                    case 0xb0:
-                    case 0xb2:
-                    case 0xb6:
-                        (*p)++; // Next char is lwr
-                        break;
-                    default:
-                        if (*p == 0xbf) {
-                            *pExtChar = 0xcf;
-                            (*p) = 0xb3;
-                        }
-                        break;
-                    }
-                    break;
-                case 0xce: // Greek & Coptic
-                    if (*p == 0x86)
-                        (*p) = 0xac;
-                    else if (*p == 0x88)
-                        (*p) = 0xad;
-                    else if (*p == 0x89)
-                        (*p) = 0xae;
-                    else if (*p == 0x8a)
-                        (*p) = 0xaf;
-                    else if (*p == 0x8c) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8c;
-                    }
-                    else if (*p == 0x8e) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8d;
-                    }
-                    else if (*p == 0x8f) {
-                        *pExtChar = 0xcf;
-                        (*p) = 0x8e;
-                    }
-                    else if ((*p >= 0x91)
-                        && (*p <= 0x9f))
-                        (*p) += 0x20; // US ASCII shift
-                    else if ((*p >= 0xa0)
-                        && (*p <= 0xab)
-                        && (*p != 0xa2)) {
-                        *pExtChar = 0xcf;
-                        (*p) -= 0x20;
-                    }
-                    break;
-                case 0xcf: // Greek & Coptic
-                    if (*p == 0x8f)
-                        (*p) = 0xb4;
-                    else if (*p == 0x91)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x98)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb4)
-                        (*p) = 0x91;
-                    else if (*p == 0xb7)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xb9)
-                        (*p) = 0xb2;
-                    else if (*p == 0xbb)
-                        (*p)++; // Next char is lwr
-                    else if (*p == 0xbd) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbb;
-                    }
-                    else if (*p == 0xbe) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbc;
-                    }
-                    else if (*p == 0xbf) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbd;
-                    }
-
-                    break;
-                case 0xd0: // Cyrillic
-                    if ((*p >= 0x80)
-                        && (*p <= 0x8f)) {
-                        *pExtChar = 0xd1;
-                        (*p) += 0x10;
-                    }
-                    else if ((*p >= 0x90)
-                        && (*p <= 0x9f))
-                        (*p) += 0x20; // US ASCII shift
-                    else if ((*p >= 0xa0)
-                        && (*p <= 0xaf)) {
-                        *pExtChar = 0xd1;
-                        (*p) -= 0x20;
-                    }
-                    break;
-                case 0xd1: // Cyrillic supplement
-                    if ((*p >= 0xa0)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd2: // Cyrillic supplement
-                    if (*p == 0x80)
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd3: // Cyrillic supplement
-                    if ((*p >= 0x81)
-                        && (*p <= 0x8e)
-                        && (*p % 2)) // Odd
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0x90)
-                        && (*p <= 0xbf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xd4: // Cyrillic supplement & Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0xaf)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    else if ((*p >= 0xb1)
-                        && (*p <= 0xbf)) {
-                        *pExtChar = 0xd5;
-                        (*p) -= 0x10;
-                    }
-                    break;
-                case 0xd5: // Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0x96)
-                        && (!(*p % 2))) // Even
-                        (*p)++; // Next char is lwr
-                    break;
-                case 0xe1: // Three byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x82: // Georgian
-                        if ((*p >= 0xa0)
-                            && (*p <= 0xbf)) {
-                            *pExtChar = 0x83;
-                            (*p) -= 0x10;
-                        }
-                        break;
-                    case 0x83: // Georgian
-                        if ((*p >= 0x80)
-                            && ((*p <= 0x85)
-                                || (*p == 0x87))
-                            || (*p == 0x8d))
-                            (*p) += 0x30;
-                        break;
-                    case 0xb8: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xb9: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xba: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x94)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        else if ((*p >= 0x9e)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xbb: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (!(*p % 2))) // Even
-                            (*p)++; // Next char is lwr
-                        break;
-                    case 0xbc: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbd: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8d))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbe: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9f))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xaf))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xb8)
-                            && (*p <= 0xb9))
-                            (*p) -= 0x08;
-                        break;
-                    case 0xbf: // Greek extened
-                        if ((*p >= 0x88)
-                            && (*p <= 0x8c))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0x98)
-                            && (*p <= 0x9b))
-                            (*p) -= 0x08;
-                        else if ((*p >= 0xa8)
-                            && (*p <= 0xac))
-                            (*p) -= 0x08;
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xf0: // Four byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x90:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0x92: // Osage 
-                            if ((*p >= 0xb0)
-                                && (*p <= 0xbf)) {
-                                *pExtChar = 0x93;
-                                (*p) -= 0x18;
-                            }
-                            break;
-                        case 0x93: // Osage 
-                            if ((*p >= 0x80)
-                                && (*p <= 0x93))
-                                (*p) += 0x18;
-                            break;
-                        default:
-                            break;
-                        }
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                    case 0x9E:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0xA4: // Adlam
-                            if ((*p >= 0x80)
-                                && (*p <= 0xA1))
-                                (*p) += 0x22;
-                            break;
-                        default:
-                            break;
-                        }
-                    break;
-                default:
-                    break;
-                }
-                pExtChar = 0;
-            }
-            p++;
-        }
-    }
-    return pString;
-}
-#endif
-
-static unsigned char* utf_StrToUpper(unsigned char* pString, bool clean)
-{
-    if (pString && *pString) {
-        unsigned char* p = pString;
-        unsigned char* pExtChar = 0;
-        while (*p) {
-            if ((*p >= 0x61) && (*p <= 0x7a)) // US ASCII
-                (*p) -= 0x20;
-            else if (*p > 0xc0) {
-                pExtChar = p;
-                p++;
-                switch (*pExtChar) {
-                case 0xc3: // Latin 1
-                    if ((*p >= 0xa0)
-                        && (*p <= 0xbe)
-                        && (*p != 0xb7))
-                        (*p) -= 0x20; // US ASCII shift
-                    break;
-                case 0xc4: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0xb7)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (!(*p % 2))) // Even
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xbf) {
-                        *pExtChar = 0xc5;
-                        (*p) = 0x80;
-                    }
-                    break;
-                case 0xc5: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x88)
-                        && (!(*p % 2))) // Even
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xb7)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0xb9)
-                        && (*p <= 0xbe)
-                        && (!(*p % 2))) // Even
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xc6: // Latin Exteneded
-                    switch (*p) {
-                    case 0x83:
-                    case 0x85:
-                    case 0x88:
-                    case 0x8c:
-                    case 0x92:
-                    case 0x99:
-                    case 0xa1:
-                    case 0xa3:
-                    case 0xa5:
-                    case 0xa8:
-                    case 0xad:
-                    case 0xb0:
-                    case 0xb4:
-                    case 0xb6:
-                    case 0xb9:
-                    case 0xbd:
-                        (*p)--; // Prev char is upr
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xc7: // Latin Exteneded
-                    if (*p == 0x86)
-                        (*p) = 0x84;
-                    else if (*p == 0x85)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0x89)
-                        (*p) = 0x87;
-                    else if (*p == 0x88)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0x8c)
-                        (*p) = 0x8a;
-                    else if (*p == 0x8b)
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0x8d)
-                        && (*p <= 0x9c)
-                        && (!(*p % 2))) // Even
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0x9e)
-                        && (*p <= 0xaf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xb3)
-                        (*p) = 0xb1;
-                    else if (*p == 0xb2)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xb4)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xb8)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xba)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xbc)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xbe)
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xc8: // Latin Exteneded
-                    if ((*p >= 0x80)
-                        && (*p <= 0x9f)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0xa2)
-                        && (*p <= 0xb3)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xbc)
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xcd: // Greek & Coptic
-                    switch (*p) {
-                    case 0xb1:
-                    case 0xb3:
-                    case 0xb7:
-                        (*p)--; // Prev char is upr
-                        break;
-                    default:
-                        if (*p == 0xbb) {
-                            *pExtChar = 0xcf;
-                            (*p) = 0xbd;
-                        }
-                        else if (*p == 0xbc) {
-                            *pExtChar = 0xcf;
-                            (*p) = 0xbe;
-                        }
-                        else if (*p == 0xbd) {
-                            *pExtChar = 0xcf;
-                            (*p) = 0xbf;
-                        }
-                        break;
-                    }
-                    break;
-                case 0xce: // Greek & Coptic
-                    if (*p == 0xac)
-                        (*p) = 0x86;
-                    else if (*p == 0xad)
-                        (*p) = 0x88;
-                    else if (*p == 0xae)
-                        (*p) = 0x89;
-                    else if (*p == 0xaf)
-                        (*p) = 0x8a;
-                    else if ((*p >= 0xb1)
-                        && (*p <= 0xbf))
-                        (*p) -= 0x20; // US ASCII shift
-                    break;
-                case 0xcf: // Greek & Coptic
-                    if (*p == 0xb4)
-                        (*p) = 0x8f;
-                    else if (*p == 0x92)
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0x98)
-                        && (*p <= 0xaf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0x91)
-                        (*p) = 0xb4;
-                    else if (*p == 0xb8)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0xb2)
-                        (*p) = 0xb9;
-                    else if (*p == 0xbc)
-                        (*p)--; // Prev char is upr
-                    else if (*p == 0x8c) {
-                        *pExtChar = 0xce;
-                        (*p) = 0x8c;
-                    }
-                    else if (*p == 0x8d) {
-                        *pExtChar = 0xce;
-                        (*p) = 0x8e;
-                    }
-                    else if (*p == 0x8e) {
-                        *pExtChar = 0xce;
-                        (*p) = 0x8f;
-                    }
-                    else if ((*p >= 0x80)
-                        && (*p <= 0x8b)
-                        && (*p != 0x82)) {
-                        *pExtChar = 0xce;
-                        (*p) += 0x20;
-                    }
-                    else if (*p == 0xb3) {
-                        *pExtChar = 0xcd;
-                        (*p) = 0xbf;
-                    }
-                    break;
-                case 0xd0: // Cyrillic
-                    if ((*p >= 0xb0)
-                        && (*p <= 0xbf))
-                        (*p) -= 0x20; // US ASCII shift
-                    break;
-                case 0xd1: // Cyrillic supplement
-                    if ((*p >= 0x90)
-                        && (*p <= 0x9f)) {
-                        *pExtChar = 0xd0;
-                        (*p) -= 0x10;
-                    }
-                    else if ((*p >= 0x80)
-                        && (*p <= 0x8f)) {
-                        *pExtChar = 0xd0;
-                        (*p) += 0x20;
-                    }
-                    else if ((*p >= 0xa0)
-                        && (*p <= 0xbf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xd2: // Cyrillic supplement
-                    if (*p == 0x80)
-                        (*p)++; // Prev char is upr
-                    else if ((*p >= 0x8a)
-                        && (*p <= 0xbf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xd3: // Cyrillic supplement
-                    if ((*p >= 0x81)
-                        && (*p <= 0x8e)
-                        && (!(*p % 2))) // Even
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0x90)
-                        && (*p <= 0xbf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xd4: // Cyrillic supplement & Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0xaf)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    break;
-                case 0xd5: // Armenian
-                    if ((*p >= 0x80)
-                        && (*p <= 0x96)
-                        && (*p % 2)) // Odd
-                        (*p)--; // Prev char is upr
-                    else if ((*p >= 0xa1)
-                        && (*p <= 0xaf)) {
-                        *pExtChar = 0xd4;
-                        (*p) += 0x10;
-                    }
-                    break;
-                case 0xe1: // Three byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x82: // Georgian
-                        break;
-                    case 0x83: // Georgian
-                        if ((*p >= 0x90)
-                            && (*p <= 0xaf)) {
-                            *pExtChar = 0x82;
-                            (*p) += 0x10;
-                        }
-                        else if ((*p >= 0xb0)
-                            && ((*p <= 0xb5)
-                                || (*p == 0xb7))
-                            || (*p == 0xbd))
-                            (*p) -= 0x30;
-                        break;
-                    case 0xb8: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (*p % 2)) // Odd
-                            (*p)--; // Prev char is upr
-                        break;
-                    case 0xb9: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (*p % 2)) // Odd
-                            (*p)--; // Prev char is upr
-                        break;
-                    case 0xba: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x94)
-                            && (*p % 2)) // Odd
-                            (*p)--; // Prev char is upr
-                        else if ((*p >= 0x9e)
-                            && (*p <= 0xbf)
-                            && (*p % 2)) // Odd
-                            (*p)--; // Prev char is upr
-                        break;
-                    case 0xbb: // Latin extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0xbf)
-                            && (*p % 2)) // Odd
-                            (*p)--; // Prev char is upr
-                        break;
-                    case 0xbc: // Greek extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x87))
-                            (*p) += 0x08;
-                        else if ((*p >= 0x90)
-                            && (*p <= 0x97))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xa0)
-                            && (*p <= 0xa7))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xb0)
-                            && (*p <= 0x87))
-                            (*p) += 0x08;
-                        break;
-                    case 0xbd: // Greek extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x87))
-                            (*p) += 0x08;
-                        else if ((*p >= 0x90)
-                            && (*p <= 0x97))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xa0)
-                            && (*p <= 0xa7))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xb0)
-                            && (*p <= 0x87))
-                            (*p) += 0x08;
-                        break;
-                    case 0xbe: // Greek extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x87))
-                            (*p) += 0x08;
-                        else if ((*p >= 0x90)
-                            && (*p <= 0x97))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xa0)
-                            && (*p <= 0xa7))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xb0)
-                            && (*p <= 0xb1))
-                            (*p) += 0x08;
-                        break;
-                    case 0xbf: // Greek extened
-                        if ((*p >= 0x80)
-                            && (*p <= 0x84))
-                            (*p) += 0x08;
-                        else if ((*p >= 0x90)
-                            && (*p <= 0x93))
-                            (*p) += 0x08;
-                        else if ((*p >= 0xa0)
-                            && (*p <= 0xa4))
-                            (*p) += 0x08;
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                case 0xf0: // Four byte code
-                    pExtChar = p;
-                    p++;
-                    switch (*pExtChar) {
-                    case 0x90:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0x92: // Osage 
-                            break;
-                        case 0x93: // Osage 
-                            if ((*p >= 0x80)
-                                && (*p <= 0x93))
-                                (*p) += 0x18;
-                            else if ((*p >= 0x98)
-                                && (*p <= 0xa7)) {
-                                *pExtChar = 0x92;
-                                (*p) += 0x18;
-                            }
-                            break;
-                        default:
-                            break;
-                        }
-                        break;
-                    case 0x9E:
-                        pExtChar = p;
-                        p++;
-                        switch (*pExtChar) {
-                        case 0xA4: // Adlam     
-                            if ((*p >= 0xa2)
-                                && (*p <= 0xc3))
-                                (*p) -= 0x22;
-                            break;
-                        default:
-                            break;
-                        }
-                        break;
-                    default:
-                        break;
-                    }
-                    break;
-                default:
-                    break;
-                }
-                pExtChar = 0;
-            }
-            p++;
-        }
-    }
-    return pString;
-}
-/*************/
 
 /* Unix Aliases */
 static const struct _aliases {
@@ -3414,14 +2273,12 @@ BYTE CHARSET::GetSet (STRING *Name) const
 
 STRING  CHARSET::ToLower(const STRING& String) const
 {
-#if 0
-  if (UTF_encoded)
+  if (Which == UTF8)
     {
         STRING newString = String.Dup();
-        _utf_StrToLower(newString.stealData());
+        _utf_StrToLower((unsigned char *)newString.stealData(),false, newString.Len());
         return newString;
     } 
-#endif
   const size_t len = String.GetLength();
   STRING NewString ('\0', len);
   unsigned char *p = (unsigned char *)String.c_str();
@@ -3434,7 +2291,7 @@ STRING  CHARSET::ToLower(const STRING& String) const
 STRING  CHARSET::ToUpper(const STRING& String) const
 {
 #if 0
-  if (UTF_encoded)
+  if (Which == UTF8)
     {
         STRING newString = String.Dup();
         _utf_StrToUpper(newString.stealData());
@@ -3576,6 +2433,11 @@ char *CHARSET::ToUTF(char *buffer, const char *From) const
   UINT2 value;
   char  *ptr = buffer;
 
+  if (Which == UTF8) {
+    strcpy(buffer, From);
+    return buffer;
+  }
+    
   while (From && *From)
     {
 /* Generate a mask of LENGTH one-bits, right justified in a word.  */

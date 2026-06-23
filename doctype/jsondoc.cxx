@@ -29,7 +29,7 @@ COLONDOC does for the text following a colon tag.
 // Detector (Determine the flavour of JSON, e.g. which Doctype to use)
 // --------------------------------------------------------------------------
 
-enum class JsonFlavor { JSON, JSONL, JSONLD, EJSON, UNKNOWN };
+enum class JsonFlavor { JSON, JSONL, JSONLD, EJSON, ESBULK, CIRRUS, UNKNOWN };
 
 
 static const char *JsonClass( JsonFlavor flavor)
@@ -39,8 +39,53 @@ static const char *JsonClass( JsonFlavor flavor)
     case JsonFlavor::JSONLD:  return "JSON-LD";
     case JsonFlavor::EJSON:   return "EJSON";
     case JsonFlavor::JSON:    return "JSON";
+    case JsonFlavor::CIRRUS:  return "CIRRUSNDJSON";
+    case JsonFlavor::ESBULK:  return "ESBULKNDJSON";
     case JsonFlavor::UNKNOWN: return "UNKNOWN";
   }
+}
+
+// Right now either plain newline JSON or the ES Bulk format
+// (to be extended as needed)
+bool inline _IsBulkActionLine(const char *buf, size_t len)
+{
+  size_t i =0;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '{') return false;
+  ++i;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '"') return false;
+  ++i;
+  size_t keyStart = i;
+  while (i < len && buf[i] != '"') ++i;
+  if (i >= len) return false;
+  const size_t keyLen = i - keyStart;
+  
+  static const char *actions[] = { "index", "create", "update", "delete" };
+  for (size_t a = 0; a < sizeof(actions)/sizeof(actions[0]); ++a)
+    {
+      const size_t alen = strlen(actions[a]);
+      if (alen == keyLen && memcmp(buf + keyStart, actions[a], alen) == 0)
+        return true;
+    }
+  return false;
+}
+
+inline bool _IsBulkActionLine(const STRING& content)
+{   
+  const char *buf = content.c_str();
+  const size_t len = content.Len();
+  return _IsBulkActionLine(buf, len);
+}
+
+
+inline JsonFlavor classify_nl_buffer(const STRING& content) {
+    // Look at first line structure
+    if (content[0] == '{' && content.find("wikitext"))
+        return JsonFlavor::CIRRUS;
+     if (_IsBulkActionLine (content.c_str(), content.Len()))
+        return JsonFlavor::ESBULK;
+    return JsonFlavor::JSONL; 
 }
 
 static JsonFlavor identify_flavor(const STRING& content) {
@@ -53,7 +98,7 @@ static JsonFlavor identify_flavor(const STRING& content) {
     if (first_newline && first_newline < len ) {
         unsigned next_char = content.find_first_not_of(" \t\n\r", first_newline);
         if (next_char < len  && content[next_char] == '{') {
-            return JsonFlavor::JSONL;
+	    return classify_nl_buffer(content);
         }
     }
 
@@ -401,6 +446,8 @@ void JSONDOC::ParseRecords(const RECORD& FileRecord)
     }
 }
 
+
+#if 0
 // ---------------------------------------------------------------------------
 // ParseFields
 // ---------------------------------------------------------------------------
@@ -459,6 +506,7 @@ void JSONDOC::ParseFields(PRECORD NewRecord)
 
   delete[] buf;
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // ParseObject  { "key" : value , … }
@@ -855,4 +903,442 @@ void NDJSON::ParseRecords(const RECORD& FileRecord)
     }
   if (inQuote) message_log (LOG_ERROR, "Runaway record. Missing end-quotes (%c). Check format.", quoteChar);
 };
+
+
+const char *CIRRUSNDJSON::Description(PSTRLIST List) const {
+  if (List) {
+    const STRING ThisDoctype("CIRRUSNDJSON");
+    if (Doctype != ThisDoctype && List->IsEmpty())
+      List->AddEntry(Doctype);
+    List->AddEntry(ThisDoctype);
+    NDJSON::Description(List);
+  }
+  return "Elasticsearch Bulk-format NDJSON (e.g. Wikimedia Cirrus search dumps).\n\
+Automatically skips interleaved {\"index\":{...}} action lines and treats\n\
+JSON arrays as repeatable fields (IndexArrayElements defaults to False).\n\
+Options (in .ini):\n\
+  IndexArrayElements=False    (default — set True to flatten arrays instead)\n\
+  PathSep=<char>              default: |";
+}
+
+// A bulk action line is a JSON object whose single top-level key is
+// one of: index, create, update, delete -- e.g. {"index":{"_id":"123"}}
+// Real Cirrus document bodies never start with one of these as the
+// sole/first key, so this check is cheap and safe.
+bool CIRRUSNDJSON::IsBulkActionLine(const char *buf, size_t len) const
+{
+  return _IsBulkActionLine(buf, len);
+}
+
+void CIRRUSNDJSON::ParseFields(PRECORD NewRecord)
+{
+  if (!NewRecord)
+    return;
+
+  STRING FileName;
+  NewRecord->GetFullFileName(&FileName);
+
+  GPTYPE base   = NewRecord->GetRecordStart();
+  GPTYPE recEnd = NewRecord->GetRecordEnd();
+  size_t recLen = (size_t)(recEnd - base + 1);
+
+  PFILE fp = Db->ffopen(FileName, "rb");
+  if (!fp) {
+    message_log(LOG_ERROR, "CIRRUSNDJSON::ParseFields: cannot open '%s'",
+                (const char*)FileName);
+    return;
+  }
+  if (fseek(fp, (long)base, SEEK_SET) != 0) {
+    message_log(LOG_ERROR, "CIRRUSNDJSON::ParseFields: fseek to %ld failed in '%s'",
+                (long)base, (const char*)FileName);
+    Db->ffclose(fp);
+    return;
+  }
+  char *buf = new char[recLen + 1];
+  size_t nRead = fread(buf, 1, recLen, fp);
+  Db->ffclose(fp);
+  buf[nRead] = '\0';
+
+  if (IsBulkActionLine(buf, nRead)) {
+    delete[] buf;
+    return;   // skip — ES bulk action line, not a document
+  }
+
+  ParseBuffer(buf, NewRecord, base, FileName);
+  delete[] buf;
+}
+
+
+
+void JSONDOC::ParseFields(PRECORD NewRecord)
+{
+  if (!NewRecord)
+    return;
+
+  STRING FileName;
+  NewRecord->GetFullFileName(&FileName);
+
+  GPTYPE base   = NewRecord->GetRecordStart();
+  GPTYPE recEnd = NewRecord->GetRecordEnd();
+  size_t recLen = (size_t)(recEnd - base + 1);
+
+  PFILE fp = Db->ffopen(FileName, "rb");
+  if (!fp) {
+    message_log(LOG_ERROR, "JSONDOC::ParseFields: cannot open '%s'",
+                (const char*)FileName);
+    return;
+  }
+  if (fseek(fp, (long)base, SEEK_SET) != 0) {
+    message_log(LOG_ERROR, "JSONDOC::ParseFields: fseek to %ld failed in '%s'",
+                (long)base, (const char*)FileName);
+    Db->ffclose(fp);
+    return;
+  }
+  char *buf = new char[recLen + 1];
+  size_t nRead = fread(buf, 1, recLen, fp);
+  Db->ffclose(fp);
+  buf[nRead] = '\0';
+
+  ParseBuffer(buf, NewRecord, base, FileName);
+  delete[] buf;
+}
+
+// Factored out so subclasses (e.g. CIRRUSNDJSON) can peek at the
+// loaded buffer before committing to a full parse, without opening
+// and reading the file a second time.
+void JSONDOC::ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& FileName)
+{
+  size_t pos = 0;
+  SkipWhitespace(buf, pos);
+
+  if (buf[pos] == '{') {
+    STRING emptyPrefix;
+    ParseObject(buf, pos, emptyPrefix, 0, record, base);
+  } else if (buf[pos] == '[') {
+    STRING rootKey("_root_");
+    ParseArray(buf, pos, rootKey, 0, record, base);
+  } else {
+    message_log(LOG_WARN,
+                "JSONDOC: '%s' offset %ld does not start with '{' or '[', "
+                "falling back to COLONDOC parser",
+                FileName.c_str(), (long)base);
+    COLONDOC::ParseFields(record);
+  }
+}
+
+inline STRING _createESKey(const STRING& id, const STRING& index)
+{
+  return "E$" + id + "@" + index;
+}
+
+
+const char *ESBULKNDJSON::Description(PSTRLIST List) const {
+  if (List) {
+    const STRING ThisDoctype("ESBULKNDJSON");
+    if (Doctype != ThisDoctype && List->IsEmpty())
+      List->AddEntry(Doctype);
+    List->AddEntry(ThisDoctype);
+    NDJSON::Description(List);
+  }
+  return "Elasticsearch Bulk API formatted NDJSON (e.g. Wikimedia Cirrus dumps).\n\
+Automatically pairs {\"index\"/\"create\"/\"update\":{\"_id\":...}} action lines\n\
+with their following document body line, using \"_id\" as the record Key so\n\
+the engine's same-key versioning applies. {\"delete\":{\"_id\":...}} action\n\
+lines call DeleteByKey() directly and are not indexed.\n\
+Options (in .ini):\n\
+  IndexArrayElements=False    (default -- set True to flatten arrays to key|0, key|1, ...)\n\
+  PathSep=<char>              default: |";
+}
+
+// A bulk action line is a JSON object whose single top-level key is
+// one of: index, create, update, delete -- e.g. {"index":{"_id":"123"}}
+// Real document bodies never start with one of these as the sole/first
+// key, so this check is cheap and safe.
+
+
+// Scan raw JSON bytes for a top-level string field by name.
+// Returns empty STRING if not found. No full parse needed --
+// wiki/title are always top-level scalars in Cirrus body lines.
+static inline STRING ExtractJsonStringField(const unsigned char *buf, size_t len, const char *field)
+{
+  // Build search pattern: "field":"
+  char pat[64];
+  snprintf(pat, sizeof(pat), "\"%s\"", field);
+  size_t patLen = strlen(pat);
+
+  const void *found = memmem(buf, len, pat, patLen);
+  if (!found) return NulString;
+
+  const unsigned char *p   = (const unsigned char *)found + patLen;
+  const unsigned char *end = buf + len;
+
+  // Skip whitespace and colon
+  while (p < end && (*p == ' ' || *p == '\t' || *p == ':')) ++p;
+  if (p >= end || *p != '"') return NulString;
+  ++p;
+
+  const unsigned char *valStart = p;
+  while (p < end && *p != '"') ++p;
+  if (p >= end) return NulString;
+
+  return STRING((const char *)valStart, (size_t)(p - valStart));
+}
+
+
+#if 1
+
+
+ESBULKNDJSON::BulkAction ESBULKNDJSON::ParseBulkAction(
+    const unsigned char *buf, size_t len, STRING& idOut, STRING& indexOut) const
+{
+  idOut.Clear();
+//  indexOut.Clear(); // Defaults to "" if not defined in the action object
+
+  size_t i = 0;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '{') return ActionNone;
+  ++i;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '"') return ActionNone;
+  ++i;
+  size_t keyStart = i;
+  while (i < len && buf[i] != '"') ++i;
+  if (i >= len) return ActionNone;
+  const size_t keyLen = i - keyStart;
+
+  BulkAction action = ActionNone;
+  if      (keyLen == 5 && memcmp(buf+keyStart, "index",  5) == 0) action = ActionIndex;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "create", 6) == 0) action = ActionCreate;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "update", 6) == 0) action = ActionUpdate;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "delete", 6) == 0) action = ActionDelete;
+  if (action == ActionNone) return ActionNone;
+
+  // 1. Pull "_index":"..." out of the action's inner object, if present
+  const char *indexKey = "\"_index\"";
+  const void *foundIndex = memmem(buf + i, len - i, indexKey, 8); // length of "_index" is 8
+  if (foundIndex)
+    {
+      const unsigned char *p   = (const unsigned char *)foundIndex + 8;
+      const unsigned char *end = buf + len;
+      while (p < end && (*p == ' ' || *p == ':' || *p == '\t')) ++p;
+      if (p < end && *p == '"')
+        {
+          ++p;
+          const unsigned char *valStart = p;
+          while (p < end && *p != '"') ++p;
+          if (p < end)
+            indexOut = STRING((const char*)valStart, (size_t)(p - valStart));
+        }
+    }
+
+  // 2. Pull "_id":"..." out of the action's inner object, if present
+  const char *idKey = "\"_id\"";
+  const void *foundId = memmem(buf + i, len - i, idKey, 5); // length of "_id" is 5
+  if (foundId)
+    {
+      const unsigned char *p   = (const unsigned char *)foundId + 5;
+      const unsigned char *end = buf + len;
+      while (p < end && (*p == ' ' || *p == ':' || *p == '\t')) ++p;
+      if (p < end && *p == '"')
+        {
+          ++p;
+          const unsigned char *valStart = p;
+          while (p < end && *p != '"') ++p;
+          if (p < end)
+            idOut = STRING((const char*)valStart, (size_t)(p - valStart));
+        }
+    }
+
+  return action;
+}
+
+
+
+#else
+ESBULKNDJSON::BulkAction ESBULKNDJSON::ParseBulkAction(const unsigned char *buf, size_t len, STRING& idOut) const
+{
+  idOut.Clear();
+
+  size_t i = 0;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '{') return ActionNone;
+  ++i;
+  while (i < len && (buf[i] == ' ' || buf[i] == '\t')) ++i;
+  if (i >= len || buf[i] != '"') return ActionNone;
+  ++i;
+  size_t keyStart = i;
+  while (i < len && buf[i] != '"') ++i;
+  if (i >= len) return ActionNone;
+  const size_t keyLen = i - keyStart;
+
+  BulkAction action = ActionNone;
+  if      (keyLen == 5 && memcmp(buf+keyStart, "index",  5) == 0) action = ActionIndex;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "create", 6) == 0) action = ActionCreate;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "update", 6) == 0) action = ActionUpdate;
+  else if (keyLen == 6 && memcmp(buf+keyStart, "delete", 6) == 0) action = ActionDelete;
+  if (action == ActionNone) return ActionNone;
+
+  // Pull "_id":"..." out of the action's inner object, if present.
+  const char *idKey = "\"_id\"";
+  const void *found = memmem(buf + i, len - i, idKey, 5);
+  if (found)
+    {
+      const unsigned char *p   = (const unsigned char *)found + 5;
+      const unsigned char *end = buf + len;
+      while (p < end && (*p == ' ' || *p == ':' || *p == '\t')) ++p;
+      if (p < end && *p == '"')
+        {
+          ++p;
+          const unsigned char *valStart = p;
+          while (p < end && *p != '"') ++p;
+          if (p < end)
+            idOut = STRING((const char*)valStart, (size_t)(p - valStart));
+        }
+    }
+  return action;
+}
+#endif
+
+// We accept newlines in fields if within quotes!!!!
+//
+// ES bulk-format files interleave an "action" line with its document
+// body line. "delete" actions are a single line with NO following body.
+// We pair action+body, set the record Key from "_id" so the engine's
+// existing same-key versioning applies, and call Db->DeleteByKey() for
+// "delete" actions directly (no body is indexed for those).
+
+void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
+{
+  const STRING FileName (FileRecord.GetFullFileName() );
+  MMAP         FileMap (FileName, MapSequential);
+  if (!FileMap.Ok())
+    {
+      message_log (LOG_ERRNO, "%s could not access '%s'", Doctype.c_str(), FileName.c_str());
+      return;
+    }
+  off_t RecStart = FileRecord.GetRecordStart();
+  off_t RecEnd   = FileRecord.GetRecordEnd();
+  const off_t FileEnd = FileMap.Size();
+
+  if (RecEnd == 0) RecEnd = FileEnd;
+
+  if (RecEnd - RecStart <= 0)
+    {
+      message_log (LOG_WARN, "zero-length record '%s'[%ld-%ld] -- skipping",
+        FileName.c_str(), (long)RecStart, (long)RecEnd);
+      return;
+    }
+  else if (RecStart > FileEnd)
+    {
+      message_log (LOG_ERROR, "%s::ParseRecords(): Seek '%s' to %ld failed",
+        Doctype.c_str(), FileName.c_str(), RecStart);
+      return;
+    }
+  else if (RecEnd > FileEnd)
+    {
+      message_log (LOG_WARN, "%s::ParseRecord(): End after EOF (%d>%d) in '%s'?",
+        Doctype.c_str(), RecEnd, FileEnd, FileName.c_str());
+      RecEnd = FileEnd;
+    }
+
+  off_t Position = RecStart;
+  unsigned char  ci = 0;
+  const unsigned char *ptr = FileMap.Ptr();
+
+  const char quoteChar = '\"';
+  bool inQuote = false;
+
+  // Carries the pending action's id across to the *next* line (its body),
+  // within this single sequential ParseRecords call.
+  STRING pendingId;
+  bool   havePendingId = false;
+
+  STRING ES_index = FileRecord.GetFileName().Left('-');
+
+  while (Position < RecEnd)
+    {
+      for (; !(!inQuote && (ci == '\n' || ci =='\r')) && Position <= RecEnd; ci=*ptr++, Position++) {
+        if (newLinesInQuotes && ci == quoteChar) {
+          if (*ptr == quoteChar) ptr++, Position++;
+          else inQuote = !inQuote;
+        }
+      }
+      if (*ptr == '\r' || *ptr == '\n') {
+        ptr++; Position++;
+      }
+
+      if (RecStart != Position)
+        {
+          const unsigned char *lineStart = FileMap.Ptr() + RecStart;
+          const size_t         lineLen   = (size_t)(Position - 1 - RecStart);
+
+          STRING     thisId;
+          BulkAction thisAction = ParseBulkAction(lineStart, lineLen, thisId, ES_index);
+
+          if (thisAction != ActionNone)
+            {
+              // Every action line still becomes a record -- bad/deleted,
+              // never returned, but its bytes are accounted for so the
+              // GP address space stays gapless.
+              RECORD Record (FileRecord);
+              Record.SetRecordStart(RecStart);
+              Record.SetRecordEnd(Position-1);
+              Record.SetDocumentType("PLAINTEXT"); // No fields -- junk
+              Record.SetBadRecord();
+              Db->DocTypeAddRecord(Record);
+
+              if (thisAction == ActionDelete)
+                {
+                  if (thisId.GetLength())
+                    {
+                      if (!Db->DeleteByKey(_createESKey(thisId, ES_index)))
+                        {
+                            message_log(LOG_INFO, "%s: DeleteByKey('%s') found nothing to delete",
+                                        Doctype.c_str(), thisId.c_str());
+                        }
+                      else 
+                        message_log(LOG_DEBUG, "%s: deleted record with key '%s'", Doctype.c_str(), thisId.c_str());
+                    }
+                  else
+                    {
+                      message_log(LOG_WARN, "%s: delete action with no _id at offset %ld in '%s'",
+                                  Doctype.c_str(), (long)RecStart, FileName.c_str());
+                    }
+                  havePendingId = false;
+                }
+              else
+                {
+                  // index / create / update -- body is the next line.
+                  pendingId     = thisId;
+                  havePendingId = true;
+                }
+            }
+          else
+            {
+              // This line is a document body.
+              RECORD Record (FileRecord);
+              Record.SetRecordStart(RecStart);
+              Record.SetRecordEnd(Position-1);
+
+              if (havePendingId && pendingId.GetLength())
+                {
+                  SetKey(&Record, _createESKey(pendingId, ES_index ));
+                }
+              else if (!havePendingId && DebugMode)
+                {
+                  message_log(LOG_DEBUG, "%s: body line with no preceding action line at %ld",
+                              Doctype.c_str(), (long)RecStart);
+                }
+
+              Db->DocTypeAddRecord(Record);
+              havePendingId = false;
+              pendingId.Clear();
+            }
+        }
+      if (ci=='\n' || ci == '\r')
+        ci=0;
+      RecStart = Position;
+    }
+  if (inQuote) message_log (LOG_ERROR, "Runaway record. Missing end-quotes (%c). Check format.", quoteChar);
+}
 

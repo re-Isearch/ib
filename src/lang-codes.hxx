@@ -317,4 +317,59 @@ bool SetGlobalCharset (BYTE Charset = 0xFF);
 BYTE        GetGlobalCharset (STRING *StringBuffer = NULL);
 #endif
 
+int _ib_IsUTF8TermChr(const unsigned char *Buffer);
+unsigned char *_utf_StrToLower(unsigned char *pString, const bool clean, unsigned length = 0);
+unsigned char *_utf_StrToUpper(unsigned char *pString, unsigned length = 0);
+INT _utf_strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
+        bool *look = NULL, size_t *p2_bytes = NULL);
+
+inline int _utf8_codepoint_len(const UCHR *p)
+{
+    if      ((*p & 0x80) == 0x00) return 1; // 0xxxxxxx  ASCII
+    else if ((*p & 0xe0) == 0xc0) return 2; // 110xxxxx
+    else if ((*p & 0xf0) == 0xe0) return 3; // 1110xxxx
+    else if ((*p & 0xf8) == 0xf0) return 4; // 11110xxx
+    return 1; // continuation or invalid — advance one byte
+}
+
+// ---------------------------------------------------------------------------
+// _utf8_to_ucs32
+//   Decode one UTF-8 sequence (already length-checked by _utf8_codepoint_len)
+//   into its UCS-32 codepoint value.  p must point at a valid lead byte.
+//   Invalid / truncated sequences return the raw lead byte (still non-zero,
+//   still unique, so comparisons remain meaningful).
+// ---------------------------------------------------------------------------
+inline uint32_t _utf8_to_ucs32(const UCHR *p)
+{
+    uint32_t cp;
+    int len = _utf8_codepoint_len(p);
+    switch (len)
+    {
+    case 1:
+        cp = (uint32_t)(*p & 0x7f);
+        break;
+    case 2:
+        cp = ((uint32_t)(*p     & 0x1f) <<  6)
+           |  (uint32_t)(*(p+1) & 0x3f);
+        break;
+    case 3:
+        cp = ((uint32_t)(*p     & 0x0f) << 12)
+           | ((uint32_t)(*(p+1) & 0x3f) <<  6)
+           |  (uint32_t)(*(p+2) & 0x3f);
+        break;
+    case 4:
+        cp = ((uint32_t)(*p     & 0x07) << 18)
+           | ((uint32_t)(*(p+1) & 0x3f) << 12)
+           | ((uint32_t)(*(p+2) & 0x3f) <<  6)
+           |  (uint32_t)(*(p+3) & 0x3f);
+        break;
+    default:
+        cp = (uint32_t)*p; // fallback: raw byte
+        break;
+    }
+    return cp;
+}
+
+
+
 #endif

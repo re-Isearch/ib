@@ -55,6 +55,7 @@ public:
 class JSONDOC : public COLONDOC {
   friend class JSONLDDOC;
   friend class EJSONDOC;
+  friend class ESBULKNDJSON;
 public:
   JSONDOC(PIDBOBJ DbParent, const STRING& Name);
 
@@ -68,6 +69,11 @@ public:
   ~JSONDOC();
 
 protected:
+  // Parses an already-loaded buffer (shared by ParseFields and by
+  // subclasses, like CIRRUSNDJSON, that need to peek at the buffer
+  // before deciding whether to parse it).
+  void ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& FileName);
+
   // ---------------------------------------------------------------
   // Recursive descent parser.
   //
@@ -123,6 +129,7 @@ protected:
 
 // NDJSON (Newline Delimited JSON) 
 class NDJSON : public JSONDOC {
+  friend class ESBULKNDJSON;
 public:
   NDJSON(PIDBOBJ DbParent, const STRING& Name) : JSONDOC (DbParent, Name) {
      newLinesInQuotes = Getoption("NewLinesInQuotes", "true").GetBool();
@@ -135,5 +142,74 @@ private:
 
 
 typedef JSONDOC* PJSONDOC;
+
+class CIRRUSNDJSON : public NDJSON {
+public:
+  CIRRUSNDJSON(PIDBOBJ DbParent, const STRING& Name) : NDJSON(DbParent, Name) {
+    // Cirrus array fields (outgoing_link, category, template, …) should
+    // be repeatable fields, not flattened to key|0, key|1, … key|N.
+    m_IndexArrayElements = Getoption("IndexArrayElements", "false").GetBool();
+  }
+  const char *Description(PSTRLIST List) const;
+  void ParseFields(PRECORD NewRecord);
+
+protected:
+  bool IsBulkActionLine(const char *buf, size_t len) const;
+};
+
+typedef CIRRUSNDJSON* PCIRRUSNDJSON;
+
+
+
+// ---------------------------------------------------------------------------
+// ESBULKNDJSON
+//
+// Variant of NDJSON for files in the Elasticsearch "Bulk API" NDJSON
+// format (used by, among others, Wikimedia Cirrus search dumps:
+// *-cirrussearch-content.json.gz / *-cirrussearch-general.json.gz).
+//
+// Bulk-format files interleave an "action" line with its document body:
+//   {"index":{"_id":"123"}}
+//   {"title":"...", "text":"...", "outgoing_link":["...","..."], ...}
+//
+// Action verbs: index, create, update, delete.
+//   - index/create/update: body line follows; the action's "_id" is used
+//     as the record's Key, so the engine's existing same-key
+//     versioning/replacement logic applies (this matters especially for
+//     "update", which may carry only partial fields).
+//   - delete: single line, NO body follows; we call Db->DeleteByKey()
+//     directly and do not index anything for it.
+//
+// Also defaults IndexArrayElements to False, since bulk-format documents
+// (e.g. Cirrus dumps) are array-heavy (outgoing_link, category, template,
+// external_link, auxiliary_text, heading, ...) and we want those treated
+// as repeatable fields rather than flattened into hundreds of positional
+// field names (outgoing_link|0 .. outgoing_link|N).
+// ---------------------------------------------------------------------------
+
+class ESBULKNDJSON : public NDJSON {
+public:
+  ESBULKNDJSON(PIDBOBJ DbParent, const STRING& Name) : NDJSON(DbParent, Name) {
+    m_IndexArrayElements = Getoption("IndexArrayElements", "false").GetBool();
+    DebugMode = false;
+  }
+  const char *Description(PSTRLIST List) const;
+  void ParseRecords(const RECORD& FileRecord);
+
+protected:
+  enum BulkAction { ActionNone, ActionIndex, ActionCreate, ActionUpdate, ActionDelete };
+
+  // Inspects a single line's bytes. Returns ActionNone if this is NOT
+  // a recognized bulk action line (i.e. it's a document body line).
+  // On a recognized action line, extracts "_id" into idOut if present.
+  BulkAction ParseBulkAction(const unsigned char *buf, size_t len, STRING& idOut,
+    STRING& indexOut) const;
+private:
+  bool DebugMode;
+};
+
+typedef ESBULKNDJSON* PESBULKNDJSON;
+
+
 
 #endif /* JSONDOC_HXX */

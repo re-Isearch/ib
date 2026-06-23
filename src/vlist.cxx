@@ -19,6 +19,37 @@ VLIST::VLIST ()
   Next = Prev = this; // a circle of one
 }
 
+void VLIST::StealRing(VLIST& Other) noexcept
+{
+  if (Other.IsEmpty())
+    {
+      Next = Prev = this;
+      return;
+    }
+  Next = Other.Next;
+  Prev = Other.Prev;
+  Next->Prev = this;     // fix the ring's boundary nodes to point at the new sentinel
+  Prev->Next = this;
+
+  Other.Next = Other.Prev = &Other;  // Other becomes an empty circle of one
+}
+
+VLIST::VLIST(VLIST&& Other) noexcept
+{
+  StealRing(Other);
+}
+
+VLIST& VLIST::operator=(VLIST&& Other) noexcept
+{
+  if (this != &Other)
+    {
+      Clear();           // free our own existing chain first (still O(n), but that's correct — we own real data)
+      StealRing(Other);
+    }
+  return *this;
+}
+
+
 bool VLIST::IsEmpty() const
 {
   return (Next == NULL || Next == this);

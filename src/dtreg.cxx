@@ -133,7 +133,9 @@ enum Doctypes {
   _IMAGEPNG,
   _IMAGETIFF,
   _IMAGEJPEG,
-  _JSONDETECT, _JSON, _NDJSON, _LDJSON, _EJSON,
+  _JSONDETECT, _JSON, _NDJSON,
+  _LDJSON, _EJSON, _CIRRUSNDJSON,
+  _ESBULKNDJSON,
 
   _MAX_ID, // This is the "last real" doctype
   _PLUGIN = 126
@@ -211,6 +213,9 @@ static const struct {
   { "NDJSON",      _NDJSON,     true}, // Newline Delimited JSON 
   { "JSON-LD",     _LDJSON,     true},
   { "EJSON",       _EJSON,      true},
+  { "CIRRUSNDJSON",_CIRRUSNDJSON, true}, // Wiki Dumps from Elastic
+  { "ESBULKNDJSON",_ESBULKNDJSON, true}, // ES Bulk Dumps (like CIRRUS but more general)
+
 
   /* Aliases */
   { "TBINARY",    _TBINARY,     false},
@@ -245,6 +250,8 @@ static const struct {
   { "RFC8259",    _JSON,    false},
   { "JSONL",      _NDJSON,  false},
   { "JSONLD",     _LDJSON,  false},
+  { "CIRRUS",     _CIRRUSNDJSON, false},
+  { "ESNDJSON",   _ESBULKNDJSON, false},
 
 
   { "PLUGIN",     _PLUGIN,      false}
@@ -846,6 +853,10 @@ PDOCTYPE        DTREG::GetDocTypePtr(const DOCTYPE_ID& DoctypeId)
       return RegisterDocType (Ident, new JSONLDDOC(Db, Name));
     case _EJSON:
       return RegisterDocType (Ident, new EJSONDOC(Db, Name));
+    case _CIRRUSNDJSON:
+      return RegisterDocType (Ident, new CIRRUSNDJSON(Db, Name));
+    case _ESBULKNDJSON:
+      return RegisterDocType (Ident, new ESBULKNDJSON(Db, Name));
     case _PLUGIN:
       // Now look at the plugins
       STRING DocType = DoctypeId.Name;

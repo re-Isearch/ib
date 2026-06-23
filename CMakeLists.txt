@@ -1,6 +1,6 @@
 
 cmake_minimum_required(VERSION 3.20)
-project(reIsearch VERSION 4.8 LANGUAGES C CXX)
+project(reIsearch VERSION 4.9 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,7 +37,7 @@ set(IB_SHARED_TARGETS
 foreach(lib_tgt ${IB_SHARED_TARGETS})
     if(TARGET ${lib_tgt})
         set_target_properties(${lib_tgt} PROPERTIES
-            VERSION "4.8"
+            VERSION "4.9"
             SOVERSION "4"
         )
     endif()
@@ -215,7 +215,8 @@ endfunction()
 # ─────────────────────────────────────────────
 add_library(ibUtils
     ${SRC_DIR}/string.cxx       ${SRC_DIR}/fuzzy.cxx
-    ${SRC_DIR}/qsort.cxx        ${SRC_DIR}/vlist.cxx
+    ${SRC_DIR}/qsort.cxx        ${SRC_DIR}/qsort_simd.cxx
+    ${SRC_DIR}/vlist.cxx
     ${SRC_DIR}/plist.cxx        ${SRC_DIR}/common.cxx
     ${SRC_DIR}/error.cxx        ${SRC_DIR}/glob.cxx
     ${SRC_DIR}/fieldmatch.cxx   ${SRC_DIR}/pathname.cxx

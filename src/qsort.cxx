@@ -600,8 +600,9 @@ void DualPivotQsort (void *base, size_t nel, size_t esz, cmp_t *cmp)
 
 
 //
-// Choices are: BentleyQsort, SedgewickQsort, DualPivotQsort, qsort, timsort
+// Choices are: BentleyQsort, SedgewickQsort, DualPivotQsort, CoreQuarrySIMDSort, qsort, timsort
 //
+extern void CoreQuarrySIMDSort( void *, size_t, size_t, int (*)(const void *, const void *));
 
-void (*_IB_Qsort)(void *, size_t, size_t, cmp_t) = BentleyQsort; 
+void (*_IB_Qsort)(void *, size_t, size_t, cmp_t) = CoreQuarrySIMDSort; 
 

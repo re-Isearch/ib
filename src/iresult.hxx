@@ -81,8 +81,12 @@ class IRESULT {
 public:
   IRESULT();
   IRESULT(MDT *);
+
   IRESULT(const IRESULT& OtherIresult);
   IRESULT& operator=(const IRESULT& OtherIresult);
+
+  IRESULT(IRESULT&& OtherIresult) noexcept;
+  IRESULT& operator=(IRESULT&& OtherIresult) noexcept;
 
   INDEX_ID GetIndex() const { return Index; }
   void     SetIndex(const INDEX_ID& newIndex) { Index = newIndex; }

@@ -1,5 +1,4 @@
 #include <cstdint>
-#include <immintrin.h>
 #include <cstring>
 
 typedef int cmp_t(const void *, const void *);
@@ -13,6 +12,9 @@ typedef int cmp_t(const void *, const void *);
   #include <arm_sve.h>
   #define HAVE_SIMD
 #endif
+
+extern void BentleyQsort(void *a, size_t n, size_t es, cmp_t *cmp);
+
 
 
 #ifdef __AVX2__
@@ -147,7 +149,7 @@ static inline int32_t simd_partition_32bit(int32_t* array, int32_t left, int32_t
  */
 void CoreQuarrySIMDSort(void *base, size_t nel, size_t esz, cmp_t *cmp) {
 #ifdef HAVE_SIMD
-    // SIMD optimizations excel at primitive structures (like your packed 64-bit labels or 32-bit categories)
+    // SIMD optimizations excel at primitive structures (like our packed 64-bit labels or 32-bit categories)
     // For large generic structures, fall back to the highly tuned BentleyQsort
     if (esz != 4 && esz != 8) {
         BentleyQsort(base, nel, esz, cmp);
