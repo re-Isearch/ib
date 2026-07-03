@@ -58,6 +58,11 @@ Description:	Common functions
 # include <dlfcn.h>
 #endif
 
+#if defined(__APPLE__)
+# include <sys/types.h>
+# include <sys/sysctl.h>
+#endif
+
 
 #ifdef _WIN32
 # undef WWW_SUPPORT
@@ -3200,7 +3205,7 @@ bool _IB_GetmyMail (PSTRING Name, PSTRING Address)
   return false;
 }
 
-
+// Ensure PAGESIZE evaluates dynamically or falls back gracefully
 #ifndef PAGESIZE
 # ifdef _SC_PAGESIZE
 #  define PAGESIZE sysconf(_SC_PAGESIZE)
@@ -3211,17 +3216,28 @@ bool _IB_GetmyMail (PSTRING Name, PSTRING Address)
 
 rlim_t _IB_GetFreeMemory()
 {
-#ifdef _SC_AVPHYS_PAGES
+#if defined(__APPLE__)
+  // macOS Unified Cache Approach: Fall back to a calculated estimate
+  // because inactive pages can be reclaimed instantly by the kernel.
+  int64_t physical_memory = 0;
+  size_t length = sizeof(physical_memory);
+  int mib[2] = { CTL_HW, HW_MEMSIZE };
+  if (sysctl(mib, 2, &physical_memory, &length, NULL, 0) == 0) {
+    return (rlim_t)(physical_memory / 2); // Sane estimate for index sizing
+  }
+  return (rlim_t)4096L * (1ULL << 20); // 4GB baseline fallback
 
-#if defined(SOLARIS) || defined(BSD)
+#elif defined(_SC_AVPHYS_PAGES)
+# if defined(SOLARIS) || defined(BSD)
   long physical = sysconf(_SC_PHYS_PAGES);
   long free     = sysconf(_SC_AVPHYS_PAGES);
   if (physical > 2*free)
     return (free + (physical-free)/4) * PAGESIZE;
   return free * PAGESIZE;
-#else
+# else
   return sysconf(_SC_AVPHYS_PAGES) * PAGESIZE;
-#endif
+# endif
+
 #elif defined(LINUX)
   return  get_phys_pages() * PAGESIZE;
 #else
@@ -3231,12 +3247,22 @@ rlim_t _IB_GetFreeMemory()
 
 rlim_t _IB_GetTotalMemory()
 {
-#ifdef _SC_AVPHYS_PAGES
+#if defined(__APPLE__)
+  // Native macOS physical hardware lookup via sysctl
+  int64_t physical_memory = 0;
+  size_t length = sizeof(physical_memory);
+  int mib[2] = { CTL_HW, HW_MEMSIZE };
+  if (sysctl(mib, 2, &physical_memory, &length, NULL, 0) == 0) {
+    return (rlim_t)physical_memory;
+  }
+  return (rlim_t)(-1);
+
+#elif defined(_SC_AVPHYS_PAGES)
   return sysconf(_SC_PHYS_PAGES) * PAGESIZE;
 #elif defined(LINUX)
   return get_avphys_pages() * PAGESIZE;
 #else
-  return (off_t)-1;
+  return (rlim_t)-1;
 #endif
 }
 

@@ -117,24 +117,24 @@ public:
   size_t GetHitTotal ();
 
   // Score normalization (scoring functions)
-  OPOBJ *ComputeScores (const INT TermWeight, enum NormalizationMethods Method = defaultNormalization);
+  OPOBJ *ComputeScores (const float TermWeight, enum NormalizationMethods Method = defaultNormalization);
   // Methods
-  OPOBJ *ComputeScoresNoNormalization (const int TermWeight);
-  OPOBJ *ComputeScoresNormalizationAF (const int TermWeight);
-  OPOBJ *ComputeScoresNormalizationL2 (const int TermWeight);
-  OPOBJ *ComputeScoresNormalizationL1 (const int TermWeight);
-  OPOBJ *ComputeScoresMaxNormalization (const int TermWeight);
-  OPOBJ *ComputeScoresLogNormalization (const int TermWeight);
-  OPOBJ *ComputeScoresBytesNormalization (const int TermWeight);
-  OPOBJ *ComputeScoresCosineMetricNormalization (const int TermWeight);
+  OPOBJ *ComputeScoresNoNormalization (const float TermWeight);
+  OPOBJ *ComputeScoresNormalizationAF (const float TermWeight);
+  OPOBJ *ComputeScoresNormalizationL2 (const float TermWeight);
+  OPOBJ *ComputeScoresNormalizationL1 (const float TermWeight);
+  OPOBJ *ComputeScoresMaxNormalization (const float TermWeight);
+  OPOBJ *ComputeScoresLogNormalization (const float TermWeight);
+  OPOBJ *ComputeScoresBytesNormalization (const float TermWeight);
+  OPOBJ *ComputeScoresCosineMetricNormalization (const float TermWeight);
 
-  OPOBJ *ComputeScoresHybridNormalization(const int TermWeight);
+  OPOBJ *ComputeScoresHybridNormalization(const float TermWeight);
   void SetPrecomputed(enum NormalizationMethods Method);
 
   // Stubs
-  OPOBJ *ComputeScoresAux1Normalization (const int TermWeight);
-  OPOBJ *ComputeScoresAux2Normalization (const int TermWeight);
-  OPOBJ *ComputeScoresAux3Normalization (const int TermWeight);
+  OPOBJ *ComputeScoresAux1Normalization (const float TermWeight);
+  OPOBJ *ComputeScoresAux2Normalization (const float TermWeight);
+  OPOBJ *ComputeScoresAux3Normalization (const float TermWeight);
 
   // Binary Functions
   virtual OPOBJ *Or (const OPOBJ& OtherIrset);
@@ -431,9 +431,9 @@ public:
     node()->AddEntry(ResultRecord, Add); }
   void FastAddEntry(const IRESULT& ResultRecord) { node()->FastAddEntry(ResultRecord); }
 
-  OPOBJ *ComputeScores (const INT TermWeight) {
+  OPOBJ *ComputeScores (const float TermWeight) {
         return node()->ComputeScoresNormalizationL2(TermWeight); }
-  OPOBJ *ComputeScores (const INT TermWeight, enum NormalizationMethods Method) {
+  OPOBJ *ComputeScores (const float TermWeight, enum NormalizationMethods Method) {
 	return node()->ComputeScores(TermWeight, Method); }
 
   void MergeEntries(bool Add = true)       { p_->ptr_->MergeEntries(Add);      }

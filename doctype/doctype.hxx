@@ -224,13 +224,16 @@ protected:
   }
   INT         ffclose(FILE *Fp) const { return Db ? Db->ffclose(Fp) : fclose(Fp); }
 
-
   IDBOBJ     *Db;
   STRING      Doctype;
   STRING      HeadlineFmt;
   STRING      SummaryFmt;
   REGISTRY   *tagRegistry;
   STRINGINDEX WordMaximum;
+
+protected:
+   MMAP_FILE_SESSION  m_FileSession;
+
 private:
   CHARSET     Charset;
   HASH        Defaults;

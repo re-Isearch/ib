@@ -73,6 +73,8 @@ protected:
   // subclasses, like CIRRUSNDJSON, that need to peek at the buffer
   // before deciding whether to parse it).
   void ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& FileName);
+  void ParseBufferBounded(char *buf, size_t recLen, PRECORD record, GPTYPE base, const STRING& FileName);
+
 
   // ---------------------------------------------------------------
   // Recursive descent parser.
@@ -110,6 +112,7 @@ protected:
                      size_t& valueStart,   size_t& valueEnd);
 
   void SkipWhitespace(const char *json, size_t& pos) const;
+  void SkipWhitespace(const char *json, size_t& pos, size_t len) const;
 
   STRING SanitiseFieldName(const STRING& raw) const;
 

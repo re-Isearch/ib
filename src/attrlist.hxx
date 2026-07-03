@@ -231,8 +231,9 @@ public:
   bool AttrGetStructure(INT *IntBuffer) const;
   INT         AttrGetStructure() const; // -1 means failed
 
+  void        AttrSetTermWeight(const float TermWeight);
   void        AttrSetTermWeight(const INT TermWeight);
-  INT         AttrGetTermWeight() const;
+  float       AttrGetTermWeight() const;
 
   void        Write(PFILE Fp) const;
   bool Read(PFILE Fp);

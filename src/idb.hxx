@@ -324,10 +324,10 @@ public:
   RSET *VSearchSmart(QUERY *Query, const STRING& DefaultField=NulString);
 
   IRSET *TermSearch(const STRING& SearchTerm, const STRING& FieldName,
-	INDEX::MATCH Typ=INDEX::Unspecified, INT Weight=1,
+	INDEX::MATCH Typ=INDEX::Unspecified, float Weight=1.0f,
 	enum NormalizationMethods Method= defaultNormalization) const {
     IRSET *irset = MainIndex->TermSearch(SearchTerm, FieldName, Typ);
-    return Weight ? (IRSET *)irset->ComputeScores(Weight, Method) : irset;
+    return (fabs(Weight) > 0.001f) ? (IRSET *)irset->ComputeScores(Weight, Method) : irset;
   }
 
   PIRSET FileSearch(const STRING& FileSpecification) {

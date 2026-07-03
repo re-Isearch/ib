@@ -1543,9 +1543,9 @@ message_log (LOG_DEBUG, "AFTER INDEXING");
 	    // We have a Zip archive
 	    doctype = "ZIP:FILTER2XML";
 	    if (Db->ProfileGetString("ZIP", "Filter").IsEmpty()) {
-	      STRING zipper ( ResolveBinPath("zipper"));
-	      if (ExeExists(zipper))
-		Db->ProfileWriteString("ZIP", "Filter", zipper);
+	      STRING ziplist ( ResolveBinPath("ziplist"));
+	      if (ExeExists(ziplist))
+		Db->ProfileWriteString("ZIP", "Filter", ziplist);
 	    }
 	    goto done;
 	  }

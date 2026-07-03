@@ -109,8 +109,12 @@ struct STRINGData
 extern const char * g_szNul; // global pointer to empty string
 extern const STRINGData * const g_strNul; // global pointer to empty stringdata
 
+
+class STRING_VIEW;
+
 class STRING {
   friend class ArraySTRING;
+  friend class STRING_VIEW;
 
 public:
   /** @name constructors & dtor */
@@ -146,6 +150,9 @@ public:
  ~STRING();
   //@}
 
+  operator STRING_VIEW() const noexcept; //  { return STRING_VIEW(c_str(), GetLength());}
+  const STRING_VIEW view() const noexcept ;
+
   /** @name numeric typecasts */
   //@{
   // Explicit..
@@ -159,6 +166,7 @@ public:
   double GetDouble() const           { return atof(m_pchData); }
   long double GetLongDouble() const  { return strtold(m_pchData, NULL); } 
   // casts
+
 #ifndef SWIG
   operator bool () const             { return GetBool(); }
   operator short () const            { return (short)GetInt(); }
@@ -1041,6 +1049,36 @@ protected:
 };
 
 extern const STRING& NulString;
+
+class STRING_VIEW {
+protected:
+    const char* data_;
+    size_t      len_;
+
+public:
+    constexpr STRING_VIEW() noexcept
+      : data_(""), len_(0) {}
+
+    constexpr STRING_VIEW(const char* s, size_t n) noexcept
+      : data_(s), len_(n) {}
+
+    constexpr STRING_VIEW(const STRING& s) noexcept
+      : data_(s.c_str()), len_(s.length()) {}
+
+    constexpr const char* data() const noexcept { return data_; }
+    constexpr size_t size() const noexcept { return len_; }
+    constexpr bool empty() const noexcept { return len_ == 0; }
+
+    constexpr char operator[](size_t i) const noexcept {
+        return data_[i];
+    }
+};
+
+
+inline STRING::operator STRING_VIEW() const noexcept { return STRING_VIEW(c_str(), GetLength());}
+inline const STRING_VIEW STRING::view() const noexcept { return STRING_VIEW(c_str(), GetLength()); }
+
+
 
 // ----------------------------------------------------------------------------
 /** The string array uses it's knowledge of internal structure of the String

@@ -2488,6 +2488,72 @@ size_t IDB::GetTotalDocumentsDeleted() const
 }
 
 // Set Memory in bytes
+#if 1
+
+// Updated to handle modern machines where 4GB is tiny versus when 128MB was considered massive
+void IDB::SetIndexingMemory(const size_t MemorySize, bool Force)
+{
+  const rlim_t totalMemory = _IB_GetTotalMemory();
+  const rlim_t freeMemory  = _IB_GetFreeMemory();
+  
+  // Fallback to a sane modern baseline (e.g., 2GB total) if the OS fails to report memory metrics
+  const rlim_t totalRAM = (totalMemory > 0) ? totalMemory : (2ULL * 1024 * 1024 * 1024);
+  const rlim_t freeRAM  = (freeMemory > 0)  ? freeMemory  : (totalRAM / 2);
+
+  size_t requestedBytes = 0;
+
+  // 1. IMMEDIATE INPUT NORMALIZATION
+  if (MemorySize == 0) {
+    // AUTO-SELECT: Target a balanced ~25% of total system RAM for index operations
+    requestedBytes = static_cast<size_t>(totalRAM / 4);
+  }
+  else if ((long long)MemorySize < 0) {
+    // DYNAMIC RETRIEVAL MODE: Total RAM minus an absolute offset
+    long long offset = static_cast<long long>(MemorySize) * PAGESIZE;
+    long long calculated = static_cast<long long>(totalRAM) + offset;
+    requestedBytes = (calculated > 0) ? static_cast<size_t>(calculated) : MinimumMemSize;
+  } 
+  else {
+    // USER SPECIFIED: Clean up ambiguous unit sizes safely
+    if (MemorySize < 4096)           requestedBytes = MemorySize * (1ULL << 20); // Treated as MB
+    else if (MemorySize < (1ULL<<20)) requestedBytes = MemorySize * 1024ULL;      // Treated as KB
+    else                              requestedBytes = MemorySize;               // Treated as Bytes
+  }
+
+  // Enforce absolute minimum constraints
+  if (requestedBytes < MinimumMemSize) {
+    requestedBytes = MinimumMemSize;
+  }
+
+  // 2. HARDWARE CEILING HEURISTICS
+  size_t safeCeiling = static_cast<size_t>(totalRAM * 60 / 100); // 60% Absolute Maximum Cap
+  size_t targetDefault = static_cast<size_t>(totalRAM * 30 / 100); // 30% Balanced Target
+
+  if (!Force && requestedBytes > safeCeiling) {
+    message_log(LOG_WARN, "Requested memory (%lu MB) exceeds safety cap for consumer hardware. Overriding to %lu MB.", 
+                requestedBytes / (1L<<20), safeCeiling / (1L<<20));
+    requestedBytes = safeCeiling;
+  }
+
+  // 3. APPLY ALIGNMENT BOUNDARIES
+  IndexingMemory = requestedBytes;
+  if (PAGEOFFSET) {
+    IndexingMemory = (IndexingMemory + PAGEOFFSET) & ~PAGEOFFSET;
+  }
+
+  // 4. METRICS & STATE LOGGING
+  if (IndexingMemory > freeRAM) {
+    message_log(LOG_WARN, "Warning: Indexing target (%lu MB) is higher than current free RAM (%lu MB). System will swap.", 
+                IndexingMemory / (1L<<20), freeRAM / (1L<<20));
+  } else {
+    message_log(LOG_INFO, "Indexing memory pool configured successfully: %lu MB (%lu pages).", 
+                IndexingMemory / (1L<<20), IndexingMemory / PAGESIZE);
+  }
+}
+
+
+
+#else
 void IDB::SetIndexingMemory (const size_t MemorySize, bool Force)
 {
   const rlim_t totalMemory        = _IB_GetTotalMemory();
@@ -2597,6 +2663,7 @@ void IDB::SetIndexingMemory (const size_t MemorySize, bool Force)
   message_log (LOG_DEBUG, "Indexing memory set to %ld kb (%ld pages).",
 	IndexingMemory/1024, IndexingMemory/PAGESIZE);
 }
+#endif
 
 /* void IDB::GenerateKeys() { MainMdt->GenerateKeys(); } */
 

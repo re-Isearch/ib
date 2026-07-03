@@ -123,8 +123,12 @@ char *TOKENGEN::nexttoken (char *input, STRING *token)
 	      // special case for weighted terms (BUGFIX)
 	      if ( *input == ':' && isdigit(*(input+1)) )
 		{
+		  int dot = 0;
 		  do {
 		    token->Cat(*input++);
+		    if (*input == '.' && dot == 0) {
+		      dot++; continue;
+		    }
 		  } while (isdigit(*input));
 		}
 	      continue;

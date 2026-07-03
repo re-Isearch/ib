@@ -1012,17 +1012,23 @@ bool ATTRLIST::AttrGetStructure(INT *IntBuffer) const
 }
 
 
+void ATTRLIST::AttrSetTermWeight (const float TermWeight)
+{
+  SetValue (IsearchAttributeSet, IsearchWeightAttr, (STRING) TermWeight);
+}
+
+
 void ATTRLIST::AttrSetTermWeight (const INT TermWeight)
 {
   SetValue (IsearchAttributeSet, IsearchWeightAttr, (STRING) TermWeight);
 }
 
-INT ATTRLIST::AttrGetTermWeight () const
+float ATTRLIST::AttrGetTermWeight () const
 {
   STRING S;
   if (GetValue (IsearchAttributeSet, IsearchWeightAttr, &S))
     {
-      return S.GetInt ();
+      return S.GetFloat ();
     }
   return 1;
 }

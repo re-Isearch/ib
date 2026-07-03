@@ -4,25 +4,18 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #ifndef BUFFER_HXX
 #define BUFFER_HXX 1
 
-#include <cstddef>
 #include "string.hxx"
 
 class BUFFER {
 public:
   BUFFER();
-  BUFFER(size_t bytes, size_t size = sizeof(char));
+  BUFFER(size_t bytes, size_t size=sizeof(char));
   ~BUFFER();
-
-  // Move-only semantics: Prevent accidental shallow copies / double-frees
-  BUFFER(const BUFFER&) = delete;
-  BUFFER& operator=(const BUFFER&) = delete;
-  BUFFER(BUFFER&& other) noexcept;
-  BUFFER& operator=(BUFFER&& other) noexcept;
 
   void  SetPageSize(size_t size);
 
-  void *Want(size_t bytes, size_t size = sizeof(char)); 
-  void *Expand(size_t bytes, size_t size = sizeof(char)); 
+  void *Want(size_t bytes, size_t size=sizeof(char)); // like malloc
+  void *Expand(size_t bytes, size_t size=sizeof(char)); // like realloc
 
   void          *Ptr() const    { return (void *)Buffer; }
   signed char   *c_str() const  { return (signed char *)Buffer; }
@@ -44,10 +37,13 @@ private:
   size_t          PageSize;
   size_t          Buffer_size;
   unsigned char  *Buffer;
-
-  size_t CalculateAllocSize(size_t want, size_t size) const;
-  void   SetMagicBytes();
 };
 
-#endif
+/*
+TODO:
+  CHARBUFFER -- buffer for sizeof(char)
+  GPBUFFER -- buffer for sizeof(GPTYPE)
+*/
 
+
+#endif

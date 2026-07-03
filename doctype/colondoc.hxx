@@ -58,14 +58,16 @@ protected:
   bool     GetRecordDfdt (const STRING& Key, PDFDT DfdtBuffer) const;
   void            SetSepChar(const STRING& Default);
 
+  BUFFER          tmpBuffer;
+
 private:
   void            SetPresentType(const STRING& Default);
-  BUFFER          tmpBuffer, tagBuffer;
-  bool     allowWhiteBeforeField;
-  bool     UseTable;
-  bool     IgnoreTagWords;
+  BUFFER          tagBuffer;
+  bool            allowWhiteBeforeField;
+  bool            UseTable;
+  bool            IgnoreTagWords;
   CHR             sepChar;
-  bool     autoFieldTypes;
+  bool            autoFieldTypes;
   unsigned        recordsAdded;
 };
 

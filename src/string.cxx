@@ -2266,6 +2266,7 @@ bool STRING::IsNumber() const
     {
       if(hex ? !_ib_isxdigit(*s) : !_ib_isdigit(*s))
 	{
+	  if (*s == ':' || *s == '/') return false;
 	  if (*s == '.')
 	    dots++;
 	  else if (!isspace(*s) || s[1]) // Don't be tricked by trailing space!
@@ -2356,6 +2357,9 @@ bool STRING::IsDate() const
   // Dates should have at least 6 characters and be not too long
   if ((Len() > 5 && Len() < 512) && !IsFilePath())
     {
+      if (IsNumber()) {
+	return false;
+      }
       return SRCH_DATE(*this).Ok();
     }
   return false;
@@ -2363,8 +2367,10 @@ bool STRING::IsDate() const
 
 bool STRING::IsDateRange() const
 {
-  if (Len() > 10)
+  if (Len() > 10) {
+    if ( m_pchData[0] == '-' || Count('.') == 1) return false;  
     return DATERANGE(*this).Ok();
+  }
   return false;
 }
 
@@ -2389,7 +2395,6 @@ bool STRING::IsPrint() const
     }
   return(true);
 }
-
 
 bool STRING::GetBool() const
 {

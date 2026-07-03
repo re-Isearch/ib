@@ -1520,7 +1520,9 @@ Using '%s' as default.", browser);
   if (createCentroid)
     pdb->CreateCentroid();
 
-  const int indexingMemoryMB = (int) ((long long)pdb->GetIndexingMemory() + 512L*1024L)/(1024L*1024L);
+  // Keep the calculation 64-bit through the division step
+  const int indexingMemoryMB = (int) (((long long)pdb->GetIndexingMemory() + (512LL * 1024LL)) / (1024LL * 1024LL));
+
 
   delete pdb;
   pdb = NULL;

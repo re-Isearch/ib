@@ -5959,14 +5959,14 @@ INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Tr
     {
       IndexNum = GetIndexNum();
       if (DebugMode) message_log (LOG_DEBUG, "%d sub-indicies (%d slots)", IndexNum, IndexNum+5);
-      MemorySISCache = new MMAP_TABLE (IndexNum+5); // Add 5 for extra .sis.# files
-      if (MemorySISCache == NULL)
+      MemorySISCache = new (std::nothrow) MMAP_TABLE (IndexNum + 5); // Add 5 for extra .sis.# files
+      if (MemorySISCache == nullptr)
         {
           message_log (LOG_PANIC, "Could not allocate Memory Map Cache with %ld slots.", IndexNum+5);
           return -1; // Bad Error!
         }
     }
-  if (MemorySISCache->CreateMap(Slot, SisFn))
+  if (MemorySISCache->CreateMap(Slot, SisFn, MapRandom))
     return findIt (MemorySISCache->Map(Slot), Term, TermLength, Truncate, start, overflow);
   message_log (LOG_ERRNO, "Could not create MAP in Slot %d for '%s'!", Slot, SisFn.c_str());
   Parent->SetErrorCode(2);

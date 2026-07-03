@@ -736,6 +736,53 @@ void JSONDOC::SkipWhitespace(const char *json, size_t& pos) const
   }
 }
 
+void JSONDOC::SkipWhitespace(const char *json, size_t& pos, size_t len) const
+{   
+  while (pos < len) {
+    const unsigned char ch = static_cast<unsigned char>(json[pos]);
+
+    // 1. Hot Path: Skip standard ASCII whitespace fast
+    // Avoid isspace() overhead (which handles locale sync overhead)
+    // Checking the common space types directly or via a fast unrolled layout
+    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+      ++pos;
+      continue;
+    }
+
+    // 2. Comments Path: Check bounds carefully before peering ahead
+    if (ch == '/' && (pos + 1 < len)) {
+      char next_ch = json[pos + 1];
+
+      if (next_ch == '/') {
+        // Line Comment: Scan until newline or end of record buffer
+        pos += 2;
+        while (pos < len && json[pos] != '\n') {
+          ++pos;
+        }
+        continue;
+      } 
+      
+      if (next_ch == '*') {
+        // Block Comment: Scan until closing tokens or end of buffer safely
+        pos += 2;
+        while (pos + 1 < len && !(json[pos] == '*' && json[pos + 1] == '/')) {
+          ++pos;
+        }
+        // Advance past the closing '*/' if we found it before the buffer limit
+        if (pos + 1 < len) {
+          pos += 2;
+        } else {
+          pos = len; // Malformed input terminated safely at boundary
+        }
+        continue;
+      }
+    }
+
+    // 3. Structural Token Hit: Break instantly
+    break;
+  }                       
+}
+
 // ---------------------------------------------------------------------------
 // SanitiseFieldName
 // ---------------------------------------------------------------------------
@@ -874,13 +921,18 @@ void NDJSON::ParseRecords(const RECORD& FileRecord)
 
   const char quoteChar = '\"'; // We assume ONLY " for quotes
   bool inQuote = false;
+  bool escaped = false;
   while (Position < RecEnd)
     {
       // Need to handle newlines in quoted columns
       for (; !(!inQuote && (ci == '\n' || ci =='\r')) && Position <= RecEnd; ci=*ptr++, Position++) {
-	if (newLinesInQuotes && ci == quoteChar) {
-	  if (*ptr == quoteChar) ptr++, Position++; // skip
-	  else inQuote = !inQuote;
+	if (escaped) escaped = false;
+	else if (ci == '\\') 
+	  escaped = true;
+	else if (newLinesInQuotes && ci == quoteChar) {
+	  // if (*ptr == quoteChar) ptr++, Position++; // skip
+	  // else 
+	  inQuote = !inQuote;
 	}
       }
       // I may be in a quote but that's an error so I'm in trouble anyway..
@@ -930,8 +982,39 @@ bool CIRRUSNDJSON::IsBulkActionLine(const char *buf, size_t len) const
   return _IsBulkActionLine(buf, len);
 }
 
-void CIRRUSNDJSON::ParseFields(PRECORD NewRecord)
+void CIRRUSNDJSON::ParseFields(RECORD* Record)
 {
+#if 1
+  if (!Record) return;
+
+  STRING FileName;
+  Record->GetFullFileName(&FileName);
+
+  // Ask the session wrapper for the address base.
+  // If the queue is on the same file, it returns immediately with zero cost.
+  // If the file name shifts, it automatically handles unmapping and new mapping.
+  const unsigned char* FileBase = m_FileSession.GetMemoryBase(FileName, MapSequential);
+  if (!FileBase) {
+    return; // Failure logs already handled internally
+  }
+  GPTYPE base   = Record->GetRecordStart();
+  GPTYPE recEnd = Record->GetRecordEnd();
+  size_t recLen = (size_t)(recEnd - base + 1);
+
+  // Instant zero-copy memory dereference
+  const char* RecBuffer = reinterpret_cast<const char*>(FileBase + base);
+
+  if (IsBulkActionLine(RecBuffer, recLen)) {
+    return; 
+  }
+
+  // Ensure null-termination using your high-performance loop buffer
+  PCHR LocalCopy = (PCHR)tmpBuffer.Want(recLen + 1);
+  memcpy(LocalCopy, RecBuffer, recLen);
+  LocalCopy[recLen] = '\0';
+
+  ParseBuffer(LocalCopy, Record, base, FileName);
+#else
   if (!NewRecord)
     return;
 
@@ -941,6 +1024,7 @@ void CIRRUSNDJSON::ParseFields(PRECORD NewRecord)
   GPTYPE base   = NewRecord->GetRecordStart();
   GPTYPE recEnd = NewRecord->GetRecordEnd();
   size_t recLen = (size_t)(recEnd - base + 1);
+
 
   PFILE fp = Db->ffopen(FileName, "rb");
   if (!fp) {
@@ -954,18 +1038,19 @@ void CIRRUSNDJSON::ParseFields(PRECORD NewRecord)
     Db->ffclose(fp);
     return;
   }
-  char *buf = new char[recLen + 1];
+  BUFFER tmpBuffer; // Will move this to a call-in.. So this is temp!!
+  char *buf = (char *)tmpBuffer.Want (recLen + 1, sizeof(char));
+
   size_t nRead = fread(buf, 1, recLen, fp);
   Db->ffclose(fp);
   buf[nRead] = '\0';
 
   if (IsBulkActionLine(buf, nRead)) {
-    delete[] buf;
     return;   // skip — ES bulk action line, not a document
   }
 
   ParseBuffer(buf, NewRecord, base, FileName);
-  delete[] buf;
+#endif
 }
 
 
@@ -1028,7 +1113,7 @@ void JSONDOC::ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& 
 
 inline STRING _createESKey(const STRING& id, const STRING& index)
 {
-  return "E$" + id + "@" + index;
+  return "E$" + id + ":" + index;
 }
 
 
@@ -1083,6 +1168,35 @@ static inline STRING ExtractJsonStringField(const unsigned char *buf, size_t len
 
   return STRING((const char *)valStart, (size_t)(p - valStart));
 }
+
+#if 0
+
+void CIRRUSNDJSON::ParseRecords(const RECORD& FileRecord)
+{
+  // ... identical setup to ESBULKNDJSON::ParseRecords ...
+  // Only difference: body record Key = wiki + ":" + _id
+
+  // In the body-line branch, after:
+  //   Record.SetRecordStart(RecStart);
+  //   Record.SetRecordEnd(Position-1);
+  // and before Db->DocTypeAddRecord(Record):
+
+  if (havePendingId && pendingId.GetLength())
+    {
+      // Scan body bytes for "wiki":"<value>" to namespace the key.
+      STRING wiki = ExtractJsonStringField(lineStart, lineLen, "wiki");
+      if (wiki.GetLength())
+        Record.SetKey(wiki + ":" + pendingId);
+      else
+        Record.SetKey(pendingId);   // fallback: no wiki field in this dump
+    }
+
+  Db->DocTypeAddRecord(Record);
+  havePendingId = false;
+  pendingId.Clear();
+}
+
+#endif
 
 
 #if 1
@@ -1210,15 +1324,23 @@ ESBULKNDJSON::BulkAction ESBULKNDJSON::ParseBulkAction(const unsigned char *buf,
 void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
 {
   const STRING FileName (FileRecord.GetFullFileName() );
-  MMAP         FileMap (FileName, MapSequential);
-  if (!FileMap.Ok())
-    {
-      message_log (LOG_ERRNO, "%s could not access '%s'", Doctype.c_str(), FileName.c_str());
-      return;
-    }
+
   off_t RecStart = FileRecord.GetRecordStart();
   off_t RecEnd   = FileRecord.GetRecordEnd();
-  const off_t FileEnd = FileMap.Size();
+
+  if (RecEnd - RecStart <= 0)
+    {
+      message_log (LOG_WARN, "zero-length record '%s'[%ld-%ld] -- skipping",
+        FileName.c_str(), (long)RecStart, (long)RecEnd);
+      return;
+    }
+
+  const unsigned char* FileBase = m_FileSession.GetMemoryBase(FileName, MapSequential);
+  if (!FileBase) return; // Failure logs already handled internally
+
+  const off_t FileEnd = m_FileSession.Size();
+
+  size_t recLen = (size_t)(RecEnd - RecStart + 1);
 
   if (RecEnd == 0) RecEnd = FileEnd;
 
@@ -1230,7 +1352,7 @@ void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
     }
   else if (RecStart > FileEnd)
     {
-      message_log (LOG_ERROR, "%s::ParseRecords(): Seek '%s' to %ld failed",
+      message_log (LOG_ERROR, "%s::ParseRecords(): Read '%s' at offset %ld failed",
         Doctype.c_str(), FileName.c_str(), RecStart);
       return;
     }
@@ -1243,10 +1365,11 @@ void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
 
   off_t Position = RecStart;
   unsigned char  ci = 0;
-  const unsigned char *ptr = FileMap.Ptr();
+  const unsigned char* ptr = reinterpret_cast<const unsigned char*>(FileBase + RecStart);
 
   const char quoteChar = '\"';
   bool inQuote = false;
+  bool escaped = false;
 
   // Carries the pending action's id across to the *next* line (its body),
   // within this single sequential ParseRecords call.
@@ -1254,13 +1377,17 @@ void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
   bool   havePendingId = false;
 
   STRING ES_index = FileRecord.GetFileName().Left('-');
+  bool   test_wiki = true;
 
   while (Position < RecEnd)
     {
       for (; !(!inQuote && (ci == '\n' || ci =='\r')) && Position <= RecEnd; ci=*ptr++, Position++) {
-        if (newLinesInQuotes && ci == quoteChar) {
-          if (*ptr == quoteChar) ptr++, Position++;
-          else inQuote = !inQuote;
+	if (escaped) escaped = false;
+ 	else if (ci == '\\') escaped = true;
+        else if (newLinesInQuotes && ci == quoteChar) {
+          // if (*ptr == quoteChar) ptr++, Position++;
+          // else
+	  inQuote = !inQuote;
         }
       }
       if (*ptr == '\r' || *ptr == '\n') {
@@ -1269,7 +1396,8 @@ void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
 
       if (RecStart != Position)
         {
-          const unsigned char *lineStart = FileMap.Ptr() + RecStart;
+          const unsigned char *lineStart = reinterpret_cast<const unsigned char*>(FileBase + RecStart);
+
           const size_t         lineLen   = (size_t)(Position - 1 - RecStart);
 
           STRING     thisId;
@@ -1322,6 +1450,17 @@ void ESBULKNDJSON::ParseRecords(const RECORD& FileRecord)
 
               if (havePendingId && pendingId.GetLength())
                 {
+		  if (test_wiki) {
+		    const unsigned char *lineStart = reinterpret_cast<const unsigned char*>(FileBase + RecStart);
+		    const size_t         lineLen   = (size_t)(Position - 1 - RecStart);
+		    // "wiki":"abwiki" 
+		    STRING wiki = ExtractJsonStringField(lineStart, lineLen, "wiki");
+		    if (wiki.GetLength()) {
+			cerr << "Got a wiki: " << wiki << endl;
+			ES_index = wiki;
+		    }
+		    test_wiki = false;
+		  }
                   SetKey(&Record, _createESKey(pendingId, ES_index ));
                 }
               else if (!havePendingId && DebugMode)

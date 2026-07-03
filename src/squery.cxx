@@ -45,6 +45,51 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #define   NAMESPACE
 #define CQL 1 /* Rule is that terms always have quotes */
 
+
+#define EPSILON 0.0001f
+
+// We have our own atof since we want decimal to be always defined by '.'
+static inline float fast_atof(const char *s)
+{
+    float value = 0.0f;
+    float frac = 0.1f;
+    int sign = 1;
+
+    // sign
+    if (*s == '-')
+    {
+        sign = -1;
+        ++s;
+    }
+    else if (*s == '+')
+    {
+        ++s;
+    }
+
+    // integer part
+    while (*s >= '0' && *s <= '9')
+    {
+        value = value * 10.0f + (*s - '0');
+        ++s;
+    }
+
+    // fractional part
+    if (*s == '.')
+    {
+        ++s;
+
+        while (*s >= '0' && *s <= '9')
+        {
+            value += (*s - '0') * frac;
+            frac *= 0.1f;
+            ++s;
+        }
+    }
+
+    // Want only 2 decimal places
+    return floorf(value * sign * 100.0f) / 100.0f;
+}
+
 SQUERY::SQUERY ()
 {
   Thesaurus       = (THESAURUS *)NULL;
@@ -865,7 +910,7 @@ size_t SQUERY::SetWords(const STRING& Sentence, ATTRLIST *AttrlistPtr, const LIS
   OPERATOR Operator;
   Operator.SetOperatorType (OperatorOr);
 
-  INT      Weight= AttrlistPtr->AttrGetTermWeight();
+  float   Weight= AttrlistPtr->AttrGetTermWeight();
 
   OPSTACK Stack;
   STERM   Sterm;
@@ -876,7 +921,7 @@ size_t SQUERY::SetWords(const STRING& Sentence, ATTRLIST *AttrlistPtr, const LIS
   const bool rightTrunc = AttrlistPtr->AttrGetRightTruncation();
   const bool leftTrunc  = AttrlistPtr->AttrGetLeftTruncation ();
 
-  if (Weight == 0) Weight = 1;
+  if (fabs(Weight) < EPSILON) Weight = 1;
   Words.Sort();
   for (const STRLIST *p = Words.Next(); p; p = p->Next())
     {
@@ -1108,7 +1153,7 @@ size_t SQUERY::SetTerm (const STRING& NewTerm)
 size_t SQUERY::SetRelevantTerm (const STRING& RelId)
 {
   STRING DBname, RecordKey, ESet;
-  INT weight = 1;
+  float weight = 1;
 
   if (RelId.GetLength())
     {
@@ -1126,7 +1171,7 @@ size_t SQUERY::SetRelevantTerm (const STRING& RelId)
               if ((tcp = strrchr (element, ':')) != NULL)
                 {
                   *tcp++ = '\0';
-                  weight = atoi(tcp);
+                  weight = fast_atof(tcp);
                 }
               ESet = element;
             }
@@ -1249,7 +1294,7 @@ size_t SQUERY::SetRelevantTerm (const STRING& RelId)
                 {
                   if (factor*weight <= 1) trim++;
                   Sterm.SetTerm (Term);
-                  AttrlistPtr->AttrSetTermWeight ((INT)(weight*factor));
+                  AttrlistPtr->AttrSetTermWeight (weight*factor);
                   Sterm.SetAttributes (*AttrlistPtr);
                   Stack << Sterm;
                   if (count++ >= 1)
@@ -1593,7 +1638,8 @@ size_t SQUERY::SetTerm (const STRING& NewTerm, bool Ored)
                 ((StrTemp.GetChr(pos+1) == '-' || StrTemp.GetChr(pos+1) == '+') &&
                  isdigit(StrTemp.GetChr(pos+2)) ) ) )
             {
-              AttrlistPtr->AttrSetTermWeight( atoi (((const CHR *)StrTemp)+pos) );
+	      const float weight = fast_atof (((const CHR *)StrTemp)+pos);
+              AttrlistPtr->AttrSetTermWeight( weight );
               StrTemp.EraseAfter(pos - 1); // Remove weight
             }
           pos = StrTemp.GetLength ();
@@ -2023,8 +2069,8 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                     op = '~';
                   }
                 if (op) S+= op;
-                const INT Weight = Attrlist.AttrGetTermWeight ();
-                if ((Weight != 1) || (GetOperator(T) != OperatorERR))
+                const float Weight = Attrlist.AttrGetTermWeight ();
+                if ((fabs(Weight-1.0f) > EPSILON) || (GetOperator(T) != OperatorERR))
                   {
                     S << ':' << Weight;
                   }
@@ -2368,16 +2414,17 @@ void SQUERY::CloseThesaurus()
     }
 }
 
-static STRING __TermValue(const STRING& Term, int *Weight)
+static STRING __TermValue(const STRING& Term, float *Weight)
 {
-  int           weight = 1;
+  float         weight = 1.0f;
   STRING        StrTemp (Term);
   STRINGINDEX   pos;
   if ((pos = StrTemp.SearchReverse(':')) > 2 && StrTemp.GetChr(pos-1) != '\\' && (
-        isdigit(StrTemp.GetChr(pos+1)) || ((StrTemp.GetChr(pos+1) == '-' ||
-                                            StrTemp.GetChr(pos+1) == '+') && isdigit(StrTemp.GetChr(pos+2)) ) ) )
+        isdigit(StrTemp.GetChr(pos+1)) ||
+		((StrTemp.GetChr(pos+1) == '-' || StrTemp.GetChr(pos+1) == '.' || StrTemp.GetChr(pos+1) == '+')
+		&& isdigit(StrTemp.GetChr(pos+2)) ) ) )
     {
-      weight = atoi (((const CHR *)StrTemp)+pos);
+      weight = fast_atof (((const CHR *)StrTemp)+pos);
       StrTemp.EraseAfter(pos - 1); // Remove weight
     }
   *Weight = weight;
@@ -2427,16 +2474,17 @@ void SQUERY::ExpandQuery()
                 }
             }
           else FieldName.Clear();
-          const INT Weight = Attrlist.AttrGetTermWeight ();
-          int  w;
+          const float Weight = Attrlist.AttrGetTermWeight ();
+          float  w;
           for (STRLIST *p = ChildTerms.Next(); p != &ChildTerms; p = p->Next())
             {
               if (!FieldName.IsEmpty())
                 StringBuffer << FieldName << "/";
               StringBuffer << "\"" << __TermValue(p->Value(), &w) << "\"";
               // w--; // Take away 1 from the weight
-              if (Weight != 1 || w != 1)
-                StringBuffer << ":" << (Weight*w) << " ";
+	      const float ww = Weight*w;
+              if ((fabs(ww - 1.0f)) > EPSILON)
+                StringBuffer << ":" << ww << " ";
             }
         }
       delete OpPtr;

@@ -840,6 +840,8 @@ void DOCTYPE::BeforeIndexing ()
 
 void DOCTYPE::AfterIndexing ()
 {
+  m_FileSession.Close(); // Release any mmaps !
+
   message_log (LOG_DEBUG, "%s::AfterIndexing called", Doctype.c_str());
 }
 
@@ -1138,6 +1140,7 @@ static bool _valid_URL_method(const char *base, size_t len, bool *d)
     size_t      len;
     bool dslash;
   } methods[] = {
+    {"ar",      2, true},
     {"efs",     3, true}, // ExoDAO File System
     {"ftp",     3, true},
     {"urn",     3, true},
@@ -2676,23 +2679,42 @@ void DOCTYPE::HandleSpecialFields(RECORD* NewRecord, const STRING& FieldName, co
   else if (FieldName ^= KeyField)
     {
       STRING Key;
-      // Special case for E$ keys
-      STRING currentKey = NewRecord->GetKey() ;
-      if (currentKey.Compare ("E$", 2)== 0) {
-	Key = currentKey.Left('@') + "@" + Buffer;
-      } else {
-        if (strncasecmp(Buffer, "urn:uuid:", 9) == 0 && strlen(Buffer)>(DocumentKeySize-8))
-  	  Buffer += 10;
-          Key = Buffer;
-       }
-      // URLs are NOT persistent (except ipfs) so we don't use as keys
-      if (!Key.SearchAny("://") || Key.Compare("ipfs:", 5) == 0) {
-        if (Db->KeyLookup (Key)) {
-	  if (trustKey)
-	    Db->MdtSetUniqueKey(NewRecord, Key);
-	} else
-          NewRecord->SetKey (Key);
+      bool persist = trustKey;
+      if (strncasecmp(Buffer, "urn:uuid:", 9) == 0 && strlen(Buffer)>(DocumentKeySize-8)) {
+  	Buffer += 10;
+        Key = Buffer;
       }
+      if (strncasecmp(Buffer, "ipfs://", 7) == 0)
+         {
+	   Key = "F$";
+	   // IPFS (filecoin) get I$ followed by the hash
+	   Buffer += 9;
+	   Key.Cat (Buffer);
+	   persist = true;
+         }
+      else if (strncasecmp(Buffer, "ar://", 4) == 0)
+	{
+	  Key = "A$";
+	  // Arweave (Permaweb) get A$ followed by the transaction ID
+	  Buffer += 5;
+          Key.Cat(Buffer);
+	  persist = true;
+	}
+      else if (strncasecmp(Buffer, "https://purl.org", 16) == 0)
+	{
+	  Key = "P$";
+	  Buffer += 17;
+	  Key.Cat(Buffer);
+	  persist = true;
+	}
+      // Other URLs are NOT persistent so we don't use as keys
+      if (Key.SearchAny("://")) return;
+
+      if (Db->KeyLookup (Key)) {
+	if (persist)
+	  Db->MdtSetUniqueKey(NewRecord, Key);
+      } else
+	NewRecord->SetKey (Key);
     }
   else if (FieldName ^= LanguageField) 
     {

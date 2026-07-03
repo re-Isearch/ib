@@ -85,10 +85,9 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
       // We only auto detect fields where the content is less than 512 bytes long
       if (autoFieldTypes && Contents.GetLength() < 512)
 	{
+cerr << "CHECK: " << Contents << endl;
 	  if (Contents.IsGeoBoundedBox())      ft = FIELDTYPE::box;
-	  else if (Contents.IsDate())          ft = FIELDTYPE::date;
 	  else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
-
 	  else if (Contents.IsNumberRange())   ft = FIELDTYPE::numericalrange;
 	  else if (Contents.IsNumber())
 	    {
@@ -96,11 +95,14 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	      // CCYYMMDD
 	      if (Contents.GetLong() > 19000101)
 		{
+cerr << "CHECKING IF REALLAY A DATE" << endl;
 	          SRCH_DATE date (Contents);
 	          ft = (date.Ok() && date.IsDayDate()) ? FIELDTYPE::date : FIELDTYPE::numerical;
 		}
 	      else ft = FIELDTYPE::numerical;
 	    }
+          else if (Contents.IsDate())          ft = FIELDTYPE::date;
+         // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
 	  else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
 	  else if (Contents.IsDotNumber())     ft = FIELDTYPE::dotnumber;
 #if 1
