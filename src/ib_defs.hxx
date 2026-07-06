@@ -557,8 +557,8 @@ const size_t DocumentTypeSize = 16-1;
 const size_t MaxDocPathNameSize = 128 - 2; // 256 - 2;
 #endif
 
-const size_t StringCompLength = 64; // 32; // 64; // how many characters to compare
-const size_t DefaultSisLength = 28; // was 32
+const size_t StringCompLength = 56; // to align with 64: 56+8 // how many characters to compare
+const size_t DefaultSisLength = 15; // 16 == 99.9% of English text 28; // was 32
 
 // Locks
 const int L_WRITE  = 0x01;

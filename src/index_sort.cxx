@@ -1,3 +1,4 @@
+#include <new>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
@@ -8,8 +9,21 @@
 // We let the intrinsics and compiler optimizer handle the SIMD lifting
 //
 
+
+// Fallback if the compiler/standard library doesn't fully export the macro yet
+#ifdef __cpp_lib_hardware_interference_size
+    using std::hardware_destructive_interference_size;
+#else
+    // Safe standard fallback for modern x86_64 and Apple Silicon/ARM64 cores
+    constexpr size_t hardware_destructive_interference_size = 64;
+#endif
+
+// Calculate the exact maximum text space available in a single hardware cache line
+// On standard 64-byte cache line systems with 8-byte GPTYPE, this equals exactly 56.
+constexpr size_t HW_PERFECT_LEN = hardware_destructive_interference_size - sizeof(GPTYPE); 
+
 template <size_t N>
-struct alignas(64) SIMDVariableTermKey {
+struct alignas(hardware_destructive_interference_size) SIMDVariableTermKey {
     unsigned char text[N];     // Must be unsigned char for clean array indexing
     GPTYPE        gp_value;    // Original address offset
 };
@@ -27,7 +41,16 @@ void RadixSortMSDCore(SIMDVariableTermKey<N>* src, SIMDVariableTermKey<N>* dst,
 {
     // Base Case: If the slice is small or we finished scanning text bytes,
     // break any remaining ties using the GPTYPE value (implicitly encodes indexing order).
-    if (count < 16 || digit >= N) {
+
+    // Dynamically scale the fallback threshold to fit exactly into a ~1KB L1 window:
+    // 32-bit  String -> Struct is 64 bytes  -> Threshold 16 (1024 bytes)
+    // 64-bit  String -> Struct is 128 bytes -> Threshold 8  (1024 bytes)
+    // 128-bit String -> Struct is 192 bytes -> Threshold 5  (960 bytes)
+    constexpr size_t FALLBACK_THRESHOLD = 
+        (sizeof(SIMDVariableTermKey<N>) <= 64)  ? 16 : 
+        (sizeof(SIMDVariableTermKey<N>) <= 128) ? 8  : 5;
+
+    if (count < FALLBACK_THRESHOLD || digit >= N) {
         std::sort(src, src + count, [digit](const SIMDVariableTermKey<N>& x, const SIMDVariableTermKey<N>& y) {
             if (digit < N) {
                 int res = memcmp(x.text + digit, y.text + digit, N - digit);
@@ -81,6 +104,14 @@ void INDEX::ExecuteTemplatedSort(const void* base, void* a, size_t n) const {
     PGPTYPE elements = (PGPTYPE)a;
     const char* text_buffer = (const char*)base;
 
+    // Compile-time check: Alert the developer if an alignment choice causes 
+    // a single element to spill across multiple cache lines.
+    constexpr size_t element_size = sizeof(SIMDVariableTermKey<N>);
+#if defined(DEBUG) || !defined(NDEBUG)
+    if constexpr (element_size > hardware_destructive_interference_size)
+      message_log(LOG_DEBUG, "Notice: Track <%lu> element size (%luB) spans multiple cache lines.", N, element_size);
+#endif
+
     // Allocate the primary staging array
     SIMDVariableTermKey<N>* staging_array = new (std::nothrow) SIMDVariableTermKey<N>[n];
     // Allocate the secondary scratchpad buffer required for Radix scattering
@@ -131,28 +162,24 @@ void INDEX::TermSort_SIMD(const void *base, void *a, size_t n) const
         TermSort(base, a, n);
         return;
     }   
-    
     // Dynamic Routing based on the application's current configuration
-    switch (StringCompLength) {
-        case 32: 
-            ExecuteTemplatedSort<32>(base, a, n);
-            break;
-        case 64:  // standard ib default
-            ExecuteTemplatedSort<64>(base, a, n);
-            break;
-        case 128: // ANGIS / Standard Genomic Token window
-            ExecuteTemplatedSort<128>(base, a, n);
-            break;
-        case 256: // Extended Structural Search window
-            ExecuteTemplatedSort<256>(base, a, n);
-            break;
-        default:
-            // SAFEST RUNTIME FALLBACK:
-            // If they need an arbitrary long length not optimized by a template slot,
-            // we fall back directly to the trusted original Bentley-McIlroy sort
-            // which safely scales to infinity using the text buffer directly!
-            TermSort(base, a, n); 
-            break;
-    }   
+    // We match the active lookahead variable to the tightest safe template slot.
+    if (StringCompLength <= 32)
+      ExecuteTemplatedSort<32>(base, a, n);
+    else if (StringCompLength <= 56)
+      ExecuteTemplatedSort<56>(base, a, n); // Cache-line sweet spot (56 text + 8 ptr = 64B)
+    else if (StringCompLength <= 64)
+      ExecuteTemplatedSort<64>(base, a, n); // Historical ib default
+    else if (StringCompLength <= 128)
+      ExecuteTemplatedSort<128>(base, a, n); // Genomic Token window
+    else if (StringCompLength <= 256)
+      ExecuteTemplatedSort<256>(base, a, n); // Extended Structural Search window
+    else {
+      // SAFEST RUNTIME FALLBACK:
+      // If they need an arbitrary long length not optimized by a template slot,
+      // we fall back directly to the trusted original Bentley-McIlroy sort
+      // which safely scales to infinity using the text buffer directly!
+      TermSort(base, a, n); 
+    }
 }
 

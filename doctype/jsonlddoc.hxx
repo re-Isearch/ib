@@ -73,7 +73,7 @@ protected:
   // Called by ParseFields before the main field walk.
   // Parses an inline @context object or string and populates
   // m_ContextTerms / m_ContextValues for this document.
-  void ParseContext(const char *json, size_t& pos);
+  void ParseContext(const char *json, size_t recLen, size_t& pos);
 
   // Resolve a single context value (IRI or prefix:local) to a field name.
   STRING ResolveIRI(const STRING& iri) const;
@@ -81,9 +81,8 @@ protected:
   // Override ParseObject to handle @value unwrapping, @id, @type, @graph.
   // Declared protected so JSONLDDOC can call JSONDOC's version via
   // the explicit base-class call when needed.
-  void ParseObject(const char *json, size_t& pos,
-                   const STRING& prefix, int depth,
-                   PRECORD record, GPTYPE base);
+  void ParseObject(const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base);
 
 private:
   // Per-document term map populated from inline @context.
@@ -100,7 +99,7 @@ private:
 
   // Detect whether an object is a JSON-LD value object
   // { "@value": ..., "@language": ... } or { "@value": ..., "@type": ... }
-  bool IsValueObject(const char *json, size_t pos) const;
+  bool IsValueObject(const char *json, size_t recLen, size_t pos) const;
 
   // Load a cached remote context file; returns false if not available.
   bool LoadContextFromCache(const STRING& url);

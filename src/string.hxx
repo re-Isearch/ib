@@ -193,6 +193,7 @@ public:
   friend size_t Strlen(const STRING& Str) { return Str.Len(); } 
    /// How much space
   size_t Capacity () const  { return GetStringData()->nAllocLength; }
+  bool   reserve(size_t newCapacity);
     /// string contains any characters?
   int RefCount() const { return GetStringData()->nRefs; }
   bool IsEmpty() const { return GetStringData()->nDataLength == 0;  }

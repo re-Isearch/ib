@@ -1252,6 +1252,14 @@ STRING INDEX::getFileName(const STRING& FieldName, FIELDTYPE FieldType)
 
 FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 {
+  auto key = std::make_pair(FieldName.toStdString(), FieldType);
+  // Check if we already have an open handle cached for this specific field combo
+  auto it = ActiveFieldStreams.find(key);
+  if (it != ActiveFieldStreams.end())
+    {
+      return it->second;
+    }
+
   FILE         *fp = NULL;
   STRING       FileName = getFileName(FieldName, FieldType);
 
@@ -1313,6 +1321,13 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	case FIELDTYPE::text:
           fp = fopen(FileName, "ab");
       }
+
+
+  // Cache the open pointer before returning it
+  if (fp != NULL)
+    {
+      ActiveFieldStreams[key] = fp;
+    }
   return fp;
 }
 
@@ -1775,7 +1790,8 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
               type = FIELDTYPE::unknown;
             }
         } // for()
-      fclose(fp);
+//      fclose(fp); // <-- Becasue of the new cache.. 
+	fflush(fp); // Flush instead
       if (items)
         message_log (LOG_DEBUG, "Appended %d item(s) of type '%s' for field '%s'",
               items, FieldType.c_str(), FieldName.c_str() );
@@ -2684,6 +2700,8 @@ memory_allocation: // This is where we try to get memory
             message_log (LOG_ERRNO, "Could not remove '%s' (old Sis)", SisFileName.c_str());
         }
     }
+
+  FlushActiveFieldStreams();
 
   ActiveIndexing = false;
   return Error? false : true;
@@ -7252,8 +7270,35 @@ INDEX::~INDEX ()
     embeddingIndexer = NULL;
   }
 #endif
+
+  CloseActiveFieldStreams();
+
   message_log (LOG_DEBUG, "Disposed of INDEX instance of '%s'", IndexFileName.c_str());
 }
+
+
+void INDEX::CloseActiveFieldStreams()
+{
+  for (auto const& [key, fp] : ActiveFieldStreams)
+    {
+      if (fp != NULL)
+        {
+          fflush(fp);
+          fclose(fp);
+        }
+    }
+  ActiveFieldStreams.clear();
+}
+
+void INDEX::FlushActiveFieldStreams()
+{ 
+  for (auto const& [key, fp] : ActiveFieldStreams)
+    { 
+      if (fp != NULL) fflush(fp); 
+    }
+}
+
+
 
 //////////////////////////////////////////////////////////////////////////////
 

@@ -49,6 +49,8 @@ public:
   bool    Equals(const FIELDTYPE Other) const {return Type == Other.Type; }
   bool    Equals(const BYTE Other) const      {return (BYTE)Type == Other;      }
 
+  bool operator<(const FIELDTYPE& other) const { return Type < (INT)other.Type; }
+
   bool    IsBoolean() const  { return (Type == numerical) || (Type == boolean); }
 
   bool    IsText() const     { return Type <= text || Type == isbn;      }

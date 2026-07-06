@@ -35,7 +35,7 @@ Notes:
 #include "colondoc.hxx"
 
 #ifndef JSON_PATH_SEP
-# define JSON_PATH_SEP '|'
+# define JSON_PATH_SEP '.'
 #endif
 
 #ifndef JSON_MAX_DEPTH
@@ -72,8 +72,7 @@ protected:
   // Parses an already-loaded buffer (shared by ParseFields and by
   // subclasses, like CIRRUSNDJSON, that need to peek at the buffer
   // before deciding whether to parse it).
-  void ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& FileName);
-  void ParseBufferBounded(char *buf, size_t recLen, PRECORD record, GPTYPE base, const STRING& FileName);
+  void ParseBuffer(const char *buf, size_t recLen, PRECORD record, GPTYPE base, const STRING& FileName);
 
 
   // ---------------------------------------------------------------
@@ -90,26 +89,23 @@ protected:
   //            FC.end   = base + pos_after_value_content - 1
   // ---------------------------------------------------------------
 
-  virtual void ParseValue (const char *json, size_t& pos,
-                   const STRING& prefix, int depth,
-                   PRECORD record, GPTYPE base);
+  virtual void ParseValue (const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base);
 
-  virtual void ParseObject(const char *json, size_t& pos,
-                   const STRING& prefix, int depth,
-                   PRECORD record, GPTYPE base);
+  virtual void ParseObject(const char *json, size_t recLen,
+	 size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base);
 
-  virtual void ParseArray (const char *json, size_t& pos,
-                   const STRING& prefix, int depth,
-                   PRECORD record, GPTYPE base);
+  virtual void ParseArray (const char *json, size_t recLen,
+	 size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base);
 
   // Skip a quoted string; returns buffer-relative indices of the
   // content bytes INSIDE the quotes (the range we want the FC to cover).
-  void SkipString   (const char *json, size_t& pos,
-                     size_t& contentStart, size_t& contentEnd);
+  void SkipString   (const char *json, size_t recLen,
+	 size_t& pos, size_t& contentStart, size_t& contentEnd);
 
   // Skip a primitive (number/bool/null); returns its buffer-relative range.
-  void SkipPrimitive(const char *json, size_t& pos,
-                     size_t& valueStart,   size_t& valueEnd);
+  void SkipPrimitive(const char *json, size_t recLen,
+	size_t& pos, size_t& valueStart,   size_t& valueEnd);
 
   void SkipWhitespace(const char *json, size_t& pos) const;
   void SkipWhitespace(const char *json, size_t& pos, size_t len) const;
@@ -124,6 +120,7 @@ protected:
                 GPTYPE start, GPTYPE end,
                 const STRING& contents);
 
+  STRING m_ScratchPath; // Holds onto internal capacity between records
   char m_PathSep;
   bool m_IndexArrayElements;
   bool m_AutoFieldTypes;

@@ -30,6 +30,8 @@ Description:	Class INDEX
 #include "EmbeddingIndexer.hxx"
 #endif
 
+#include <map>
+
 class FPT;
 class Dictionary;
 
@@ -239,6 +241,8 @@ public:
   void SortNumericFieldData();
 
   bool KillAll ();
+  void CloseActiveFieldStreams();
+  void FlushActiveFieldStreams();
 
   long Dump(INT Skip, ostream& os = cout, bool OnlyErrors=false);
   void Dump(ostream& os = cout);
@@ -417,6 +421,8 @@ private:
   CHARSET     Charset;
   HASH*       TermAliases;
   STRLIST    *CommonWords;
+
+  std::map<std::pair<const std::string, FIELDTYPE>, FILE*> ActiveFieldStreams;
 
   volatile GPTYPE IndexingTotalBytesCount;
   volatile GPTYPE IndexingTotalWordsCount;

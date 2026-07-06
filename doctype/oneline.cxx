@@ -30,6 +30,57 @@ const char *ONELINE::Description(PSTRLIST List) const
 void ONELINE::ParseRecords(const RECORD& FileRecord)
 {
   STRING Fn (FileRecord.GetFullFileName () );
+#if 1
+  const unsigned char* file_data = m_FileSession.GetMemoryBase(Fn, MapSequential); 
+  size_t file_size               = m_FileSession.Size();
+
+  if (!file_data || file_size == 0)
+    return; // Safety check for empty or unmapped sessions
+
+  RECORD Record (FileRecord);
+
+  off_t GlobalStart = FileRecord.GetRecordStart();
+  off_t GlobalEnd   = FileRecord.GetRecordEnd();
+
+  const unsigned char* current     = file_data + GlobalStart;
+  const unsigned char* global_end  = file_data + GlobalEnd;
+
+  size_t record_start = GlobalStart;
+
+  while (current < global_end) {
+    size_t remaining_bytes = global_end - current;
+
+    // SIMD scan for the next newline block
+    const unsigned char* next_nl = static_cast<const unsigned char*>(
+        std::memchr(current, '\n', remaining_bytes)
+    );
+
+    const unsigned char* line_end = next_nl ? next_nl : global_end;
+    
+    // The next record boundary MUST encompass everything up to the next processing segment
+    size_t record_end = line_end - file_data;
+
+    // If there is a newline character, advance record_end to consume it, 
+    // keeping the file records perfectly seamless (no gaps).
+    if (next_nl) {
+        record_end; // Points right at the '\n' index
+    }
+
+    // Maintain original length filter criteria
+    if (record_end > record_start + 2) {
+        Record.SetRecordStart(record_start);
+        Record.SetRecordEnd(record_end); 
+        Db->DocTypeAddRecord(Record);
+    }
+
+    if (next_nl) {
+        current = next_nl + 1;
+        record_start = current - file_data; // Next record starts exactly here
+    } else {
+        break; 
+    }
+  }
+#else
   PFILE Fp = DOCTYPE::ffopen (Fn, "rb");
   if (!Fp)
     {
@@ -67,6 +118,7 @@ void ONELINE::ParseRecords(const RECORD& FileRecord)
       if (ci=='\n') ci=0;// save an EOF, but hide a newline so it will loop again
     }
   DOCTYPE::ffclose(Fp);
+#endif
 }
 
 ONELINE::~ONELINE() {

@@ -147,6 +147,7 @@ UCHR *MMAP::map(int fd, int permit, off_t from, off_t to, enum mapping_access fl
 
    // Hardware-sympathetic pre-faulting for sequential single-file tracks
     if (flag == MapSequential) {
+      ::madvise(addr, len, MADV_SEQUENTIAL);
       ::madvise(addr, len, MADV_WILLNEED);
     } else {
       int advice = (flag == MapRandom) ? MADV_RANDOM : MADV_NORMAL;

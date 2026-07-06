@@ -60,24 +60,21 @@ public:
 
 protected:
   // Override ParseObject to detect and unwrap { "$type": value } objects.
-  void ParseObject(const char *json, size_t& pos,
-                   const STRING& prefix, int depth,
-                   PRECORD record, GPTYPE base);
+  void ParseObject(const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base);
 
 private:
   // Lookahead: is the object at pos a { "$<type>": <value> } wrapper?
   // If yes, sets ft to the resolved FIELDTYPE and returns true.
   // If skip=true on return, the type is known but non-indexable.
   // Returns false if the '$' key is not recognised as any FIELDTYPE.
-  bool IsEJsonWrapper(const char *json, size_t pos,
-                      FIELDTYPE& ft, bool& skip) const;
+  bool IsEJsonWrapper(const char *json, size_t recLen,
+	 size_t pos, FIELDTYPE& ft, bool& skip) const;
 
   // Parse and index the value inside the wrapper.
   // pos is on opening '{'; advances past closing '}'.
-  void HandleEJsonWrapper(const char *json, size_t& pos,
-                          const STRING& fieldname,
-                          const FIELDTYPE& ft,
-                          PRECORD record, GPTYPE base);
+  void HandleEJsonWrapper(const char *json, size_t recLen,
+	size_t& pos, const STRING& fieldname, const FIELDTYPE& ft, PRECORD record, GPTYPE base);
 
   // Force an explicit FIELDTYPE for fieldname in the DFDT.
   void ForceFieldType(const STRING& fieldname, const FIELDTYPE& ft);

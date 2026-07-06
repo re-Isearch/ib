@@ -212,6 +212,18 @@ STRING::STRING(char ch, size_t nLength)
   }
 }
 
+bool STRING::reserve(size_t newCapacity)
+{
+  STRINGData* pData = GetStringData();
+
+  if (newCapacity < pData->nAllocLength) return true;
+  if (AllocBuffer( newCapacity ) == NULL)
+      return false;
+  memcpy(m_pchData, pData->data(), pData->nDataLength*sizeof(char));
+  return true;
+}
+
+
 STRING::STRING(unsigned char ch, size_t nLength)
 {
   Init();
@@ -2247,35 +2259,51 @@ bool STRING::IsHexadecimal(size_t length) const
 }
 #endif
 
+
 bool STRING::IsNumber() const
-{
-  size_t               dots   = 0;
-  size_t               digits = 0;
-  const unsigned char *s = (const unsigned char*) *this;
-  int                  hex  = 0;
+{   
+  size_t               dots      = 0;
+  size_t               exponents = 0;
+  size_t               digits    = 0;
+  const unsigned char *s         = (const unsigned char*) this->c_str();
+  int                  hex       = 0;
 
   while (isspace(*s)) s++;
 
   if (*s == '0' && (s[1] == 'x' || s[1] == 'X'))
     hex = 1;
   else if (*s == '-' || *s == '+')
-    s++; // signed number
+    s++; 
 
-
-  for (; *s; s++)
+  for (; *s && exponents < 2 && dots < 2; s++)
     {
-      if(hex ? !_ib_isxdigit(*s) : !_ib_isdigit(*s))
-	{
-	  if (*s == ':' || *s == '/') return false;
-	  if (*s == '.')
-	    dots++;
-	  else if (!isspace(*s) || s[1]) // Don't be tricked by trailing space!
-	    return(false);
-	}
+      if (hex ? !_ib_isxdigit(*s) : !_ib_isdigit(*s))
+        {
+          if (!hex && (*s == 'e' || *s == 'E')) {
+            exponents++;
+            
+            // Check if there's anything after the 'e' before advancing
+            if (*(s+1) == '-' || *(s+1) == '+') {
+              // Ensure a digit actually follows the sign, otherwise it's malformed
+              if (!_ib_isdigit(*(s+2))) return false;
+              s++; // Safe to consume the sign character here
+            } else if (!_ib_isdigit(*(s+1))) {
+              // Naked exponent without a following digit (e.g., "123e")
+              return false;
+            }
+          }
+          else if (*s == '.') {
+            dots++;
+          }
+          else if (!isspace(*s) || s[1]) {
+            return false;
+          }
+        }
        else digits++;
     }
-
-  return (dots < 2 && digits);
+  // To protect IsDotNumber pipelines, we reject strings that look like IPs (dots > 0)
+  // if this is intended strictly for primitive value validation.
+  return (dots < 2 && digits > 0 && exponents < 2);
 }
 
 bool STRING::IsNumberRange() const

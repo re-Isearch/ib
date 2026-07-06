@@ -1,3 +1,6 @@
+// TODO: Clean up NOT to look for '\0' but look for recLen
+
+
 /*-@@@
 File:           ejsondoc.cxx
 Version:        1.01
@@ -146,8 +149,7 @@ void EJSONDOC::SourceMIMEContent(PSTRING StringPtr) const
 //   4. Unknown '$' key     — return false (treat as normal nested object)
 // ---------------------------------------------------------------------------
 
-bool EJSONDOC::IsEJsonWrapper(const char *json, size_t pos,
-                               FIELDTYPE& ft, bool& skip) const
+bool EJSONDOC::IsEJsonWrapper(const char *json, size_t recLen, size_t pos, FIELDTYPE& ft, bool& skip) const
 {
   skip = false;
   ft   = FIELDTYPE();   // undefined
@@ -247,25 +249,23 @@ void EJSONDOC::ForceFieldType(const STRING& fieldname, const FIELDTYPE& ft)
 //   primitive value:        $numberInt, $bool true/false, …
 // ---------------------------------------------------------------------------
 
-void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
-                                   const STRING& fieldname,
-                                   const FIELDTYPE& ft,
-                                   PRECORD record, GPTYPE base)
+void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
+	size_t& pos, const STRING& fieldname, const FIELDTYPE& ft, PRECORD record, GPTYPE base)
 {
   ++pos; // consume '{'
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
 
   // Skip the $key — type already resolved
   if (json[pos] == '"')
     {
       size_t kStart, kEnd;
-      SkipString(json, pos, kStart, kEnd);
+      SkipString(json, recLen, pos, kStart, kEnd);
       (void)kStart; (void)kEnd;
     }
 
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
   if (json[pos] == ':') ++pos;
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
 
   if (ft == FIELDTYPE::time && json[pos] == '{')
     {
@@ -275,7 +275,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
       STRING tContents;
       while (true)
         {
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
           if (json[pos] != '"')
             {
@@ -284,20 +284,20 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
               continue;
             }
           size_t kStart, kEnd;
-          SkipString(json, pos, kStart, kEnd);
+          SkipString(json, recLen, pos, kStart, kEnd);
           STRING key;
           for (size_t i = kStart; i <= kEnd; ++i) key += json[i];
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ':') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (key == "t")
             {
-              SkipPrimitive(json, pos, tStart, tEnd);
+              SkipPrimitive(json, recLen, pos, tStart, tEnd);
               for (size_t i = tStart; i <= tEnd; ++i) tContents += json[i];
             }
           else
             { while (json[pos] && json[pos]!=',' && json[pos]!='}') ++pos; }
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
         }
       if (tStart != (size_t)-1 && !fieldname.IsEmpty())
@@ -313,26 +313,26 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
       // Nested object value — e.g. EJSON v1 $date: { "$numberLong": "<ms>" }
       // Extract the inner string or primitive.
       ++pos; // consume inner '{'
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       // skip inner key
       if (json[pos] == '"')
         {
           size_t kStart, kEnd;
-          SkipString(json, pos, kStart, kEnd);
-          SkipWhitespace(json, pos);
+          SkipString(json, recLen, pos, kStart, kEnd);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ':') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
         }
       size_t vStart = (size_t)-1, vEnd = 0;
       STRING contents;
       if (json[pos] == '"')
         {
-          SkipString(json, pos, vStart, vEnd);
+          SkipString(json, recLen, pos, vStart, vEnd);
           for (size_t i = vStart; i <= vEnd; ++i) contents += json[i];
         }
       else
         {
-          SkipPrimitive(json, pos, vStart, vEnd);
+          SkipPrimitive(json, recLen, pos, vStart, vEnd);
           for (size_t i = vStart; i <= vEnd; ++i) contents += json[i];
         }
       // skip to and consume inner '}'
@@ -351,7 +351,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
     {
       // String value: ISO date, OID hex, regex pattern, code, symbol, …
       size_t vStart, vEnd;
-      SkipString(json, pos, vStart, vEnd);
+      SkipString(json, recLen, pos, vStart, vEnd);
       if (vEnd >= vStart && !fieldname.IsEmpty())
         {
           STRING contents;
@@ -366,7 +366,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
     {
       // Primitive: $numberInt, $numberLong, $numberDouble, $bool true/false
       size_t vStart, vEnd;
-      SkipPrimitive(json, pos, vStart, vEnd);
+      SkipPrimitive(json, recLen, pos, vStart, vEnd);
       if (vEnd >= vStart && !fieldname.IsEmpty())
         {
           STRING contents;
@@ -379,7 +379,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
     }
 
   // Consume the closing '}' of the wrapper object
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
   if (json[pos] == '}') ++pos;
 }
 
@@ -391,9 +391,8 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t& pos,
 // Otherwise fall through to the inherited ParseValue.
 // ---------------------------------------------------------------------------
 
-void EJSONDOC::ParseObject(const char *json, size_t& pos,
-                            const STRING& prefix, int depth,
-                            PRECORD record, GPTYPE base)
+void EJSONDOC::ParseObject(const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base)
 {
   if (depth > JSON_MAX_DEPTH)
     {
@@ -408,7 +407,7 @@ void EJSONDOC::ParseObject(const char *json, size_t& pos,
 
   while (true)
     {
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
       if (json[pos] != '"')
         {
@@ -419,7 +418,7 @@ void EJSONDOC::ParseObject(const char *json, size_t& pos,
 
       // Read key
       size_t kStart, kEnd;
-      SkipString(json, pos, kStart, kEnd);
+      SkipString(json, recLen, pos, kStart, kEnd);
       STRING key;
       for (size_t i = kStart; i <= kEnd; ++i) key += json[i];
 
@@ -430,16 +429,16 @@ void EJSONDOC::ParseObject(const char *json, size_t& pos,
       else
         fullKey = key;
 
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ':') ++pos;
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
 
       // Check if value is a { "$type": ... } wrapper
       if (json[pos] == '{')
         {
           FIELDTYPE ft;
           bool skip = false;
-          if (IsEJsonWrapper(json, pos, ft, skip))
+          if (IsEJsonWrapper(json, recLen, pos, ft, skip))
             {
               if (skip)
                 {
@@ -454,11 +453,9 @@ void EJSONDOC::ParseObject(const char *json, size_t& pos,
                 }
               else
                 {
-                  HandleEJsonWrapper(json, pos,
-                                     SanitiseFieldName(fullKey),
-                                     ft, record, base);
+                  HandleEJsonWrapper(json, recLen, pos, SanitiseFieldName(fullKey), ft, record, base);
                 }
-              SkipWhitespace(json, pos);
+              SkipWhitespace(json, pos, recLen);
               if (json[pos] == ',') ++pos;
               continue;
             }
@@ -466,9 +463,9 @@ void EJSONDOC::ParseObject(const char *json, size_t& pos,
         }
 
       // Normal value — parse via inherited ParseValue
-      ParseValue(json, pos, fullKey, depth + 1, record, base);
+      ParseValue(json, recLen, pos, fullKey, depth + 1, record, base);
 
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ',') ++pos;
     }
 }

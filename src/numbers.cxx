@@ -40,8 +40,24 @@ NUMERICOBJ::NUMERICOBJ(const STRING& s)
 	} 
       val = x;
     }
-  else
-    val = BAD_NUMBER;
+  else // Handle Floating Point & Scientific Notation
+    {
+      const char* start = s.c_str();
+      char* endPtr = nullptr;
+      
+      // std::strtod natively parses "6.053984e-5" out of the box
+      double parsedVal = std::strtod(start, &endPtr);
+      
+      // If endPtr advanced to the end of the string, it's a valid floating-point match!
+      if (endPtr != start && *endPtr == '\0')
+        {
+          val = (NUMBER)parsedVal;
+        }
+      else
+        {
+          val = BAD_NUMBER;
+        }
+    }
 }
 
 bool NUMERICOBJ::Ok() const

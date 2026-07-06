@@ -193,7 +193,7 @@ Limited to \"pure JSON\" (RFC 8259). Nested keys are joined with path-separator.
 Indexing options (defined in .ini):\n\
   [General]\n\
   AutodetectFieldtypes=True|False // Guess fieldtypes\n\
-  IndexArrayElements=True|False\n  PathSep=Character (default '|')";
+  IndexArrayElements=True|False\n  PathSep=Character (default '.')";
 }
 
 void JSONDOC::SourceMIMEContent(PSTRING StringPtr) const
@@ -446,133 +446,79 @@ void JSONDOC::ParseRecords(const RECORD& FileRecord)
     }
 }
 
-
-#if 0
-// ---------------------------------------------------------------------------
-// ParseFields
-// ---------------------------------------------------------------------------
-
-void JSONDOC::ParseFields(PRECORD NewRecord)
-{
-  if (!NewRecord)
-    return;
-
-  STRING FileName;
-  NewRecord->GetFullFileName(&FileName);
-
-  // base = absolute file offset of the first byte of this record.
-  // All FC values are base + buffer-relative-offset, so they point
-  // correctly into the original file regardless of multi-record layout.
-  GPTYPE base = NewRecord->GetRecordStart();
-  GPTYPE recEnd = NewRecord->GetRecordEnd();
-  size_t recLen = (size_t)(recEnd - base + 1);
-
-  PFILE fp = Db->ffopen(FileName, "rb");
-  if (!fp) {
-    message_log(LOG_ERROR, "JSONDOC::ParseFields: cannot open '%s'",
-                (const char*)FileName);
-    return;
-  }
-
-  if (fseek(fp, (long)base, SEEK_SET) != 0) {
-    message_log(LOG_ERROR, "JSONDOC::ParseFields: fseek to %ld failed in '%s'",
-                (long)base, (const char*)FileName);
-    Db->ffclose(fp);
-    return;
-  }
-  char *buf = new char[recLen + 1];
-  size_t nRead = fread(buf, 1, recLen, fp);
-  Db->ffclose(fp);
-  buf[nRead] = '\0';
-
-  size_t pos = 0;
-  SkipWhitespace(buf, pos);
-
-  if (buf[pos] == '{') {
-    STRING emptyPrefix;
-    ParseObject(buf, pos, emptyPrefix, 0, NewRecord, base);
-  } else if (buf[pos] == '[') {
-    STRING rootKey("_root_");
-    ParseArray(buf, pos, rootKey, 0, NewRecord, base);
-  } else {
-    message_log(LOG_WARN,
-                "JSONDOC: '%s' offset %ld does not start with '{' or '[', "
-                "falling back to COLONDOC parser",
-                FileName.c_str(), (long)base);
-    delete[] buf;
-    COLONDOC::ParseFields(NewRecord);
-    return;
-  }
-
-  delete[] buf;
-}
-#endif
-
 // ---------------------------------------------------------------------------
 // ParseObject  { "key" : value , … }
 // ---------------------------------------------------------------------------
 
-void JSONDOC::ParseObject(const char *json, size_t& pos,
-                          const STRING& prefix, int depth,
-                          PRECORD record, GPTYPE base)
+void JSONDOC::ParseObject(const char *json, size_t recLen,
+        size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base)
 {
   if (depth > JSON_MAX_DEPTH) {
     message_log(LOG_WARN, "JSONDOC: max nesting depth exceeded – skipping subtree");
     int brace = 1;
     ++pos; // skip opening '{'
-    while (json[pos] && brace > 0) {
-      // NOTE: a robust implementation would respect strings here;
-      // for typical document content this is sufficient.
-      if      (json[pos] == '{') ++brace;
-      else if (json[pos] == '}') --brace;
-      ++pos;
+    while (pos < recLen && brace > 0) {
+      if      (json[pos] == '{') ++brace; 
+      else if (json[pos] == '}') --brace; 
+      ++pos;    
     }
     return;
   }
 
   ++pos; // consume '{'
 
-  while (true) {
-    SkipWhitespace(json, pos);
 
-    if (!json[pos] || json[pos] == '}') {
-      if (json[pos] == '}') ++pos;
+  const STRING localPrefix = prefix;
+  while (true) {
+    SkipWhitespace(json, pos, recLen);
+
+    if (pos >= recLen) break;
+
+    // --- FIX 2: Consume the closing brace cleanly before breaking ---
+    if (json[pos] == '}') {
+      ++pos; 
       break;
     }
 
     if (json[pos] != '"') {
       // malformed – skip to next separator
-      while (json[pos] && json[pos] != ',' && json[pos] != '}')
+      while (pos < recLen && json[pos] && json[pos] != ',' && json[pos] != '}')
         ++pos;
-      if (json[pos] == ',') ++pos;
+      if (pos < recLen && json[pos] == ',') ++pos;
       continue;
     }
 
-    // Parse key – we need the content but not its FC
+    // Parse key
     size_t kStart, kEnd;
-    SkipString(json, pos, kStart, kEnd);
-    STRING key;
-    for (size_t i = kStart; i <= kEnd; ++i)
-      key += json[i];
+    SkipString(json, recLen, pos, kStart, kEnd);
+    
+    // --- FIX 1: Verify your pointer layout logic here ---
+    // If SkipString returns kEnd pointing past the string, use (kEnd - kStart)
+    const int keyLen = (kEnd - kStart) + 1; 
+    const char* keyPtr = &json[kStart];
 
-    // Build full dotted/piped path
-    STRING fullKey;
+
+    STRING fullpath;
+    // Build full path
     if (prefix.GetLength() > 0) {
-      fullKey  = prefix;
-      fullKey += m_PathSep;
-      fullKey += key;
-    } else {
-      fullKey = key;
+      fullpath  = prefix;
+      fullpath  += m_PathSep;
     }
+    fullpath.append(keyPtr, keyLen);
 
-    SkipWhitespace(json, pos);
-    if (json[pos] == ':') ++pos;
-    SkipWhitespace(json, pos);
+    SkipWhitespace(json, pos, recLen);
+    if (pos < recLen && json[pos] == ':') ++pos;
+    SkipWhitespace(json, pos, recLen);
 
-    ParseValue(json, pos, fullKey, depth + 1, record, base);
+    // Parse internal value element
+    ParseValue(json, recLen, pos, fullpath, depth + 1, record, base);
 
-    SkipWhitespace(json, pos);
-    if (json[pos] == ',') ++pos;
+    SkipWhitespace(json, pos, recLen);
+    
+    // Handle list separator
+    if (pos < recLen && json[pos] == ',') {
+      ++pos;
+    }
   }
 }
 
@@ -580,7 +526,49 @@ void JSONDOC::ParseObject(const char *json, size_t& pos,
 // ParseArray  [ value , … ]
 // ---------------------------------------------------------------------------
 
-void JSONDOC::ParseArray(const char *json, size_t& pos,
+#if 1
+
+
+void JSONDOC::ParseArray(const char *json, size_t recLen, size_t& pos,
+                         const STRING& prefix, int depth,
+                         PRECORD record, GPTYPE base)
+{
+  ++pos; // consume '['
+
+  int index = 0;
+
+  while (true) {
+    SkipWhitespace(json, pos, recLen);
+    if (pos >= recLen) break; 
+
+    // --- CLEAN ROUTINE ---
+    if (json[pos] == ']') {
+      ++pos; // Consume ']' cleanly
+      break; 
+    }
+  
+    if (m_IndexArrayElements) {
+      char indexBuf[32];
+      snprintf(indexBuf, sizeof(indexBuf), "%d", index);
+      STRING elemKey = prefix;
+      elemKey += m_PathSep;
+      elemKey += indexBuf;
+      ParseValue(json, recLen, pos, elemKey, depth + 1, record, base);
+    } else {
+      // All elements indexed under the parent key
+      ParseValue(json, recLen, pos, prefix, depth + 1, record, base);
+    }
+
+    ++index;
+    SkipWhitespace(json, pos, recLen);
+    if (pos < recLen && json[pos] == ',') ++pos;
+  }
+}
+
+
+#else
+
+void JSONDOC::ParseArray(const char *json, size_t recLen, size_t& pos,
                          const STRING& prefix, int depth,
                          PRECORD record, GPTYPE base)
 {
@@ -588,8 +576,9 @@ void JSONDOC::ParseArray(const char *json, size_t& pos,
   int index = 0;
 
   while (true) {
-    SkipWhitespace(json, pos);
-    if (!json[pos] || json[pos] == ']') {
+    SkipWhitespace(json, pos, recLen);
+    if (pos >= recLen) break;
+    if (json[pos] == ']') {
       if (json[pos] == ']') ++pos;
       break;
     }
@@ -600,41 +589,41 @@ void JSONDOC::ParseArray(const char *json, size_t& pos,
       STRING elemKey = prefix;
       elemKey += m_PathSep;
       elemKey += indexBuf;
-      ParseValue(json, pos, elemKey, depth + 1, record, base);
+      ParseValue(json, recLen, pos, elemKey, depth + 1, record, base);
     } else {
       // All elements indexed under the parent key
-      ParseValue(json, pos, prefix, depth + 1, record, base);
+      ParseValue(json, recLen, pos, prefix, depth + 1, record, base);
     }
 
     ++index;
-    SkipWhitespace(json, pos);
+    SkipWhitespace(json, pos, recLen);
     if (json[pos] == ',') ++pos;
   }
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // ParseValue  – dispatch on first character
 // ---------------------------------------------------------------------------
 
-void JSONDOC::ParseValue(const char *json, size_t& pos,
-                         const STRING& prefix, int depth,
-                         PRECORD record, GPTYPE base)
+void JSONDOC::ParseValue(const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base)
 {
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
   char c = json[pos];
 
   if (c == '{') {
     // Nested object: recurse; no FC for the container itself, only leaves
-    ParseObject(json, pos, prefix, depth, record, base);
+    ParseObject(json, recLen, pos, prefix, depth, record, base);
 
   } else if (c == '[') {
-    ParseArray(json, pos, prefix, depth, record, base);
+    ParseArray(json, recLen, pos, prefix, depth, record, base);
 
   } else if (c == '"') {
     // FC covers the content bytes INSIDE the quotes, mirroring
     // how COLONDOC points at the text after the colon/whitespace.
     size_t contentStart, contentEnd;
-    SkipString(json, pos, contentStart, contentEnd);
+    SkipString(json, recLen, pos, contentStart, contentEnd);
     if (contentEnd >= contentStart) {
       STRING contents;
       for (size_t i = contentStart; i <= contentEnd; ++i)
@@ -649,7 +638,7 @@ void JSONDOC::ParseValue(const char *json, size_t& pos,
   } else {
     // Number / bool / null
     size_t valStart, valEnd;
-    SkipPrimitive(json, pos, valStart, valEnd);
+    SkipPrimitive(json, recLen, pos, valStart, valEnd);
     if (valEnd >= valStart) {
       // Skip null – don't index the word "null" as a field value
       size_t len = valEnd - valStart + 1;
@@ -680,13 +669,13 @@ void JSONDOC::ParseValue(const char *json, size_t& pos,
 // For an empty string, contentEnd < contentStart.
 // ---------------------------------------------------------------------------
 
-void JSONDOC::SkipString(const char *json, size_t& pos,
-                         size_t& contentStart, size_t& contentEnd)
+void JSONDOC::SkipString(const char *json, size_t recLen,
+	size_t& pos, size_t& contentStart, size_t& contentEnd)
 {
   ++pos; // skip opening '"'
   contentStart = pos;
 
-  while (json[pos] && json[pos] != '"') {
+  while (pos < recLen && json[pos] != '"') {
     if (json[pos] == '\\') {
       ++pos; // skip escape prefix
       if (json[pos] == 'u') pos += 4; // skip 4 hex digits of \uXXXX
@@ -703,11 +692,11 @@ void JSONDOC::SkipString(const char *json, size_t& pos,
 // SkipPrimitive  (number / bool / null)
 // ---------------------------------------------------------------------------
 
-void JSONDOC::SkipPrimitive(const char *json, size_t& pos,
-                             size_t& valueStart, size_t& valueEnd)
+void JSONDOC::SkipPrimitive(const char *json, size_t recLen,
+	size_t& pos, size_t& valueStart, size_t& valueEnd)
 {
   valueStart = pos;
-  while (json[pos] &&
+  while (pos < recLen &&
          json[pos] != ',' && json[pos] != '}' &&
          json[pos] != ']' && !isspace((unsigned char)json[pos])) {
     ++pos;
@@ -984,7 +973,6 @@ bool CIRRUSNDJSON::IsBulkActionLine(const char *buf, size_t len) const
 
 void CIRRUSNDJSON::ParseFields(RECORD* Record)
 {
-#if 1
   if (!Record) return;
 
   STRING FileName;
@@ -1007,50 +995,7 @@ void CIRRUSNDJSON::ParseFields(RECORD* Record)
   if (IsBulkActionLine(RecBuffer, recLen)) {
     return; 
   }
-
-  // Ensure null-termination using your high-performance loop buffer
-  PCHR LocalCopy = (PCHR)tmpBuffer.Want(recLen + 1);
-  memcpy(LocalCopy, RecBuffer, recLen);
-  LocalCopy[recLen] = '\0';
-
-  ParseBuffer(LocalCopy, Record, base, FileName);
-#else
-  if (!NewRecord)
-    return;
-
-  STRING FileName;
-  NewRecord->GetFullFileName(&FileName);
-
-  GPTYPE base   = NewRecord->GetRecordStart();
-  GPTYPE recEnd = NewRecord->GetRecordEnd();
-  size_t recLen = (size_t)(recEnd - base + 1);
-
-
-  PFILE fp = Db->ffopen(FileName, "rb");
-  if (!fp) {
-    message_log(LOG_ERROR, "CIRRUSNDJSON::ParseFields: cannot open '%s'",
-                (const char*)FileName);
-    return;
-  }
-  if (fseek(fp, (long)base, SEEK_SET) != 0) {
-    message_log(LOG_ERROR, "CIRRUSNDJSON::ParseFields: fseek to %ld failed in '%s'",
-                (long)base, (const char*)FileName);
-    Db->ffclose(fp);
-    return;
-  }
-  BUFFER tmpBuffer; // Will move this to a call-in.. So this is temp!!
-  char *buf = (char *)tmpBuffer.Want (recLen + 1, sizeof(char));
-
-  size_t nRead = fread(buf, 1, recLen, fp);
-  Db->ffclose(fp);
-  buf[nRead] = '\0';
-
-  if (IsBulkActionLine(buf, nRead)) {
-    return;   // skip — ES bulk action line, not a document
-  }
-
-  ParseBuffer(buf, NewRecord, base, FileName);
-#endif
+  ParseBuffer(RecBuffer, recLen, Record, base, FileName);
 }
 
 
@@ -1084,24 +1029,24 @@ void JSONDOC::ParseFields(PRECORD NewRecord)
   Db->ffclose(fp);
   buf[nRead] = '\0';
 
-  ParseBuffer(buf, NewRecord, base, FileName);
+  ParseBuffer(buf, recLen, NewRecord, base, FileName);
   delete[] buf;
 }
 
 // Factored out so subclasses (e.g. CIRRUSNDJSON) can peek at the
 // loaded buffer before committing to a full parse, without opening
 // and reading the file a second time.
-void JSONDOC::ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& FileName)
+void JSONDOC::ParseBuffer(const char *buf, size_t recLen, PRECORD record, GPTYPE base, const STRING& FileName)
 {
   size_t pos = 0;
-  SkipWhitespace(buf, pos);
-
+  SkipWhitespace(buf, pos, recLen);
+  
   if (buf[pos] == '{') {
     STRING emptyPrefix;
-    ParseObject(buf, pos, emptyPrefix, 0, record, base);
+    ParseObject(buf, recLen, pos, emptyPrefix, 0, record, base);
   } else if (buf[pos] == '[') {
     STRING rootKey("_root_");
-    ParseArray(buf, pos, rootKey, 0, record, base);
+    ParseArray(buf, recLen,  pos, rootKey, 0, record, base);
   } else {
     message_log(LOG_WARN,
                 "JSONDOC: '%s' offset %ld does not start with '{' or '[', "
@@ -1110,6 +1055,7 @@ void JSONDOC::ParseBuffer(char *buf, PRECORD record, GPTYPE base, const STRING& 
     COLONDOC::ParseFields(record);
   }
 }
+
 
 inline STRING _createESKey(const STRING& id, const STRING& index)
 {

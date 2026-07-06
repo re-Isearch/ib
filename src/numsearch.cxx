@@ -8,9 +8,8 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 
 /*@@@
 File:		numsearch.cxx
-Version:	$Revision: 1.2 $
+Version:	$Revision: 1.3 $
 Description:	Class INDEX - numeric search methods
-Author:		Archie Warnock (warnock@clark.net), A/WWW Enterprises
 @@@*/
 
 #include <stdlib.h>

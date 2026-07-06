@@ -1,3 +1,6 @@
+// TODO: Clean up NOT to look for '\0' but look for recLen
+
+
 /*-@@@
 File:           jsonlddoc.cxx
 Version:        1.00
@@ -222,15 +225,15 @@ STRING JSONLDDOC::ResolveIRI(const STRING& iri) const
 // Populates m_ContextTerms/Values and m_PrefixTerms/Values.
 // ---------------------------------------------------------------------------
 
-void JSONLDDOC::ParseContext(const char *json, size_t& pos)
+void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
 {
-  SkipWhitespace(json, pos);
+  SkipWhitespace(json, pos, recLen);
 
   if (json[pos] == '"')
     {
       // URL reference — try to load from cache
       size_t uStart, uEnd;
-      SkipString(json, pos, uStart, uEnd);
+      SkipString(json, recLen, pos, uStart, uEnd);
       if (uEnd >= uStart)
         {
           STRING url;
@@ -248,10 +251,10 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
       ++pos; // consume '['
       while (true)
         {
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (!json[pos] || json[pos] == ']') { if (json[pos]) ++pos; break; }
-          ParseContext(json, pos);   // recurse for each element
-          SkipWhitespace(json, pos);
+          ParseContext(json, recLen, pos);   // recurse for each element
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
         }
     }
@@ -260,7 +263,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
       ++pos; // consume '{'
       while (true)
         {
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
           if (json[pos] != '"')
             {
@@ -271,13 +274,13 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
 
           // Read the term name
           size_t tStart, tEnd;
-          SkipString(json, pos, tStart, tEnd);
+          SkipString(json, recLen, pos, tStart, tEnd);
           STRING term;
           for (size_t i = tStart; i <= tEnd; ++i) term += json[i];
 
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ':') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
 
           if (term == "@base" || term == "@vocab")
             {
@@ -285,7 +288,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
               if (json[pos] == '"')
                 {
                   size_t vStart, vEnd;
-                  SkipString(json, pos, vStart, vEnd);
+                  SkipString(json, recLen, pos, vStart, vEnd);
                   STRING iri;
                   for (size_t i = vStart; i <= vEnd; ++i) iri += json[i];
                   if (term == "@vocab")
@@ -305,7 +308,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
             {
               // Simple term: "name": "http://schema.org/name"
               size_t vStart, vEnd;
-              SkipString(json, pos, vStart, vEnd);
+              SkipString(json, recLen, pos, vStart, vEnd);
               STRING iri;
               for (size_t i = vStart; i <= vEnd; ++i) iri += json[i];
 
@@ -335,7 +338,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
               STRING mappedId;
               while (true)
                 {
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
                   if (json[pos] != '"')
                     {
@@ -344,16 +347,16 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
                       continue;
                     }
                   size_t kStart, kEnd;
-                  SkipString(json, pos, kStart, kEnd);
+                  SkipString(json, recLen, pos, kStart, kEnd);
                   STRING innerKey;
                   for (size_t i = kStart; i <= kEnd; ++i) innerKey += json[i];
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (json[pos] == ':') ++pos;
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (innerKey == "@id" && json[pos] == '"')
                     {
                       size_t vStart, vEnd;
-                      SkipString(json, pos, vStart, vEnd);
+                      SkipString(json, recLen, pos, vStart, vEnd);
                       for (size_t i = vStart; i <= vEnd; ++i) mappedId += json[i];
                     }
                   else
@@ -361,7 +364,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
                       // skip value
                       while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
                     }
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (json[pos] == ',') ++pos;
                 }
               if (mappedId.GetLength() > 0)
@@ -377,7 +380,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t& pos)
               while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
             }
 
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
         }
     }
@@ -425,17 +428,19 @@ bool JSONLDDOC::LoadContextFromCache(const STRING& url)
   fclose(fp);
   buf[nRead] = '\0';
 
+  size_t recLen = nRead;
+
   // The cache file should contain the @context value (the object, not
   // the full document), or a full JSON-LD document with a @context key.
   size_t pos = 0;
-  SkipWhitespace(buf, pos);
+  SkipWhitespace(buf, pos, recLen);
   if (buf[pos] == '{')
     {
       // Full document — scan for @context key
       ++pos;
       while (buf[pos])
         {
-          SkipWhitespace(buf, pos);
+          SkipWhitespace(buf, pos, recLen);
           if (buf[pos] == '}') break;
           if (buf[pos] != '"')
             {
@@ -444,15 +449,15 @@ bool JSONLDDOC::LoadContextFromCache(const STRING& url)
               continue;
             }
           size_t kStart, kEnd;
-          SkipString(buf, pos, kStart, kEnd);
+          SkipString(buf, recLen, pos, kStart, kEnd);
           STRING key;
           for (size_t i = kStart; i <= kEnd; ++i) key += buf[i];
-          SkipWhitespace(buf, pos);
+          SkipWhitespace(buf, pos, recLen);
           if (buf[pos] == ':') ++pos;
-          SkipWhitespace(buf, pos);
+          SkipWhitespace(buf, pos, recLen);
           if (key == "@context")
             {
-              ParseContext(buf, pos);
+              ParseContext(buf, recLen, pos);
               break;
             }
           // skip other keys
@@ -463,7 +468,7 @@ bool JSONLDDOC::LoadContextFromCache(const STRING& url)
   else
     {
       // Bare context object or value
-      ParseContext(buf, pos);
+      ParseContext(buf, recLen, pos);
     }
 
   delete[] buf;
@@ -480,7 +485,7 @@ bool JSONLDDOC::LoadContextFromCache(const STRING& url)
 // Does a lightweight lookahead without advancing pos.
 // ---------------------------------------------------------------------------
 
-bool JSONLDDOC::IsValueObject(const char *json, size_t pos) const
+bool JSONLDDOC::IsValueObject(const char *json, size_t recLen, size_t pos) const
 {
   if (json[pos] != '{') return false;
   ++pos; // skip '{'
@@ -488,7 +493,7 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t pos) const
   int keysChecked = 0;
   while (json[pos] && keysChecked < 4)
     {
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == '}') break;
       if (json[pos] != '"') break;
       size_t kStart = ++pos;
@@ -501,9 +506,9 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t pos) const
           strncmp(json + kStart, "@value", 6) == 0)
         return true;
       // skip the value
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ':') ++pos;
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       // rudimentary skip of the value
       if (json[pos] == '"')
         { ++pos; while (json[pos] && json[pos] != '"') { if (json[pos]=='\\') ++pos; ++pos; } if (json[pos]) ++pos; }
@@ -511,7 +516,7 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t pos) const
         { int d=1; char o=json[pos],c=(o=='{'?'}':']'); ++pos; while (json[pos]&&d>0){if(json[pos]==o)d++;else if(json[pos]==c)d--;++pos;} }
       else
         { while (json[pos] && json[pos]!=',' && json[pos]!='}') ++pos; }
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ',') ++pos;
       ++keysChecked;
     }
@@ -535,9 +540,8 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t pos) const
 //   other @kw → skip (empty mapped name)
 // ---------------------------------------------------------------------------
 
-void JSONLDDOC::ParseObject(const char *json, size_t& pos,
-                            const STRING& prefix, int depth,
-                            PRECORD record, GPTYPE base)
+void JSONLDDOC::ParseObject(const char *json, size_t recLen,
+	size_t& pos, const STRING& prefix, int depth, PRECORD record, GPTYPE base)
 {
   if (depth > JSON_MAX_DEPTH)
     {
@@ -550,7 +554,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
 
   // ---- lookahead: is this a value object { "@value": ... }? ----
   // If so, unwrap it and index the content under the parent key (prefix).
-  if (IsValueObject(json, pos))
+  if (IsValueObject(json, recLen, pos))
     {
       // Scan the object for @value and @language/@type
       ++pos; // consume '{'
@@ -560,7 +564,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
 
       while (true)
         {
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
           if (json[pos] != '"')
             {
@@ -569,24 +573,24 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
               continue;
             }
           size_t kStart, kEnd;
-          SkipString(json, pos, kStart, kEnd);
+          SkipString(json, recLen, pos, kStart, kEnd);
           STRING key;
           for (size_t i = kStart; i <= kEnd; ++i) key += json[i];
 
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ':') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
 
           if (key == "@value" && json[pos] == '"')
             {
-              SkipString(json, pos, valueStart, valueEnd);
+              SkipString(json, recLen, pos, valueStart, valueEnd);
               for (size_t i = valueStart; i <= valueEnd; ++i)
                 valueContents += json[i];
             }
           else if (key == "@language" && json[pos] == '"')
             {
               size_t lStart, lEnd;
-              SkipString(json, pos, lStart, lEnd);
+              SkipString(json, recLen, pos, lStart, lEnd);
               for (size_t i = lStart; i <= lEnd; ++i) language += json[i];
             }
           else
@@ -594,7 +598,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
               // @type or other — skip
               while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
             }
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
         }
 
@@ -628,7 +632,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
 
   while (true)
     {
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
       if (json[pos] != '"')
         {
@@ -639,20 +643,20 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
 
       // Read the key
       size_t kStart, kEnd;
-      SkipString(json, pos, kStart, kEnd);
+      SkipString(json, recLen, pos, kStart, kEnd);
       STRING rawKey;
       for (size_t i = kStart; i <= kEnd; ++i) rawKey += json[i];
 
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ':') ++pos;
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
 
       // ---- JSON-LD special key handling ----
 
       if (rawKey == "@context")
         {
-          ParseContext(json, pos);
-          SkipWhitespace(json, pos);
+          ParseContext(json, recLen, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -663,7 +667,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
           if (json[pos] == '"')
             {
               size_t vStart, vEnd;
-              SkipString(json, pos, vStart, vEnd);
+              SkipString(json, recLen, pos, vStart, vEnd);
               STRING idVal;
               for (size_t i = vStart; i <= vEnd; ++i) idVal += json[i];
               if (idVal.GetLength() > 0)
@@ -679,7 +683,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
             {
               while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
             }
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -692,21 +696,21 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
               ++pos; // consume '['
               while (true)
                 {
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (!json[pos] || json[pos] == ']') { if (json[pos]) ++pos; break; }
                   if (json[pos] == '{')
-                    ParseObject(json, pos, STRING(), depth + 1, record, base);
+                    ParseObject(json, recLen, pos, STRING(), depth + 1, record, base);
                   else
                     while (json[pos] && json[pos] != ',' && json[pos] != ']') ++pos;
-                  SkipWhitespace(json, pos);
+                  SkipWhitespace(json, pos, recLen);
                   if (json[pos] == ',') ++pos;
                 }
             }
           else if (json[pos] == '{')
             {
-              ParseObject(json, pos, STRING(), depth + 1, record, base);
+              ParseObject(json, recLen, pos, STRING(), depth + 1, record, base);
             }
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -715,10 +719,10 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
         {
           // Transparent nesting — recurse with same prefix
           if (json[pos] == '{')
-            ParseObject(json, pos, prefix, depth + 1, record, base);
+            ParseObject(json, recLen, pos, prefix, depth + 1, record, base);
           else
             while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -727,10 +731,10 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
         {
           // Treat as array under the current prefix
           if (json[pos] == '[')
-            ParseArray(json, pos, prefix, depth + 1, record, base);
+            ParseArray(json, recLen, pos, prefix, depth + 1, record, base);
           else
             while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
-          SkipWhitespace(json, pos);
+          SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -743,7 +747,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
             {
               // explicitly skip
               while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
-              SkipWhitespace(json, pos);
+              SkipWhitespace(json, pos, recLen);
               if (json[pos] == ',') ++pos;
               continue;
             }
@@ -763,7 +767,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
           {
             // Skip this field
             while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
-            SkipWhitespace(json, pos);
+            SkipWhitespace(json, pos, recLen);
             if (json[pos] == ',') ++pos;
             continue;
           }
@@ -783,9 +787,9 @@ void JSONLDDOC::ParseObject(const char *json, size_t& pos,
           fullKey = mappedKey;
         }
 
-      ParseValue(json, pos, fullKey, depth + 1, record, base);
+      ParseValue(json, recLen, pos, fullKey, depth + 1, record, base);
 
-      SkipWhitespace(json, pos);
+      SkipWhitespace(json, pos, recLen);
       if (json[pos] == ',') ++pos;
     }
 }

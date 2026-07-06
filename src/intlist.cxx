@@ -924,6 +924,7 @@ FILE *INTERVALLIST::OpenForAppend(const STRING& Fn)
 
   FILE *Fp = fopen(Fn, "rb");
 
+cerr << "INTERVALLIST::OpenForAppend " << Fn << endl;
   if (Fp == NULL)
    {
       message_log (LOG_ERRNO, "INTERVALLIST:: Can't open '%s' for reading.", Fn.c_str());
@@ -934,6 +935,8 @@ FILE *INTERVALLIST::OpenForAppend(const STRING& Fn)
       fclose(Fp);
       return fopen(Fn, "a+b");
     }
+
+cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
 
   _Count_t  Total; // This MUST match the type of Count!!!
   Read(&Total, Fp);

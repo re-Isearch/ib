@@ -23,7 +23,7 @@ Author:		Jim Fullton, Jim.Fullton@cnidr.org
 # define LINEAR_MAX 4
 #endif
 
-#define DEBUG 0
+#define DEBUG 1
 #define NEW_CODE 1
 
 typedef UINT4  _Count_t;
@@ -36,7 +36,6 @@ void NUMERICLIST::Clear()
   FileName.Empty();
   Pointer    = 0;
   StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
 }
 
 void NUMERICLIST::Empty()
@@ -49,7 +48,6 @@ void NUMERICLIST::Empty()
   FileName.Empty();   
   Pointer    = 0;
   StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
 }
 
 
@@ -62,7 +60,6 @@ NUMERICLIST::NUMERICLIST()
   Count      = 0;
   Pointer    = 0;
   StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
 }
 
 
@@ -74,7 +71,6 @@ NUMERICLIST::NUMERICLIST(INT n)
   Count      = 0;
   Pointer    = 0;
   StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
 }
 
 
@@ -229,15 +225,6 @@ SearchState NUMERICLIST::Matcher(NUMBER Key, NUMBER A, NUMBER B, NUMBER C,
       return(TOO_HIGH);
     else
       return(TOO_LOW);
-
-  case ZRelEQ:			// equals
-    if (B == Key)
-      return(MATCH);
-    else if (B > Key)
-      return(TOO_LOW);		// current bucket too high, search lower half
-    else
-      return(TOO_HIGH);		// current bucket too low, search upper half
-
   default:
     message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
     break;
@@ -284,14 +271,6 @@ SearchState NUMERICLIST::Matcher(GPTYPE Key, GPTYPE A, GPTYPE B, GPTYPE C,
       return(TOO_HIGH);
     else
       return(TOO_LOW);
-
-  case ZRelEQ:			// equals
-    if (B == Key)
-      return(MATCH);
-    else if (B > Key)
-      return(TOO_LOW);		// current bucket too high, search lower half
-    else
-      return(TOO_HIGH);		// current bucket too low, search upper half
 
    default:
      message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
@@ -482,102 +461,24 @@ SearchState NUMERICLIST::MemFindGp(GPTYPE Key, ZRelation_t Relation, INT4 *Index
   return Status;
 }
 
-// Read just the header record count of the value-sorted (VAL_BLOCK) table
-// on disk. Used by the disk-search fallback in FindIndexes() below to know
-// where the last element of the value-sorted table lives, without loading
-// the whole table into memory.
-static long NlistDiskValCount(const STRING& Fn)
-{
-  PFILE Fp = fopen(Fn, "rb");
-  if (Fp == NULL)
-    return -1;
-  if (getObjID(Fp) != objNLIST) {
-    fclose(Fp);
-    return -1;
-  }
-  _Count_t Total;
-  Read(&Total, Fp);
-  fclose(Fp);
-  return (long)Total;
-}
-
 SearchState NUMERICLIST::FindIndexes(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *StartIndex, INT4 *EndIndex)
 {
   SearchState Status = NO_MATCH;
   INT nRecs;
 
   SetFileName(Fn);
-#if DEBUG
 cerr << "LOAD TABLE" << endl;
-#endif
   nRecs = LoadTable(VAL_BLOCK); // Load up the data
 
-#if DEBUG
 cerr << "nRrecs = " << nRecs << endl;
-#endif
 
   if (nRecs > 0) { // WAS >=
     Status =
       MemFindIndexes(Key, Relation, StartIndex, EndIndex);
   } else {
-    // Failed to load the table into memory, so fall back to a disk
-    // search. DiskFind() only ever locates a single matching position,
-    // so bracket the full [StartIndex, EndIndex] range ourselves,
-    // mirroring what MemFindIndexes() does for the in-memory case.
-    INT4 first = -1, last = -1;
-
-    switch (Relation) {
-    case ZRelEQ:
-      // First index with value >= Key, then last index with value <= Key.
-      Status = DiskFind(FileName, Key, ZRelGE, &first);
-      if (Status == MATCH)
-        Status = DiskFind(FileName, Key, ZRelLE, &last);
-      break;
-
-    case ZRelLT:
-    case ZRelLE:
-      first = 0;
-      Status = DiskFind(FileName, Key, Relation, &last);
-      break;
-
-    case ZRelGT:
-    case ZRelGE:
-      Status = DiskFind(FileName, Key, Relation, &first);
-      if (Status == MATCH) {
-	long Total = NlistDiskValCount(FileName);
-	last = (Total > 0) ? (INT4)(Total - 1) : -1;
-      }
-      break;
-
-    case ZRelNE:
-      break; // not going there...
-
-    default:
-      message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-      break;
-    }
-
-    if (Status == MATCH && first >= 0 && last >= first) {
-      // table[] is still empty/NULL at this point (that's why we're in
-      // this fallback branch at all), but callers such as
-      // INDEX::NumericSearch index directly into table[StartIndex..EndIndex].
-      // So actually load just the matched [first,last] disk range into
-      // table before handing back indices, instead of returning indices
-      // into an array that was never populated.
-      const INT4 BaseCount = (INT4)Count;
-      size_t nLoaded = LoadTable(first + 1, last, VAL_BLOCK); // NOTE: LoadTable(Start,End,Offset) decrements Start by one internally
-
-      if (nLoaded > 0) {
-        *StartIndex = BaseCount;
-        *EndIndex   = BaseCount + (INT4)nLoaded - 1;
-      } else {
-        Status = NO_MATCH;
-        *StartIndex = *EndIndex = -1;
-      }
-    } else {
-      Status = NO_MATCH;
-      *StartIndex = *EndIndex = -1;
-    }
+    // Hmmm... failed to lead the table into memory, so try disk search
+    //    Status =
+    DiskFind(FileName, Key, Relation, StartIndex);
   }
   return Status;
 }
@@ -998,13 +899,6 @@ size_t NUMERICLIST::LoadTable(NumBlock Offset)
     // Note - there are two tables in the file - one sorted by starting
     // value, one sorted by ending value.  There are Count entries in each
     // version.
-    if (getObjID(fp) != objNLIST)
-      {
-	message_log (LOG_PANIC, "%s not a numerical index??", FileName.c_str());
-	fclose(fp);
-	table_type = NONE;
-	return 0;
-      }
     _Count_t nCount;
     ::Read(&nCount, fp);
     nRecs = LoadTable(0,nCount-1,Offset);
