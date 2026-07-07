@@ -64,6 +64,9 @@ public:
   void ParseRecords(const RECORD& FileRecord);
   void ParseFields(PRECORD NewRecord);
 
+  GPTYPE ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
+	GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength);
+
   void SourceMIMEContent(PSTRING StringPtr) const;
 
   ~JSONDOC();
