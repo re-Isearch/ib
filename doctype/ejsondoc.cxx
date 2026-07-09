@@ -276,10 +276,11 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
       while (true)
         {
           SkipWhitespace(json, pos, recLen);
-          if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+	  if (pos >= recLen) break;
+          if (json[pos] == '}') {++pos; break; }
           if (json[pos] != '"')
             {
-              while (json[pos] && json[pos]!=',' && json[pos]!='}') ++pos;
+              while (pos < recLen && json[pos]!=',' && json[pos]!='}') ++pos;
               if (json[pos]==',') ++pos;
               continue;
             }
@@ -296,7 +297,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
               for (size_t i = tStart; i <= tEnd; ++i) tContents += json[i];
             }
           else
-            { while (json[pos] && json[pos]!=',' && json[pos]!='}') ++pos; }
+            { while (pos < recLen && json[pos]!=',' && json[pos]!='}') ++pos; }
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
         }
@@ -336,7 +337,7 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
           for (size_t i = vStart; i <= vEnd; ++i) contents += json[i];
         }
       // skip to and consume inner '}'
-      while (json[pos] && json[pos] != '}') ++pos;
+      while (pos < recLen && json[pos] != '}') ++pos;
       if (json[pos] == '}') ++pos;
 
       if (vStart != (size_t)-1 && !fieldname.IsEmpty())
@@ -398,7 +399,7 @@ void EJSONDOC::ParseObject(const char *json, size_t recLen,
     {
       message_log(LOG_WARN, "EJSONDOC: max nesting depth exceeded");
       int b = 1; ++pos;
-      while (json[pos] && b > 0)
+      while (pos < recLen && b > 0)
         { if (json[pos]=='{') b++; else if (json[pos]=='}') b--; ++pos; }
       return;
     }
@@ -408,10 +409,11 @@ void EJSONDOC::ParseObject(const char *json, size_t recLen,
   while (true)
     {
       SkipWhitespace(json, pos, recLen);
-      if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+      if (pos >= recLen) break;
+      if (json[pos] == '}') {++pos; break; }
       if (json[pos] != '"')
         {
-          while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+          while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -444,7 +446,7 @@ void EJSONDOC::ParseObject(const char *json, size_t recLen,
                 {
                   // Non-indexable type — skip the entire wrapper object
                   int d = 1; ++pos;
-                  while (json[pos] && d > 0)
+                  while (pos < recLen && d > 0)
                     {
                       if      (json[pos]=='{' || json[pos]=='[') d++;
                       else if (json[pos]=='}' || json[pos]==']') d--;

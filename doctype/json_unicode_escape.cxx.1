@@ -1,0 +1,150 @@
+// ---------------------------------------------------------------------
+// JSON \uXXXX escape resolution, IN PLACE, offset-preserving.
+//
+//
+//   GPTYPE MYJSONDOCTYPE::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
+//     GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
+//   {
+//     ResolveJSONUnicodeEscapes(DataBuffer, DataLength);
+//     return DOCTYPE::ParseWords(DataBuffer, DataLength, DataOffset,
+//                                 GpBuffer, GpLength);
+//   }
+//
+// This is deliberately decoupled from field extraction: it doesn't
+// know or care about keys, quotes, or JSON structure. It only finds
+// \uXXXX (and \uXXXX\uYYYY surrogate pairs), rewrites them to their
+// decoded UTF-8 bytes in place, and pads whatever's left over with
+// spaces. It never shrinks or grows DataLength, so every byte offset
+// in DataBuffer -- and therefore every GP address ParseWords computes
+// from it -- lands exactly where it did before this ran.
+//
+// Anything malformed (truncated escape, bad hex digits, an unpaired
+// lone surrogate) is left untouched or blanked to spaces rather than
+// risk mis-decoding -- worst case it tokenizes as harmless junk.
+//
+// NOTE: \u0000 decodes to a literal NUL byte. That's fine under this
+// codebase's "length is always a byte count" convention, but if
+// anything downstream ever treats DataBuffer as a C-string, change
+// the cp==0 case to zapChar instead. Left as a literal NUL here since
+// that's the technically correct decode.
+// ---------------------------------------------------------------------
+
+#define UCHR unsigned char
+#define GPTYPE unsigned int
+#define UINT4  unsigned short
+#define REGISTER
+
+static inline int _json_hex_nibble(UCHR c)
+{
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// Parse exactly 4 hex digits starting at p. Returns the codepoint
+// (0..0xFFFF), or -1 if any of the 4 characters isn't a hex digit.
+static inline int _json_parse_u4(const UCHR* p)
+{
+  const int h0 = _json_hex_nibble(p[0]);
+  const int h1 = _json_hex_nibble(p[1]);
+  const int h2 = _json_hex_nibble(p[2]);
+  const int h3 = _json_hex_nibble(p[3]);
+  if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0)
+    return -1;
+  return (h0 << 12) | (h1 << 8) | (h2 << 4) | h3;
+}
+
+// Encode `cp` as UTF-8 into `out` (caller guarantees >= 4 bytes of
+// room). Returns the number of bytes written (1-4).
+static inline int _utf8_encode(UINT4 cp, UCHR* out)
+{
+  if (cp <= 0x7F) {
+    out[0] = (UCHR)cp;
+    return 1;
+  }
+  if (cp <= 0x7FF) {
+    out[0] = (UCHR)(0xC0 | (cp >> 6));
+    out[1] = (UCHR)(0x80 | (cp & 0x3F));
+    return 2;
+  }
+  if (cp <= 0xFFFF) {
+    out[0] = (UCHR)(0xE0 | (cp >> 12));
+    out[1] = (UCHR)(0x80 | ((cp >> 6) & 0x3F));
+    out[2] = (UCHR)(0x80 | (cp & 0x3F));
+    return 3;
+  }
+  out[0] = (UCHR)(0xF0 | (cp >> 18));
+  out[1] = (UCHR)(0x80 | ((cp >> 12) & 0x3F));
+  out[2] = (UCHR)(0x80 | ((cp >> 6) & 0x3F));
+  out[3] = (UCHR)(0x80 | (cp & 0x3F));
+  return 4;
+}
+
+// Single pass, in place, no allocation.
+void ResolveJSONUnicodeEscapes(UCHR* DataBuffer, GPTYPE DataLength)
+{
+  const UCHR zapChar = '\0' ; // To match the current zapping in DOCTYPE:ParseWords
+  REGISTER GPTYPE Position = 0;
+
+  while (Position + 1 < DataLength) {
+    if (DataBuffer[Position] != '\\' || DataBuffer[Position+1] != 'u') {
+      Position++;
+      continue;
+    }
+
+    // Need the full 6 bytes of \uXXXX to even attempt this one.
+    if (Position + 6 > DataLength) {
+      Position++;
+      continue;
+    }
+
+    int cp = _json_parse_u4(DataBuffer + Position + 2);
+    if (cp < 0) {
+      // Malformed hex -- leave it alone, just step past the backslash.
+      Position++;
+      continue;
+    }
+
+    const GPTYPE EscStart = Position;
+    GPTYPE       EscLen   = 6;   // \uXXXX consumed so far
+
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+      // High surrogate: only means something if immediately followed
+      // by a \uYYYY low surrogate. Otherwise it's unpaired/malformed.
+      if (Position + 12 <= DataLength &&
+          DataBuffer[Position+6] == '\\' && DataBuffer[Position+7] == 'u') {
+        const int lo = _json_parse_u4(DataBuffer + Position + 8);
+        if (lo >= 0xDC00 && lo <= 0xDFFF) {
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+          EscLen = 12;
+        } else {
+          cp = -1; // unpaired high surrogate
+        }
+      } else {
+        cp = -1; // unpaired high surrogate
+      }
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+      cp = -1; // lone low surrogate -- never valid on its own
+    }
+
+    if (cp < 0) {
+      // Couldn't make sense of it -- blank out just the \uXXXX we
+      // already parsed so it doesn't tokenize as junk, and move on.
+      for (GPTYPE i = 0; i < 6; i++)
+        DataBuffer[EscStart+i] = zapChar;
+      Position = EscStart + 6;
+      continue;
+    }
+
+    UCHR      utf8[4];
+    const int n = _utf8_encode((UINT4)cp, utf8);
+
+    for (int i = 0; i < n; i++)
+      DataBuffer[EscStart+i] = utf8[i];
+    for (GPTYPE i = (GPTYPE)n; i < EscLen; i++)
+      DataBuffer[EscStart+i] = zapChar;
+
+    Position = EscStart + EscLen;
+  }
+}

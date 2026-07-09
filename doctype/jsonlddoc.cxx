@@ -252,7 +252,12 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
       while (true)
         {
           SkipWhitespace(json, pos, recLen);
-          if (!json[pos] || json[pos] == ']') { if (json[pos]) ++pos; break; }
+	  if (pos >= recLen)
+	    break;
+          if (json[pos] == ']') {
+	    ++pos;
+	    break;}
+	  }
           ParseContext(json, recLen, pos);   // recurse for each element
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
@@ -264,10 +269,11 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
       while (true)
         {
           SkipWhitespace(json, pos, recLen);
-          if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+	  if (pos >= recLen) break;
+          if (json[pos] == '}') { ++pos; break; }
           if (json[pos] != '"')
             {
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
               if (json[pos] == ',') ++pos;
               continue;
             }
@@ -300,7 +306,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
               else
                 {
                   // null or other — skip value
-                  while (json[pos] && json[pos] != ',' && json[pos] != '}')
+                  while (pos < recLen && json[pos] != ',' && json[pos] != '}')
                     ++pos;
                 }
             }
@@ -339,10 +345,11 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
               while (true)
                 {
                   SkipWhitespace(json, pos, recLen);
-                  if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+		  if (pos >= recLen) break;
+                  if (json[pos] == '}') { ++pos; break; }
                   if (json[pos] != '"')
                     {
-                      while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+                      while (pos < recLen  && json[pos] != ',' && json[pos] != '}') ++pos;
                       if (json[pos] == ',') ++pos;
                       continue;
                     }
@@ -362,7 +369,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
                   else
                     {
                       // skip value
-                      while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+                      while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
                     }
                   SkipWhitespace(json, pos, recLen);
                   if (json[pos] == ',') ++pos;
@@ -377,7 +384,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
           else
             {
               // null or unhandled — skip
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen  && json[pos] != ',' && json[pos] != '}') ++pos;
             }
 
           SkipWhitespace(json, pos, recLen);
@@ -387,7 +394,7 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
   else
     {
       // null or unknown — skip
-      while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+      while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
     }
 }
 
@@ -491,13 +498,13 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t recLen, size_t pos) const
   ++pos; // skip '{'
   // scan keys of this object looking for "@value" as first non-trivial key
   int keysChecked = 0;
-  while (json[pos] && keysChecked < 4)
+  while (pos < recLen && keysChecked < 4)
     {
       SkipWhitespace(json, pos, recLen);
       if (json[pos] == '}') break;
       if (json[pos] != '"') break;
       size_t kStart = ++pos;
-      while (json[pos] && json[pos] != '"')
+      while (pos < recLen && json[pos] != '"')
         { if (json[pos] == '\\') ++pos; ++pos; }
       size_t kEnd = pos;
       if (json[pos] == '"') ++pos;
@@ -511,11 +518,11 @@ bool JSONLDDOC::IsValueObject(const char *json, size_t recLen, size_t pos) const
       SkipWhitespace(json, pos, recLen);
       // rudimentary skip of the value
       if (json[pos] == '"')
-        { ++pos; while (json[pos] && json[pos] != '"') { if (json[pos]=='\\') ++pos; ++pos; } if (json[pos]) ++pos; }
+        { ++pos; while (pos < recLen && json[pos] != '"') { if (json[pos]=='\\') ++pos; ++pos; } if (pos < recLen) ++pos; }
       else if (json[pos] == '{' || json[pos] == '[')
-        { int d=1; char o=json[pos],c=(o=='{'?'}':']'); ++pos; while (json[pos]&&d>0){if(json[pos]==o)d++;else if(json[pos]==c)d--;++pos;} }
+        { int d=1; char o=json[pos],c=(o=='{'?'}':']'); ++pos; while (pos < recLen &&d>0){if(json[pos]==o)d++;else if(json[pos]==c)d--;++pos;} }
       else
-        { while (json[pos] && json[pos]!=',' && json[pos]!='}') ++pos; }
+        { while (pos < recLen && json[pos]!=',' && json[pos]!='}') ++pos; }
       SkipWhitespace(json, pos, recLen);
       if (json[pos] == ',') ++pos;
       ++keysChecked;
@@ -547,7 +554,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
     {
       message_log(LOG_WARN, "JSONLDDOC: max nesting depth exceeded");
       int b=1; ++pos;
-      while (json[pos] && b>0)
+      while (pos < recLen && b>0)
         { if(json[pos]=='{')b++; else if(json[pos]=='}')b--; ++pos; }
       return;
     }
@@ -565,10 +572,11 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
       while (true)
         {
           SkipWhitespace(json, pos, recLen);
-          if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+	  if (pos >= recLen) break;
+          if (json[pos] == '}') { ++pos; break; }
           if (json[pos] != '"')
             {
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
               if (json[pos] == ',') ++pos;
               continue;
             }
@@ -596,7 +604,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
           else
             {
               // @type or other — skip
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
             }
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
@@ -633,10 +641,11 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
   while (true)
     {
       SkipWhitespace(json, pos, recLen);
-      if (!json[pos] || json[pos] == '}') { if (json[pos]) ++pos; break; }
+      if (pos >= recLen) break;
+      if (json[pos] == '}') {++pos; break; }
       if (json[pos] != '"')
         {
-          while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+          while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
           if (json[pos] == ',') ++pos;
           continue;
         }
@@ -681,7 +690,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
             }
           else
             {
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
             }
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
@@ -697,11 +706,12 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
               while (true)
                 {
                   SkipWhitespace(json, pos, recLen);
-                  if (!json[pos] || json[pos] == ']') { if (json[pos]) ++pos; break; }
+		  if (pos >= recLen) break;
+                  if (json[pos] == ']') {++pos; break; }
                   if (json[pos] == '{')
                     ParseObject(json, recLen, pos, STRING(), depth + 1, record, base);
                   else
-                    while (json[pos] && json[pos] != ',' && json[pos] != ']') ++pos;
+                    while (pos < recLen && json[pos] != ',' && json[pos] != ']') ++pos;
                   SkipWhitespace(json, pos, recLen);
                   if (json[pos] == ',') ++pos;
                 }
@@ -721,7 +731,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
           if (json[pos] == '{')
             ParseObject(json, recLen, pos, prefix, depth + 1, record, base);
           else
-            while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+            while (pos < recLen  && json[pos] != ',' && json[pos] != '}') ++pos;
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
@@ -733,7 +743,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
           if (json[pos] == '[')
             ParseArray(json, recLen, pos, prefix, depth + 1, record, base);
           else
-            while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+            while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
           continue;
@@ -746,7 +756,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
           if (mapped != nullptr && mapped[0] == '\0')
             {
               // explicitly skip
-              while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+              while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
               SkipWhitespace(json, pos, recLen);
               if (json[pos] == ',') ++pos;
               continue;
@@ -766,7 +776,7 @@ void JSONLDDOC::ParseObject(const char *json, size_t recLen,
         if (res == 0 || mappedList.IsEmpty())
           {
             // Skip this field
-            while (json[pos] && json[pos] != ',' && json[pos] != '}') ++pos;
+            while (pos < recLen && json[pos] != ',' && json[pos] != '}') ++pos;
             SkipWhitespace(json, pos, recLen);
             if (json[pos] == ',') ++pos;
             continue;

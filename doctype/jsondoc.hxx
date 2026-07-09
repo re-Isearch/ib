@@ -64,6 +64,8 @@ public:
   void ParseRecords(const RECORD& FileRecord);
   void ParseFields(PRECORD NewRecord);
 
+  void BeforeIndexing();
+
   GPTYPE ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
 	GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength);
 
