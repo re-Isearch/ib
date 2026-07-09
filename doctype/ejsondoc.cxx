@@ -1,6 +1,6 @@
 /*-@@@
 File:           ejsondoc.cxx
-Version:        1.01
+Version:        1.03
 Description:    Class EJSONDOC - MongoDB Extended JSON / Extended JSON Document Type
 Author:         Based on JSONDOC by Edward C. Zimmermann
 Copyright:      Copyright (c) 2026 re-Isearch Project
