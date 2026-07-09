@@ -249,12 +249,8 @@ void JSONLDDOC::ParseContext(const char *json, size_t recLen, size_t& pos)
       while (true)
         {
           SkipWhitespace(json, pos, recLen);
-	  if (pos >= recLen)
-	    break;
-          if (json[pos] == ']') {
-	    ++pos;
-	    break;}
-	  }
+	  if (pos >= recLen) break;
+          if (json[pos] == ']') { ++pos; break; }
           ParseContext(json, recLen, pos);   // recurse for each element
           SkipWhitespace(json, pos, recLen);
           if (json[pos] == ',') ++pos;
