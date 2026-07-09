@@ -1,6 +1,3 @@
-// TODO: Clean up NOT to look for '\0' but look for recLen
-
-
 /*-@@@
 File:           ejsondoc.cxx
 Version:        1.01
