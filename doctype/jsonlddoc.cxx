@@ -1,9 +1,6 @@
-// TODO: Clean up NOT to look for '\0' but look for recLen
-
-
 /*-@@@
 File:           jsonlddoc.cxx
-Version:        1.00
+Version:        1.03
 Description:    Class JSONLDDOC - JSON-LD (Linked Data) Document Type
 Author:         Based on JSONDOC by Edward C. Zimmermann
 Copyright:      Copyright (c) 2026 re-Isearch Project
