@@ -293,6 +293,10 @@ public:
   bool FieldExists(const STRING& FieldName) const {
     return MainDfdt ? MainDfdt->FieldExists(FieldName) > 0 : false;
   }
+ 
+  STRING getFieldDescription(const STRING& FieldName);
+  bool setFieldDescription(const STRING& FieldName, const STRING& Description);
+
 
   // Standard Search Interface function
   PIRSET Search(const QUERY& SearchQuery);

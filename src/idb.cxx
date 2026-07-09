@@ -5811,3 +5811,34 @@ PIRSET IDB::SearchSmart(const QUERY& Query, const STRING& DefaultField, SQUERY *
   if (SqueryPtr) *SqueryPtr = nQuery.Squery;
   return pIrset;
 }
+
+
+
+// The following are for MCP discovery
+
+static const char *field_desc = "FIELD_DESCRIPTION";
+
+STRING IDB::getFieldDescription(const STRING& FieldName)
+{
+  STRING description;
+  if (FieldExists(FieldName)) {
+    const char *datatype = GetFieldType(FieldName).c_str();
+    STRING string;
+    ProfileGetString(field_desc, FieldName, NulString, &string);
+    description << FieldName << ": ";
+    if (!string.IsEmpty()) description << "\"" << string << "\" ";
+    description << "using " << datatype;
+  }
+  return description;
+}
+
+bool IDB::setFieldDescription(const STRING& FieldName, const STRING& Description)
+{
+  if (FieldExists(FieldName)) {
+    ProfileWriteString(field_desc, FieldName, Description);
+    return true;
+  }
+  return false; 
+}
+
+
