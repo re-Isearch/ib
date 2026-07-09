@@ -1660,6 +1660,12 @@ void ResolveJSONUnicodeEscapes(UCHR* DataBuffer, GPTYPE DataLength, UCHR ZapChr)
 }
 
 
+void JSONDOC::BeforeIndexing()
+{
+  COLONDOC::BeforeIndexing();
+}
+
+
 GPTYPE JSONDOC::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
      GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
 {
