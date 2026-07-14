@@ -2,13 +2,17 @@
 
 ### NEWS
 
-June 4 2025
+Jul 2026
+
+Moving more and more away from generic C++ towards increasingly using C++17+. The base old version stays as re-Isearch..
+
+June 4 2026
 
 The core re-Isearch engine is NOW published as "ib". This is a key component of the release of CoreQuarry which contains: ib (formerly re-Isearch), Schmate, bert.cpp, hnswlib etc.
 
 The reason for the re-naming under re-Isearch of the components is to make it clear that they are useable seperately but also to allow the development to start to diverge slightly from its focus on "any system". This allows us to start to use SIMD code in the lexical search kernel and switch to a cmake build system which for 99% of the users is 100% better.
 
-May 23 2023
+May 23 2026
 
 Things now getting ready for distribution. The use of the bert.cpp and ggml tensor library (0.12) reduced indexing time on Apple M1 by more than 900%. Our bert.cpp is now being extended to support both sentence-piece and word-piece tokenizers.
 
