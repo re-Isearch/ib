@@ -33,6 +33,9 @@ public:
   size_t DateFieldExists(const STRING& FieldName, STRING *Ptr=NULL) const;
   size_t TypeFieldExists(const FIELDTYPE& Ft, const STRING& FieldName, STRING *Ptr=NULL) const;
 
+  size_t GetFieldEntryCount( IDBOBJ* DbParent, const STRING& FieldName) const;
+  size_t GetFieldEntryCount( IDBOBJ* DbParent, INT FileNumber) const;
+
   DFDT& operator  =(const DFDT& OtherDfdt);
   DFDT& operator +=(const DFDT& OtherDfdt);
 

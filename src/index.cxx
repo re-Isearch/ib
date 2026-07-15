@@ -3645,11 +3645,12 @@ PIRSET INDEX::Search (const QUERY& Query)
   POPOBJ       Op1, Op2;
   t_Operator op_t;
   clock_t      startClock = clock();
+  bool         StopEvaluation = false;
 
   message_log (LOG_DEBUG, "Entering Search loop");
 
   int terms = 0; // Term count (not stopwords)
-  while (Stack >> OpPtr)
+  while (!StopEvaluation && (Stack >> OpPtr))
     {
       if (OpPtr->GetOpType () == TypeOperator)
         {
@@ -3792,7 +3793,10 @@ PIRSET INDEX::Search (const QUERY& Query)
                       break;
                     case OperatorAnd:
 		      SwapOp(Op1,Op2);
-		      Stack << (Op1->And(*Op2)); 
+		      OPOBJ* Result = Op1->And(*Op2);
+		      Stack << Result; 
+		      if (Query.CanTerminateOnEmpty() && Result != NULL && Result->GetTotalEntries() == 0)
+			StopEvaluation = true;
                       break;
                     case OperatorNotAnd:
                       // A B NOTAND := B A ANDNOT
@@ -5826,6 +5830,12 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
 {
   int             num_hits = -1;
 
+  if (start) *start = 0;
+  if (overflow) *overflow = false;
+
+  off_t local_start = 0;
+  bool  local_overflow = false;
+
   if (MemoryMap && MemoryMap->Ok())
     {
       size_t          length;
@@ -5898,12 +5908,12 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
       if (maxLength < TermLength)
         {
           n[0] = '\0';
-          *overflow = true;
+          local_overflow = true;
         }
       else
         {
           n[0] = Truncate ? 0 : (unsigned char) length;
-          *overflow = false;
+          local_overflow = false;
         }
 
       num_hits = 0;		// Start off with No hits..
@@ -5915,7 +5925,7 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
         {
 
           if (DebugMode) message_log (LOG_DEBUG, "Found any match t='%s'(%u) [overflow=%d, *n=%d]",
-		t+1, (int)((unsigned char)(*t)), *overflow, (int)(n[0]));
+		t+1, (int)((unsigned char)(*t)), local_overflow, (int)(n[0]));
 
           // We now have ANY Match...
           char           *High = t;	// Last Element in range
@@ -5923,7 +5933,7 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
           char           *Low = t;	// First Element in range
 
           // If Truncated search the hits can span several elements..
-          if (n[0] == '\0' && !*overflow)
+          if (n[0] == '\0' && !local_overflow)
             {
               char           *tp;
               // Scan back to low (replace later with bsearches)
@@ -5948,14 +5958,16 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
           // Make sure not the first element...
           const GPTYPE    from = ( ( Low - Buffer) ?
                                    GP((unsigned char *)Low, -(int)sizeof(GPTYPE)) + 1 : 0 );
-          if (start)
-            *start = from;
+          local_start = from;
           num_hits = to - from + 1;
         }
     }
   if (DebugMode)
-    message_log (LOG_DEBUG, "Term = '%s' found %d hits",
-          (const char *)Term, num_hits );
+    message_log (LOG_DEBUG, "Term = '%s' found %d hits", (const char *)Term, num_hits );
+
+  if (start)    *start    = local_start;
+  if (overflow) *overflow = local_overflow;
+
   return num_hits;
 }
 

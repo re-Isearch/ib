@@ -20,6 +20,8 @@ Description:	Class IDBOBJ: Database object virtual class
 #include "words.hxx"
 #include "boost.hxx"
 
+#include "irset_fwd.hxx"
+
 class  DOCTYPE;
 class  INDEX;
 class  FCACHE;
@@ -262,9 +264,9 @@ public:
 
   virtual size_t ScanSearch(SCANLIST *, const QUERY&, const STRING&, size_t Max = 0, bool Cat = false) { return 0; }
 
-  virtual atomicIRSET *FileSearch(const STRING&) { return NULL; }
-  virtual atomicIRSET *KeySearch(const STRING&) { return NULL; }
-  virtual atomicIRSET *DoctypeSearch(const STRING&) { return NULL;}
+  virtual PIRSET FileSearch(const STRING&) { return NULL; }
+  virtual PIRSET KeySearch(const STRING&) { return NULL; }
+  virtual PIRSET DoctypeSearch(const STRING&) { return NULL;}
 
   virtual void AddTemplate (const STRING&) {}
 

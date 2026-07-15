@@ -12,18 +12,15 @@ Description:	Class DFT - Data Field Table
 #define INCREMENT 50
 
 
-DFT::DFT ()
-{
-  MaxEntries = 0;
-  Table = NULL;
-  TotalEntries = 0;
-}
+#if 0
+DFT::DFT () : Table(NULL), TotalEntries(0), MaxEntries(0) { }
 
-DFT::DFT (const DFT& OtherDft)
+DFT::DFT (const DFT& OtherDft) : Table(NULL), TotalEntries(0), MaxEntries(0)
 {
-  MaxEntries = 0;
   *this = OtherDft;
 }
+
+#endif
 
 DFT& DFT::operator =(const DFT& OtherDft)
 {

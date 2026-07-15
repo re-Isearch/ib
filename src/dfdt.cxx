@@ -792,7 +792,54 @@ size_t DFDT::TypeFieldExists(const FIELDTYPE& Ft, const STRING& FieldName, STRIN
   return 0;
 }
 
+#if 0
 
+size_t DFDT::GetFieldEntryCount( IDBOBJ* DbParent, const STRING& FieldName) const
+{
+  if (DbParent == NULL || FieldName.IsEmpty())
+    return 0;
+
+  const INT FileNumber = GetFileNumber(FieldName);
+
+  if (FileNumber <= 0)
+    return 0;
+
+  return GetFieldEntryCount(DbParent, FileNumber);
+}
+
+size_t DFDT::GetFieldEntryCount( IDBOBJ* DbParent, const INT FileNumber) const
+{
+  if (DbParent == NULL || FileNumber <= 0)
+    return 0;
+
+  const STRING FileName = DbParent->ComposeDbFn(FileNumber);
+
+  if (!FileExists(FileName))
+    return 0;
+
+  const off_t FileSize = GetFileSize(FileName);
+
+  if (FileSize <= 0)
+    return 0;
+
+  const size_t HeaderSize = FieldCoordinateHeaderSize(FileName);
+
+  if (static_cast<size_t>(FileSize) < HeaderSize)
+    return 0;
+
+  const size_t PayloadSize = static_cast<size_t>(FileSize) - HeaderSize;
+
+  if ((PayloadSize % sizeof(FC)) != 0) {
+    message_log(
+        LOG_WARN,
+        "Field coordinate file '%s' has an invalid size",
+        FileName.c_str());
+
+    return 0;
+  }
+  return PayloadSize / sizeof(FC);
+}
+#endif
 
 
 DFDT::~DFDT ()

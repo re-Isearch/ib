@@ -376,13 +376,43 @@ ATTRLIST::ATTRLIST (size_t Size)
   TotalEntries = 0;
 }
 
-ATTRLIST::ATTRLIST (const ATTRLIST& OtherAttrlist)
+ATTRLIST::ATTRLIST (const ATTRLIST& OtherAttrlist) : Table(NULL), TotalEntries(0), MaxEntries(0)
 {
-  MaxEntries = 0;
   *this = OtherAttrlist;
 }
 
+#if 1
 
+ATTRLIST& ATTRLIST::operator=(const ATTRLIST& OtherAttrlist)
+{
+  if (this == &OtherAttrlist)
+    return *this;
+
+  const size_t OtherTotal = OtherAttrlist.GetTotalEntries();
+
+  if (OtherTotal > MaxEntries) {
+    const size_t NewMaximum = OtherAttrlist.MaxEntries;
+    PATTR NewTable =
+        NewMaximum != 0 ? new ATTR[NewMaximum] : NULL;
+
+    delete[] Table;
+    Table = NewTable;
+    MaxEntries = NewMaximum;
+  }
+
+  TotalEntries = 0;
+
+  while (TotalEntries < OtherTotal) {
+    Table[TotalEntries] =
+        OtherAttrlist.Table[TotalEntries];
+    ++TotalEntries;
+  }
+
+  return *this;
+}
+
+
+#else
 ATTRLIST& ATTRLIST:: operator =(const ATTRLIST& OtherAttrlist)
 {
   const size_t OtherTotal = OtherAttrlist.GetTotalEntries ();
@@ -402,6 +432,7 @@ ATTRLIST& ATTRLIST:: operator =(const ATTRLIST& OtherAttrlist)
     }
   return *this;
 }
+#endif
 
 
 ATTRLIST& ATTRLIST:: Cat(const ATTRLIST& OtherAttrlist)

@@ -298,6 +298,9 @@ public:
   bool setFieldDescription(const STRING& FieldName, const STRING& Description);
 
 
+  bool OptimizeQuery(QUERY* Query) ;
+  bool OptimizeQuery(QUERY& Query) { return OptimizeQuery(&Query); }
+
   // Standard Search Interface function
   PIRSET Search(const QUERY& SearchQuery);
 
@@ -710,8 +713,13 @@ public:
 
   void        GetFieldDefinitionList(STRLIST *StrlistPtr) const;
 
-  bool UsePersistantCache() const  { return !PersistantIrsetCache.IsEmpty(); }
-  STRING PersistantCacheName() const { return PersistantIrsetCache; }
+  size_t      FieldEntryCount(const STRING& field_name) const;
+  bool        GetFieldEntryCount( const STRING& field_name, size_t * count) const;
+
+  double      GetTermExpectation( const STRING& Word, const STRING& FieldName = NulString, const bool Truncate = false);
+
+  bool        UsePersistantCache() const  { return !PersistantIrsetCache.IsEmpty(); }
+  STRING      PersistantCacheName() const { return PersistantIrsetCache; }
 
   FPT       *GetMainFpt() { return &MainFpt ; }
   void      RevalidateFileCache() {
@@ -747,6 +755,7 @@ private:
   bool GetFieldData(const FC& FieldFC, const STRING& FieldName, DOUBLE* Buffer);
   bool GetFieldData(const FC& FieldFC, const STRING& FieldName, SRCH_DATE* Buffer);
 
+  QueryOptimizationResult OptimizeSQuery(SQUERY* Query);
 
   bool  checkFieldName(const STRING& fieldname) const {
 	  return MainDfdt->checkFieldName(fieldname);

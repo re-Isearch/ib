@@ -38,6 +38,9 @@ Description: Class IDB
 #include "lock.hxx"
 #include "lang-codes.hxx"
 
+#include "sterm.hxx"
+#include "operator.hxx"
+
 //#include <iostream>
 #include <fstream>
 
@@ -2762,6 +2765,14 @@ PIRSET IDB::Search (const QUERY& nQuery)
     {
       DoctypePtr->BeforeSearching (&Query);
     }
+
+#if 1
+   // Now optimise
+   OptimizeQuery(&Query);
+
+cerr << "OPTIMZED: " << STRING(Query) << endl;
+#endif
+
   IRSET *IrsetPtr = MainIndex->Search (Query);
   if (DoctypePtr != NULL) 
     DoctypePtr->AfterSearching (IrsetPtr);
@@ -5841,4 +5852,304 @@ bool IDB::setFieldDescription(const STRING& FieldName, const STRING& Description
   return false; 
 }
 
+
+bool IDB::GetFieldEntryCount( const STRING& field_name, size_t * count) const
+{
+  if (count == nullptr)
+    return false;
+
+  *count = 0;
+
+  if (MainDfdt == nullptr)
+    return false;
+
+  const INT field_number =
+      MainDfdt->GetFileNumber(field_name);
+
+  if (field_number <= 0)
+    return false;
+
+  const STRING filename =
+      ComposeDbFn(field_number);
+
+  const off_t bytes = GetFileSize(filename);
+
+  if (bytes < 0)
+    return false;
+
+  constexpr std::uint64_t entry_size = 2ULL * sizeof(GPTYPE);
+  const std::uint64_t size = static_cast<std::uint64_t>(bytes);
+
+  if (size % entry_size != 0) {
+    message_log(
+        LOG_WARN,
+        "Field coordinate file '%s' has invalid size "
+        "%llu; expected a multiple of %llu",
+        filename.c_str(),
+        static_cast<unsigned long long>(size),
+        static_cast<unsigned long long>(entry_size));
+
+    return false;
+  }
+
+  *count = size / entry_size;
+  return true;
+}
+
+
+size_t IDB::FieldEntryCount( const STRING& field_name) const
+{
+  size_t count = 0;
+  GetFieldEntryCount(field_name, &count);
+  return count;
+}
+
+
+double IDB::GetTermExpectation( const STRING& Word, const STRING& FieldName, const bool Truncate)
+{
+    const long term_frequency = TermFreq(Word, Truncate);
+
+    if (term_frequency <= 0)
+        return static_cast<double>(term_frequency);
+
+    if (FieldName.IsEmpty())
+        return std::log1p(static_cast<double>(term_frequency));
+
+    const std::uint64_t field_entries =
+        FieldEntryCount(FieldName);
+
+    if (field_entries == 0)
+        return std::log1p(static_cast<double>(term_frequency));
+
+    return std::log1p(static_cast<double>(term_frequency)) +
+           std::log1p(static_cast<double>(field_entries));
+}
+
+
+bool IDB::OptimizeQuery(QUERY* Query)
+{
+  if (Query == NULL)
+    return false;
+
+  SQUERY SearchExpression = Query->GetSQUERY();
+
+  const QueryOptimizationResult Result = OptimizeSQuery(&SearchExpression);
+
+  Query->SetPlanType(Result.PlanType);
+
+  if (Result.Rewritten)
+    Query->SetSQUERY(SearchExpression);
+
+  return Result.Rewritten;
+}
+
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <memory>
+#include <vector>
+
+
+QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
+{
+  QueryOptimizationResult Result;
+
+  struct TERM_ENTRY {
+    STRING Word;
+    ATTRLIST Attributes;
+    double Expectation;
+    size_t OriginalPosition;
+  };
+
+  if (Query == NULL || MainIndex == NULL)
+    return Result;
+
+  OPSTACK Source;
+  Query->GetOpstack(&Source);
+  Source.Reverse();
+
+  std::vector<TERM_ENTRY> Terms;
+
+  size_t OperatorCount = 0;
+  size_t Position = 0;
+
+  POPOBJ Object = NULL;
+
+  while (Source >> Object) {
+    if (Object == NULL) {
+      message_log(
+          LOG_ERROR,
+          "IDB::OptimizeSQuery: null object in query stack");
+      return Result;
+    }
+
+    const t_OpType OpType = Object->GetOpType();
+
+    if (OpType == TypeOperator) {
+      const t_Operator Operator = Object->GetOperatorType();
+
+      delete Object;
+      Object = NULL;
+
+      /*
+       * Only optimize a query consisting entirely of AND operators.
+       *
+       * OR is also associative and commutative, but its useful execution
+       * ordering is a separate optimization problem.
+       */
+      if (Operator != OperatorAnd)
+        return Result;
+
+      ++OperatorCount;
+      continue;
+    }
+
+    if (OpType != TypeOperand ||
+        Object->GetOperandType() != TypeTerm) {
+      delete Object;
+      Object = NULL;
+
+      /*
+       * Do not reorder embedded result sets or unfamiliar operand types.
+       */
+      return Result;
+    }
+
+    STRING Word;
+    ATTRLIST Attributes;
+
+    Object->GetTerm(&Word);
+    Object->GetAttributes(&Attributes);
+
+    delete Object;
+    Object = NULL;
+
+    if (Word.IsEmpty())
+      return Result;
+
+    STRING FieldName;
+
+    /*
+     * Use the same attribute accessors used by the search code.
+     * If AttrGetFieldName() returns a value rather than filling a pointer,
+     * adjust this one call to match the local ATTRLIST interface.
+     */
+    Attributes.AttrGetFieldName(&FieldName);
+
+    /*
+     * Ask TermFreq() for a truncation-aware estimate when any expansion
+     * form is active.
+     */
+    const bool Truncate =
+        Attributes.AttrGetRightTruncation() ||
+        Attributes.AttrGetLeftTruncation() ||
+        Attributes.AttrGetLeftAndRightTruncation() ||
+        Attributes.AttrGetGlob();
+
+    double Expectation =
+        GetTermExpectation(
+            Word,
+            FieldName,
+            Truncate);
+
+    /*
+     * An unusable estimate should be sorted after all finite estimates.
+     *
+     * Negative infinity is intentionally retained because it may represent
+     * a known zero-frequency term and should therefore sort first.
+     */
+    if (std::isnan(Expectation))
+      Expectation =
+          std::numeric_limits<double>::infinity();
+
+    TERM_ENTRY Entry;
+
+    Entry.Word = Word;
+    Entry.Attributes = Attributes;
+    Entry.Expectation = Expectation;
+    Entry.OriginalPosition = Position++;
+
+    Terms.push_back(std::move(Entry));
+  }
+
+  /*
+   * A valid binary AND expression with N operands must have N-1
+   * operators. A one-term query does not need reordering.
+   */
+  if (Terms.size() < 2 ||
+      OperatorCount != Terms.size() - 1) {
+    return Result;
+  }
+
+  Result.PlanType = QueryPlanPureAnd;
+
+  std::stable_sort(
+      Terms.begin(),
+      Terms.end(),
+      [](const TERM_ENTRY& Left,
+         const TERM_ENTRY& Right) -> bool {
+        if (Left.Expectation < Right.Expectation)
+          return true;
+
+        if (Right.Expectation < Left.Expectation)
+          return false;
+
+        /*
+         * Keep the original ordering when the estimates are equal.
+         */
+        return Left.OriginalPosition <
+               Right.OriginalPosition;
+      });
+
+  bool Changed = false;
+
+  for (size_t i = 0; i < Terms.size(); ++i) {
+    if (Terms[i].OriginalPosition != i) {
+      Changed = true;
+      break;
+    }
+  }
+
+  if (!Changed)
+    return Result;
+
+  OPSTACK Optimized;
+
+  /*
+   * Construct each temporary STERM only at the point where it is pushed
+   * onto OPSTACK. Do not copy or assign STERM inside the vector.
+   */
+  const auto PushTerm =
+      [&Optimized](const TERM_ENTRY& Entry) {
+        STERM Term;
+
+        Term.SetTerm(Entry.Word);
+        Term.SetAttributes(Entry.Attributes);
+
+        Optimized << Term;
+      };
+
+  OPERATOR AndOperator(OperatorAnd);
+
+  /*
+   * Rebuild as a left-associative postfix expression:
+   *
+   *   A B AND C AND D AND
+   */
+  PushTerm(Terms[0]);
+  PushTerm(Terms[1]);
+  Optimized << AndOperator;
+
+  for (size_t i = 2; i < Terms.size(); ++i) {
+    PushTerm(Terms[i]);
+    Optimized << AndOperator;
+  }
+
+  Query->SetOpstack(Optimized);
+
+  Result.Rewritten = true;
+
+  return Result;
+}
 

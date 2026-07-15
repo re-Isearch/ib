@@ -13,7 +13,7 @@ Description:	Class DFT - Data Field Table
 
 class DFT {
 public:
-  DFT();
+  DFT() : Table(NULL), TotalEntries(0), MaxEntries(0) { }
   DFT(const DFT& OtherDft);
   DFT& operator=(const DFT& OtherDft);
 

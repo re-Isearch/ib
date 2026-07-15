@@ -16,6 +16,16 @@ Description:	Class SQUERY - Search Query
 
 enum QueryTypeMethods { QueryAutodetect = 0, QueryRPN, QueryInfix, QueryRelevantId};
 
+enum QueryPlanType {
+  QueryPlanUnknown = 0, QueryPlanGeneral, QueryPlanPureAnd, QueryPlanPureOr, QueryPlanCommonTerms,
+  QueryPlanMinimumShouldMatch
+};
+
+struct QueryOptimizationResult {
+  QueryPlanType PlanType = QueryPlanGeneral;
+  bool Rewritten = false;
+} ;
+
 class OPERATOR;
 
 class SQUERY {
@@ -166,12 +176,14 @@ public:
     Sort       = sort;
     Method     = method;
     MaxResults = 0;
+    PlanType   = QueryPlanUnknown;
   }
   QUERY(const SQUERY& query, enum SortBy sort=Unsorted, enum NormalizationMethods method=defaultNormalization) {
     Sort       = sort;
     Method     = method;
     Squery     = query;
     MaxResults = 0;
+    PlanType   = QueryPlanUnknown;
   }
 
   QUERY& operator =(const QUERY& Other) {
@@ -179,6 +191,7 @@ public:
     Method     = Other.Method;
     Sort       = Other.Sort;
     MaxResults = Other.MaxResults;
+    PlanType   = Other.PlanType;
     return *this;
   }
 
@@ -197,7 +210,7 @@ public:
   operator STRING() const { return Squery.GetRpnTerm(); }
 
   size_t        GetTotalTerms() const { return Squery.GetTotalTerms(); }
-  bool   isPlainQuery (STRING *Words = NULL) { return Squery.isPlainQuery(Words); }
+  bool          isPlainQuery (STRING *Words = NULL) { return Squery.isPlainQuery(Words); }
 
   void          SetSQUERY(const SQUERY& newQuery) { Squery = newQuery; }
   const SQUERY& GetSQUERY() const                 { return Squery;     }
@@ -234,10 +247,15 @@ public:
 
 #endif
 
+  QueryPlanType GetPlanType() const { return PlanType; }
+  void SetPlanType(QueryPlanType Type) { PlanType = Type; }
+  bool CanTerminateOnEmpty() const { return PlanType == QueryPlanPureAnd; }
+
 private:
   SQUERY                    Squery;
   enum SortBy               Sort;
   enum NormalizationMethods Method;
+  enum QueryPlanType        PlanType;
   size_t                    MaxResults;
 };
 

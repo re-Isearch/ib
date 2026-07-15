@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
+Copyright (c) 2020-26 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
 /************************************************************************
@@ -7,7 +7,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 
 /*@@@
 File:		irset.hxx
-Version:	1.00
+Version:	2.00
 Description:	Class IRSET - Internal Search Result Set
 @@@*/
 
@@ -20,6 +20,10 @@ Description:	Class IRSET - Internal Search Result Set
 #include "iresult.hxx"
 #include "rset.hxx"
 #include "operand.hxx"
+
+#include <memory>
+#include <utility>
+
 
 // NOTE:
 //
@@ -43,7 +47,7 @@ public:
   atomicIRSET(const OPOBJ& OtherIrset);
 
   atomicIRSET& operator = (const atomicIRSET& OtherIrset);
-  OPOBJ& operator =(const OPOBJ& OtherIrset);
+  OPOBJ& operator =(const OPOBJ& OtherIrset) override;
 
   OPOBJ& operator +=(const OPOBJ& OtherIrset);
   atomicIRSET& Concat (const atomicIRSET& OtherIrset); 
@@ -51,12 +55,12 @@ public:
   OPOBJ& Cat(const OPOBJ& OtherIrset, bool AddHitCounts = false);
   OPOBJ& Cat (const OPOBJ& OtherIrset, size_t Total, bool AddHitCounts = false);
 
-  t_Operand GetOperandType () const { return TypeRset; };
+  t_Operand GetOperandType () const override { return TypeRset; };
 
   //operator const RSET *() const;
   void   GC(); // Garbage collect
 
-  OPOBJ* Duplicate () const;
+  OPOBJ* Duplicate () const override;
   atomicIRSET* Duplicate();
 
   void MergeEntries(const bool AddHitCounts = true);
@@ -77,7 +81,7 @@ public:
   void AddEntry (const IRESULT& ResultRecord, const bool AddHitCounts);
   void FastAddEntry(const IRESULT& ResultRecord);
 
-  bool GetEntry (const size_t Index, PIRESULT ResultRecord) const;
+  bool GetEntry (const size_t Index, PIRESULT ResultRecord) const override;
   IRESULT     GetEntry (const size_t Index) const;
 
   const IRESULT operator[](size_t n) const { return Table[n]; }
@@ -106,13 +110,13 @@ public:
   // Fill() or Fill(1) return the entire IRSET as RSET
   PRSET Fill(size_t Start=1, size_t End = 0, PRSET set = NULL) const; // Fill start count with 1
 
-  bool IsEmpty() const { return TotalEntries == 0; }
+  bool IsEmpty() const override { return TotalEntries == 0; }
 
   void Expand ();
   void Reserve (const size_t Entries) { if (Entries > MaxEntries) Resize(Entries); };
   void CleanUp ();
   void Resize (const size_t Entries);
-  size_t GetTotalEntries () const { return TotalEntries; }
+  size_t GetTotalEntries () const override { return TotalEntries; }
   size_t SetTotalEntries(size_t NewTotal);
   size_t GetHitTotal ();
 
@@ -137,67 +141,67 @@ public:
   OPOBJ *ComputeScoresAux3Normalization (const float TermWeight);
 
   // Binary Functions
-  virtual OPOBJ *Or (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Nor (const OPOBJ& OtherIrset);
-  virtual OPOBJ *And (const OPOBJ& OtherIrset);
+  virtual OPOBJ *Or (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Nor (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *And (const OPOBJ& OtherIrset) override;
   virtual OPOBJ *And (const OPOBJ& OtherIrset, size_t Limit);
 
-  virtual OPOBJ *Nand (const OPOBJ& OtherIrset);
-  virtual OPOBJ *AndNot (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Xor (const OPOBJ& OtherIrset);
+  virtual OPOBJ *Nand (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *AndNot (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Xor (const OPOBJ& OtherIrset) override;
 
-  virtual OPOBJ *Join (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Join (OPOBJ *OtherIrset);
+  virtual OPOBJ *Join (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Join (OPOBJ *OtherIrset) override;
 
-  virtual OPOBJ *Near (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Far (const OPOBJ& OtherIrset);
-  virtual OPOBJ *After (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Before (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Adj (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Follows (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Precedes (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Neighbor (const OPOBJ& OtherIrset);
-  virtual OPOBJ *XPeer (const OPOBJ& OtherIrset);
-  virtual OPOBJ *Peer (const OPOBJ& OtherIrset);
-  virtual OPOBJ *BeforePeer (const OPOBJ& Irset);
-  virtual OPOBJ *AfterPeer (const OPOBJ& Irset);
+  virtual OPOBJ *Near (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Far (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *After (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Before (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Adj (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Follows (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Precedes (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Neighbor (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *XPeer (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Peer (const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *BeforePeer (const OPOBJ& Irset) override;
+  virtual OPOBJ *AfterPeer (const OPOBJ& Irset) override;
 
 
-  virtual OPOBJ *Within(const OPOBJ& OtherIrset, const STRING& Fieldname);
-  virtual OPOBJ *BeforeWithin(const OPOBJ& OtherIrset, const STRING& Fieldname);
-  virtual OPOBJ *AfterWithin(const OPOBJ& OtherIrset, const STRING& Fieldname);
+  virtual OPOBJ *Within(const OPOBJ& OtherIrset, const STRING& Fieldname) override;
+  virtual OPOBJ *BeforeWithin(const OPOBJ& OtherIrset, const STRING& Fieldname) override;
+  virtual OPOBJ *AfterWithin(const OPOBJ& OtherIrset, const STRING& Fieldname) override;
 
   // Unary Functions
   virtual OPOBJ *Within(const char *field);
   virtual OPOBJ *Within(const DATERANGE& Daterange);
-  virtual OPOBJ *Within(const STRING& FieldName);
-  virtual OPOBJ *Inside(const STRING& FieldName);
-  virtual OPOBJ *Sibling ( );
-  virtual OPOBJ *Inclusive(const STRING& FieldName);
-  virtual OPOBJ *XWithin(const STRING& FieldName);
-  virtual OPOBJ *Not ( );
+  virtual OPOBJ *Within(const STRING& FieldName) override;
+  virtual OPOBJ *Inside(const STRING& FieldName) override;
+  virtual OPOBJ *Sibling ( ) override;
+  virtual OPOBJ *Inclusive(const STRING& FieldName) override;
+  virtual OPOBJ *XWithin(const STRING& FieldName) override;
+  virtual OPOBJ *Not ( ) override;
 
   // Special Unary Functions
-  virtual OPOBJ *WithinFile(const STRING& FileSpec);
-  virtual OPOBJ *WithinDoctype(const STRING& DoctypeNameSpec);
-  virtual OPOBJ *WithKey(const STRING& KeySpec);
+  virtual OPOBJ *WithinFile(const STRING& FileSpec) override;
+  virtual OPOBJ *WithinDoctype(const STRING& DoctypeNameSpec) override;
+  virtual OPOBJ *WithKey(const STRING& KeySpec) override;
 
-  virtual OPOBJ *Not (const STRING& FieldName);
+  virtual OPOBJ *Not (const STRING& FieldName) override;
 
   // Unary
-  virtual OPOBJ *Reduce(const float Metric=0.0);
-  virtual OPOBJ *Trim(const float Metric=0.0);
-  virtual OPOBJ *HitCount(const float Metric=0.0);
+  virtual OPOBJ *Reduce(const float Metric=0.0) override;
+  virtual OPOBJ *Trim(const float Metric=0.0) override;
+  virtual OPOBJ *HitCount(const float Metric=0.0) override;
 
   // Score = Score * Weight
-  OPOBJ *BoostScore (const float Weight = 1);
+  OPOBJ *BoostScore (const float Weight = 1) override;
 
  // Unary Sort
-  virtual OPOBJ *SortBy (const STRING& ByWhat);
+  virtual OPOBJ *SortBy (const STRING& ByWhat) override;
 
   // Distance metric operator (Distance >= 0 near, Distance < 0 far)
   OPOBJ *CharProx (const OPOBJ& OtherIrset, const float Metric,
-	DIR_T dir = OPOBJ::BEFOREorAFTER);
+	DIR_T dir = OPOBJ::BEFOREorAFTER) override;
   // Convienience
   OPOBJ *WithinXChars (const OPOBJ& OtherIrset, float Metric = 50) {
      return CharProx (OtherIrset, Metric, BEFOREorAFTER);
@@ -256,14 +260,14 @@ public:
 	SortByExtIndex(SortBy);
     SortRequest = SortBy;
   }
-  INT GetSort() const { return (INT)Sort; }
+  INT GetSort() const override { return (INT)Sort; } 
   void setSortedByScore() { Sort = ByScore; }
 
-  void SetParent (PIDBOBJ const NewParent) { Parent = NewParent; }
-  PIDBOBJ GetParent () const               { return Parent;      }
+  void SetParent (PIDBOBJ const NewParent) override { Parent = NewParent; }
+  PIDBOBJ GetParent () const override               { return Parent;      }
 
-  DOUBLE GetMaxScore() const { return MaxScore; }
-  DOUBLE GetMinScore() const { return MinScore; }
+  DOUBLE GetMaxScore() const override { return MaxScore; }
+  DOUBLE GetMinScore() const override { return MinScore; }
 
   void   SetMaxEntriesAdvice (size_t nMax) { MaxEntriesAdvice=nMax; }
   size_t GetMaxEntriesAdvice () const      { return MaxEntriesAdvice; }
@@ -360,173 +364,913 @@ class atomicIRSETptr {
     signed   int   count_;      // reference count
 };
 
-///////////////////////////////////////////////////////////////
-/// _IRSET: atomicIRSET using "smart" pointers
-///////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////
+/// _IRSET: copy-on-write wrapper around atomicIRSET
+/////////////////////////////////////////////////////////////////
+///
+///
+/// Important:
+///   - _IRSET copies share the contained atomicIRSET.
+///   - Mutating operations detach first.
+///   - The inherited OPERAND state is never copied because historical
+///     OPERAND/ATTRLIST copying is not ownership-safe.
+///
+/////////////////////////////////////////////////////////////////
 
-class _IRSET :  public OPERAND {
+class _IRSET : public OPERAND
+{
+private:
+  using shared_type = std::shared_ptr<atomicIRSET>;
+
+  /*
+   * Create a completely initialized atomicIRSET and then copy the source
+   * through atomicIRSET's assignment operator.
+   *
+   * This deliberately avoids the implicit atomicIRSET copy constructor.
+   */
+  static shared_type DeepCopy(const atomicIRSET& Source)
+  {
+    shared_type Copy = std::make_shared<atomicIRSET>(
+        Source.GetParent(),
+        Source.GetTotalEntries());
+
+    *Copy = Source;
+    return Copy;
+  }
+
+  /*
+   * Construct from an OPOBJ only when it is actually an atomicIRSET.
+   */
+  static shared_type FromOperand(const OPOBJ& Source)
+  {
+    const atomicIRSET* Irset =
+        dynamic_cast<const atomicIRSET*>(&Source);
+
+    if (Irset == NULL) {
+      message_log(
+          LOG_ERROR,
+          "_IRSET: cannot construct from non-atomicIRSET operand");
+
+      return std::make_shared<atomicIRSET>();
+    }
+
+    return DeepCopy(*Irset);
+  }
+
+  /*
+   * Const access never detaches.
+   */
+  const atomicIRSET* cnode() const noexcept
+  {
+    return p_.get();
+  }
+
+  /*
+   * Mutable access performs copy-on-write detachment.
+   */
+  atomicIRSET* node()
+  {
+    if (p_.use_count() != 1)
+      p_ = DeepCopy(*p_);
+
+    return p_.get();
+  }
+
+  /*
+   * Used when the following operation replaces the complete logical
+   * contents, such as Read() or LoadTable().
+   *
+   * When shared, this avoids copying data that is immediately replaced.
+   */
+  atomicIRSET* replacement_node()
+  {
+    if (p_.use_count() != 1) {
+      const PIDBOBJ Parent = p_->GetParent();
+      p_ = std::make_shared<atomicIRSET>(Parent);
+    }
+
+    return p_.get();
+  }
+
 public:
-  atomicIRSETptr* operator-> () { return p_; }
-  atomicIRSETptr& operator* ()  { return *p_; }
-
-  _IRSET(const PIDBOBJ DbParent = NULL, size_t Reserve = 0) {
-    p_ = new atomicIRSETptr( DbParent, Reserve);
-  }
-  _IRSET (const atomicIRSET& OtherIrset) {
-    p_ = new atomicIRSETptr(OtherIrset);
-  }
-  _IRSET (const OPOBJ& OtherIrset) {
-    p_ = new atomicIRSETptr(OtherIrset);
+  explicit _IRSET(
+      const PIDBOBJ DbParent = NULL,
+      const size_t Reserve = 0)
+    : OPERAND(),
+      p_(std::make_shared<atomicIRSET>(DbParent, Reserve))
+  {
   }
 
-  _IRSET(const _IRSET& Irset) {
-     ++Irset.p_->count_;
-     p_ = Irset.p_;
+  explicit _IRSET(const atomicIRSET& OtherIrset)
+    : OPERAND(),
+      p_(DeepCopy(OtherIrset))
+  {
   }
-/*
-  operator const atomicIRSET*() const { return p_->ptr_;    }
-  operator const atomicIRSET() const  { return *(p_->ptr_); }
-*/
-  operator const OPOBJ*() const       { return p_->ptr_;    }
-//operator const OPOBJ() const        { return *(p_->ptr_); }
 
-  _IRSET& operator= (const _IRSET& Irset) {
-    ++Irset.p_->count_;
-    unlock();
-    p_ = Irset.p_;
+  explicit _IRSET(const OPOBJ& OtherOperand)
+    : OPERAND(),
+      p_(FromOperand(OtherOperand))
+  {
+  }
+
+  /*
+   * Do not default these operations.
+   *
+   * Defaulting them would also copy OPERAND, whose ATTRLIST state has
+   * historical shallow-copy ownership behavior.
+   */
+  _IRSET(const _IRSET& Other) noexcept
+    : OPERAND(),
+      p_(Other.p_)
+  {
+  }
+
+  _IRSET(_IRSET&& Other) noexcept
+    : OPERAND(),
+      p_(std::move(Other.p_))
+  {
+  }
+
+  _IRSET& operator=(const _IRSET& Other) noexcept
+  {
+    if (this != &Other)
+      p_ = Other.p_;
+
     return *this;
   }
 
-  _IRSET& Concat (const _IRSET& OtherIrset) {
-    node()->Concat(OtherIrset);
+  _IRSET& operator=(_IRSET&& Other) noexcept
+  {
+    if (this != &Other)
+      p_ = std::move(Other.p_);
+
     return *this;
   }
 
-  OPOBJ* Duplicate () const { return (OPOBJ *)this; }
-  _IRSET* Duplicate()       { lock(); return this;  }
+  ~_IRSET() override = default;
 
-  INT    GetSort() const         { return p_->ptr_->GetSort();         }
-  DOUBLE GetMaxScore() const     { return p_->ptr_->GetMaxScore();     }
-  DOUBLE GetMinScore() const     { return p_->ptr_->GetMinScore();     }
-  size_t GetHitTotal () const    { return p_->ptr_->GetHitTotal();     }
-  size_t GetTotalEntries() const { return p_->ptr_->GetTotalEntries(); }
-  size_t SetTotalEntries(size_t NewTotal) {
-    return (p_->ptr_ = node())->SetTotalEntries(NewTotal); }
-  t_Operand GetOperandType () const{ return p_->ptr_->GetOperandType();}
+  /////////////////////////////////////////////////////////////////
+  // Underlying-object access
+  /////////////////////////////////////////////////////////////////
 
-  PRSET GetRset () const               { return p_->ptr_->GetRset();      }
-  PRSET GetRset (size_t Total) const   { return p_->ptr_->GetRset(Total); }
-  // Getting RSet in two passes...
-  PRSET GetRset(size_t Start, size_t End) const {
-    return p_->ptr_->GetRset(Start, End); }
-  PRSET Fill(size_t Start, size_t End = 0, PRSET set = NULL) const {
-    return p_->ptr_->Fill(Start, End, set); }
-
-  void LoadTable (const STRING& FileName)          { nnode()->LoadTable(FileName); }
-  void SaveTable (const STRING& FileName) const    { p_->ptr_->SaveTable(FileName); }
-
-  void Resize (const size_t Entries)  { if (Entries >= GetTotalEntries()) p_->ptr_->Resize(Entries);
-    else node()->Resize(Entries); }
-  void AddEntry (const IRESULT& ResultRecord, const bool Add) {
-    node()->AddEntry(ResultRecord, Add); }
-  void FastAddEntry(const IRESULT& ResultRecord) { node()->FastAddEntry(ResultRecord); }
-
-  OPOBJ *ComputeScores (const float TermWeight) {
-        return node()->ComputeScoresNormalizationL2(TermWeight); }
-  OPOBJ *ComputeScores (const float TermWeight, enum NormalizationMethods Method) {
-	return node()->ComputeScores(TermWeight, Method); }
-
-  void MergeEntries(bool Add = true)       { p_->ptr_->MergeEntries(Add);      }
-  void Adjust_Scores()                                { p_->ptr_->Adjust_Scores();        }
-  bool GetMdtrec(size_t i, MDTREC *m) const    { return p_->ptr_->GetMdtrec(i, m); }
-  void SetMdt(const IDBOBJ *Idb)                      { p_->ptr_->SetMdt(Idb);            }
-  void SetMdt(const MDT *NewMdt)                      { p_->ptr_->SetMdt(NewMdt);         }
-  const MDT *GetMdt(size_t i) const                   { return p_->ptr_->GetMdt(i);       }
-
-  // Binary Functions
-   virtual OPOBJ *Or (const _IRSET& OtherIrset)       { return node()->Or (OtherIrset);       }
-   virtual OPOBJ *Nor (const _IRSET& OtherIrset)      { return node()->Nor (OtherIrset);      }
-   virtual OPOBJ *And (const _IRSET& OtherIrset)      { return node()->And (OtherIrset);      }
-   virtual OPOBJ *Nand (const _IRSET& OtherIrset)     { return node()->Nand (OtherIrset);     }
-   virtual OPOBJ *AndNot (const _IRSET& OtherIrset)   { return node()->AndNot (OtherIrset);   }
-   virtual OPOBJ *Xor (const _IRSET& OtherIrset)      { return node()->Xor (OtherIrset);      }
-   virtual OPOBJ *Near (const _IRSET& OtherIrset)     { return node()->Near (OtherIrset);     }
-   virtual OPOBJ *Far (const _IRSET& OtherIrset)      { return node()->Far (OtherIrset);      }
-   virtual OPOBJ *After (const _IRSET& OtherIrset)    { return node()->After (OtherIrset);    }
-   virtual OPOBJ *Before (const _IRSET& OtherIrset)   { return node()->Before (OtherIrset);   }
-   virtual OPOBJ *Adj (const _IRSET& OtherIrset)      { return node()->Adj (OtherIrset);      }
-   virtual OPOBJ *Follows (const _IRSET& OtherIrset)  { return node()->Follows (OtherIrset);  }
-   virtual OPOBJ *Precedes (const _IRSET& OtherIrset) { return node()->Precedes (OtherIrset); }
-   virtual OPOBJ *Neighbor (const _IRSET& OtherIrset) { return node()->Neighbor (OtherIrset); }
-  // Distance metric operator (Distance >= 0 near, Distance < 0 far)
-   virtual OPOBJ *CharProx (const _IRSET& OtherIrset, const float Metric, DIR_T dir = BEFOREorAFTER) {
-     return node()->CharProx(OtherIrset, Metric, dir);
-   }
-
-  virtual bool IsEmpty() const { return p_->ptr_->IsEmpty(); }
-
-  // Unary Functions
-   virtual OPOBJ *Not ( )                             { return node()->Not ();                }
-
-   virtual OPOBJ *Reduce(const float Metric)          { return node()->Reduce(Metric);        }
-   virtual OPOBJ *Reduce(const int Metric=0)          { return node()->Reduce((float)Metric); }
-
-  void SortBy(enum SortBy SortBy) { node()->SortBy(SortBy);     }
-
-  bool GetEntry(const size_t Index, IRESULT* ResultRecord) const {
-    return p_->ptr_->GetEntry(Index, ResultRecord);
+  atomicIRSET* operator->()
+  {
+    return node();
   }
-  const IRESULT operator[](size_t n) const { return (*(p_->ptr_))[n]; }
-  IRESULT& operator[](size_t n)            { return (*(p_->ptr_))[n]; }
 
-  void Write(PFILE fp) const { p_->ptr_->Write(fp);     }
-  bool Read(PFILE fp) { return nnode()->Read(fp); }
-  ~_IRSET() { unlock(); }
- private:
-  void    lock() { p_->count_++; }
-  void    unlock() {
-    if (--p_->count_ == 0)
-      delete p_;
+  const atomicIRSET* operator->() const noexcept
+  {
+    return cnode();
   }
-  atomicIRSET * node() {
-    if (p_->count_ > 1)
-      {
-	if (p_->ptr_)
-	  {
-	    // detach ...
-	    unlock(); // decrement count
-	    p_ = new atomicIRSETptr( *(p_->ptr_) );
-	  }
-	else
-	  {
-	    // This should never happen!
-	    message_log (LOG_PANIC, "Stray IRSET in atomicIRSET *node() [count=%d]", p_->count_);
-	    p_ = new atomicIRSETptr ( p_->ptr_->GetParent () );
-	  }
-      }
-    return p_->ptr_;
+
+  atomicIRSET& operator*()
+  {
+    return *node();
   }
-  // Create a new node if needed but don't bother copying
-  atomicIRSET *nnode() {
-    if (p_->count_ > 1)
-      {
-        // detach ...
-        unlock(); // decrement count
-        p_ = new atomicIRSETptr(  p_->ptr_->GetParent ());
-      }
-    return p_->ptr_;
+
+  const atomicIRSET& operator*() const noexcept
+  {
+    return *cnode();
   }
-  atomicIRSETptr *p_;
+
+  operator const OPOBJ*() const noexcept
+  {
+    return cnode();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Copying and concatenation
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* Duplicate() const override
+  {
+    return new _IRSET(*this);
+  }
+
+  _IRSET* Duplicate()
+  {
+    return new _IRSET(*this);
+  }
+
+  _IRSET& Concat(const _IRSET& OtherIrset)
+  {
+    node()->Concat(*OtherIrset.cnode());
+    return *this;
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Basic information
+  /////////////////////////////////////////////////////////////////
+
+  INT GetSort() const override
+  {
+    return cnode()->GetSort();
+  }
+
+  DOUBLE GetMaxScore() const override
+  {
+    return cnode()->GetMaxScore();
+  }
+
+  DOUBLE GetMinScore() const override
+  {
+    return cnode()->GetMinScore();
+  }
+
+  size_t GetHitTotal() const
+  {
+    /*
+     * Logically const, even if atomicIRSET's declaration is not const.
+     */
+    return p_->GetHitTotal();
+  }
+
+  size_t GetTotalEntries() const override
+  {
+    return cnode()->GetTotalEntries();
+  }
+
+  size_t SetTotalEntries(const size_t NewTotal) 
+  {
+    return node()->SetTotalEntries(NewTotal);
+  }
+
+  t_Operand GetOperandType() const override
+  {
+    return cnode()->GetOperandType();
+  }
+
+  bool IsEmpty() const override
+  {
+    return cnode()->IsEmpty();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // RSET conversion
+  /////////////////////////////////////////////////////////////////
+
+  PRSET GetRset() const
+  {
+    return cnode()->GetRset();
+  }
+
+  PRSET GetRset(const size_t Total) const
+  {
+    return cnode()->GetRset(Total);
+  }
+
+  PRSET GetRset(
+      const size_t Start,
+      const size_t End) const
+  {
+    return cnode()->GetRset(Start, End);
+  }
+
+  PRSET Fill(
+      const size_t Start = 1,
+      const size_t End = 0,
+      PRSET Set = NULL) const
+  {
+    return cnode()->Fill(Start, End, Set);
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Storage and table operations
+  /////////////////////////////////////////////////////////////////
+
+  void LoadTable(const STRING& FileName)
+  {
+    replacement_node()->LoadTable(FileName);
+  }
+
+  void SaveTable(const STRING& FileName) const
+  {
+    cnode()->SaveTable(FileName);
+  }
+
+  void Resize(const size_t Entries)
+  {
+    node()->Resize(Entries);
+  }
+
+  void Reserve(const size_t Entries)
+  {
+    node()->Reserve(Entries);
+  }
+
+  void Expand()
+  {
+    node()->Expand();
+  }
+
+  void CleanUp()
+  {
+    node()->CleanUp();
+  }
+
+  void Clear()
+  {
+    node()->Clear();
+  }
+
+  void GC()
+  {
+    node()->GC();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Entry access
+  /////////////////////////////////////////////////////////////////
+
+  void AddEntry( const IRESULT& ResultRecord, const bool AddHitCounts) 
+  {
+    node()->AddEntry(ResultRecord, AddHitCounts);
+  }
+
+  void FastAddEntry(const IRESULT& ResultRecord) 
+  {
+    node()->FastAddEntry(ResultRecord);
+  }
+
+  bool GetEntry( const size_t Index, PIRESULT ResultRecord) const override
+  {
+    return cnode()->GetEntry(Index, ResultRecord);
+  }
+
+  IRESULT GetEntry(const size_t Index) const
+  {
+    return cnode()->GetEntry(Index);
+  }
+
+  IRESULT operator[](const size_t Index) const 
+  {
+    return (*cnode())[Index];
+  }
+
+  IRESULT& operator[](const size_t Index)
+  {
+    return (*node())[Index];
+  }
+
+  INDEX_ID GetIndex(const size_t Index) const 
+  {
+    return p_->GetIndex(Index);
+  }
+
+  bool SetSortIndex( const size_t Index, const SORT_INDEX_ID& SortIndex) 
+  {
+    return node()->SetSortIndex(Index, SortIndex);
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Scoring
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* ComputeScores(
+      const float TermWeight,
+      const enum NormalizationMethods Method =
+          defaultNormalization)
+  {
+    return node()->ComputeScores(TermWeight, Method);
+  }
+
+  OPOBJ* ComputeScoresNoNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresNoNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresNormalizationAF(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresNormalizationAF(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresNormalizationL2(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresNormalizationL2(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresNormalizationL1(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresNormalizationL1(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresMaxNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresMaxNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresLogNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresLogNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresBytesNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresBytesNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresCosineMetricNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresCosineMetricNormalization(
+        TermWeight);
+  }
+
+  OPOBJ* ComputeScoresHybridNormalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresHybridNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresAux1Normalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresAux1Normalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresAux2Normalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresAux2Normalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresAux3Normalization(
+      const float TermWeight)
+  {
+    return node()->ComputeScoresAux3Normalization(TermWeight);
+  }
+
+  void SetPrecomputed(
+      const enum NormalizationMethods Method)
+  {
+    node()->SetPrecomputed(Method);
+  }
+
+  void MergeEntries(const bool AddHitCounts = true)
+  {
+    node()->MergeEntries(AddHitCounts);
+  }
+
+  void Adjust_Scores()
+  {
+    node()->Adjust_Scores();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // MDT and virtual-index information
+  /////////////////////////////////////////////////////////////////
+
+  bool GetMdtrec(
+      const size_t Index,
+      MDTREC* Record) const
+  {
+    return cnode()->GetMdtrec(Index, Record);
+  }
+
+  void SetMdt(const IDBOBJ* Idb)
+  {
+    node()->SetMdt(Idb);
+  }
+
+  void SetMdt(const MDT* NewMdt)
+  {
+    node()->SetMdt(NewMdt);
+  }
+
+  const MDT* GetMdt(const size_t Index) const
+  {
+    return cnode()->GetMdt(Index);
+  }
+
+  void SetVirtualIndex(const UCHR NewVirtualIndex)
+  {
+    node()->SetVirtualIndex(NewVirtualIndex);
+  }
+
+  UCHR GetVirtualIndex(const size_t Index) const
+  {
+    return cnode()->GetVirtualIndex(Index);
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Binary Boolean operations
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* Or(const _IRSET& Other)
+  {
+    return node()->Or(*Other.cnode());
+  }
+
+  OPOBJ* Nor(const _IRSET& Other)
+  {
+    return node()->Nor(*Other.cnode());
+  }
+
+  OPOBJ* And(const _IRSET& Other)
+  {
+    return node()->And(*Other.cnode());
+  }
+
+  OPOBJ* And(
+      const _IRSET& Other,
+      const size_t Limit)
+  {
+    return node()->And(*Other.cnode(), Limit);
+  }
+
+  OPOBJ* Nand(const _IRSET& Other)
+  {
+    return node()->Nand(*Other.cnode());
+  }
+
+  OPOBJ* AndNot(const _IRSET& Other)
+  {
+    return node()->AndNot(*Other.cnode());
+  }
+
+  OPOBJ* Xor(const _IRSET& Other)
+  {
+    return node()->Xor(*Other.cnode());
+  }
+
+  OPOBJ* Join(const _IRSET& Other)
+  {
+    return node()->Join(*Other.cnode());
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Binary proximity operations
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* Near(const _IRSET& Other)
+  {
+    return node()->Near(*Other.cnode());
+  }
+
+  OPOBJ* Far(const _IRSET& Other)
+  {
+    return node()->Far(*Other.cnode());
+  }
+
+  OPOBJ* After(const _IRSET& Other)
+  {
+    return node()->After(*Other.cnode());
+  }
+
+  OPOBJ* Before(const _IRSET& Other)
+  {
+    return node()->Before(*Other.cnode());
+  }
+
+  OPOBJ* Adj(const _IRSET& Other)
+  {
+    return node()->Adj(*Other.cnode());
+  }
+
+  OPOBJ* Follows(const _IRSET& Other)
+  {
+    return node()->Follows(*Other.cnode());
+  }
+
+  OPOBJ* Precedes(const _IRSET& Other)
+  {
+    return node()->Precedes(*Other.cnode());
+  }
+
+  OPOBJ* Neighbor(const _IRSET& Other)
+  {
+    return node()->Neighbor(*Other.cnode());
+  }
+
+  OPOBJ* XPeer(const _IRSET& Other)
+  {
+    return node()->XPeer(*Other.cnode());
+  }
+
+  OPOBJ* Peer(const _IRSET& Other)
+  {
+    return node()->Peer(*Other.cnode());
+  }
+
+  OPOBJ* BeforePeer(const _IRSET& Other)
+  {
+    return node()->BeforePeer(*Other.cnode());
+  }
+
+  OPOBJ* AfterPeer(const _IRSET& Other)
+  {
+    return node()->AfterPeer(*Other.cnode());
+  }
+
+  OPOBJ* Within(
+      const _IRSET& Other,
+      const STRING& FieldName)
+  {
+    return node()->Within(*Other.cnode(), FieldName);
+  }
+
+  OPOBJ* BeforeWithin(
+      const _IRSET& Other,
+      const STRING& FieldName)
+  {
+    return node()->BeforeWithin(
+        *Other.cnode(),
+        FieldName);
+  }
+
+  OPOBJ* AfterWithin(
+      const _IRSET& Other,
+      const STRING& FieldName)
+  {
+    return node()->AfterWithin(
+        *Other.cnode(),
+        FieldName);
+  }
+
+  OPOBJ* CharProx(
+      const _IRSET& Other,
+      const float Metric,
+      const DIR_T Direction = OPOBJ::BEFOREorAFTER)
+  {
+    return node()->CharProx(
+        *Other.cnode(),
+        Metric,
+        Direction);
+  }
+
+  OPOBJ* WithinXChars(
+      const _IRSET& Other,
+      const float Metric = 50)
+  {
+    return CharProx(
+        Other,
+        Metric,
+        OPOBJ::BEFOREorAFTER);
+  }
+
+  OPOBJ* WithinXChars_Before(
+      const _IRSET& Other,
+      const float Metric = 50)
+  {
+    return CharProx(
+        Other,
+        Metric,
+        OPOBJ::BEFORE);
+  }
+
+  OPOBJ* WithinXChars_After(
+      const _IRSET& Other,
+      const float Metric = 50)
+  {
+    return CharProx(
+        Other,
+        Metric,
+        OPOBJ::AFTER);
+  }
+
+  OPOBJ* WithinXPercent(
+      const _IRSET& Other,
+      const float Metric)
+  {
+    if (Metric >= 100.0)
+      return And(Other);
+
+    return CharProx(
+        Other,
+        Metric / 100.0F,
+        OPOBJ::BEFOREorAFTER);
+  }
+
+  OPOBJ* WithinXPercent_Before(
+      const _IRSET& Other,
+      const float Metric)
+  {
+    if (Metric >= 100.0)
+      return Before(Other);
+
+    return CharProx(
+        Other,
+        Metric / 100.0F,
+        OPOBJ::BEFORE);
+  }
+
+  OPOBJ* WithinXPercent_After(
+      const _IRSET& Other,
+      const float Metric)
+  {
+    if (Metric >= 100.0)
+      return After(Other);
+
+    return CharProx(
+        Other,
+        Metric / 100.0F,
+        OPOBJ::AFTER);
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Unary operations
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* Not() override
+  {
+    return node()->Not();
+  }
+
+  OPOBJ* Not(const STRING& FieldName) override
+  {
+    return node()->Not(FieldName);
+  }
+
+  OPOBJ* Reduce(const float Metric = 0.0F) override
+  {
+    return node()->Reduce(Metric);
+  }
+
+  OPOBJ* Trim(const float Metric = 0.0F) override
+  {
+    return node()->Trim(Metric);
+  }
+
+  OPOBJ* HitCount(const float Metric = 0.0F) override
+  {
+    return node()->HitCount(Metric);
+  }
+
+  OPOBJ* BoostScore(const float Weight = 1.0F) override
+  {
+    return node()->BoostScore(Weight);
+  }
+
+  OPOBJ* Within(const char* FieldName) 
+  {
+    return node()->Within(FieldName);
+  }
+
+  OPOBJ* Within(const DATERANGE& DateRange) 
+  {
+    return node()->Within(DateRange);
+  }
+
+  OPOBJ* Within(const STRING& FieldName) override
+  {
+    return node()->Within(FieldName);
+  }
+
+  OPOBJ* Inside(const STRING& FieldName) override
+  {
+    return node()->Inside(FieldName);
+  }
+
+  OPOBJ* Sibling() override
+  {
+    return node()->Sibling();
+  }
+
+  OPOBJ* Inclusive(const STRING& FieldName) override
+  {
+    return node()->Inclusive(FieldName);
+  }
+
+  OPOBJ* XWithin(const STRING& FieldName) override
+  {
+    return node()->XWithin(FieldName);
+  }
+
+  OPOBJ* WithinFile(const STRING& FileSpecification) override
+  {
+    return node()->WithinFile(FileSpecification);
+  }
+
+  OPOBJ* WithinDoctype(const STRING& DoctypeSpecification) override
+  {
+    return node()->WithinDoctype(DoctypeSpecification);
+  }
+
+  OPOBJ* WithKey(const STRING& KeySpecification) override
+  {
+    return node()->WithKey(KeySpecification);
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Sorting
+  /////////////////////////////////////////////////////////////////
+
+  OPOBJ* SortBy(const STRING& ByWhat) override
+  {
+    return node()->SortBy(ByWhat);
+  }
+
+  void SortBy(const enum SortBy SortOrder)
+  {
+    node()->SortBy(SortOrder);
+  }
+
+  void SortBy(int (*Function)(const void*, const void*))
+  {
+    node()->SortBy(Function);
+  }
+
+  void installSortFunction(
+      int (*Function)(const void*, const void*))
+  {
+    node()->installSortFunction(Function);
+  }
+
+  void setSortedByScore()
+  {
+    node()->setSortedByScore();
+  }
+
+  void setPrivateSortUserData(void* Data)
+  {
+    node()->setPrivateSortUserData(Data);
+  }
+
+  void* getPrivateSortUserData() const
+  {
+    return cnode()->getPrivateSortUserData();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Parent and limits
+  /////////////////////////////////////////////////////////////////
+
+  void SetParent(PIDBOBJ const NewParent) override
+  {
+    node()->SetParent(NewParent);
+  }
+
+  PIDBOBJ GetParent() const override
+  {
+    return cnode()->GetParent();
+  }
+
+  void SetMaxEntriesAdvice(const size_t Maximum)
+  {
+    node()->SetMaxEntriesAdvice(Maximum);
+  }
+
+  size_t GetMaxEntriesAdvice() const
+  {
+    return cnode()->GetMaxEntriesAdvice();
+  }
+
+  /////////////////////////////////////////////////////////////////
+  // Serialization and diagnostics
+  /////////////////////////////////////////////////////////////////
+
+  void Write(PFILE File) const
+  {
+    cnode()->Write(File);
+  }
+
+  bool Read(PFILE File)
+  {
+    return replacement_node()->Read(File);
+  }
+
+  void Dump(
+      const INT Skip = 0,
+      ostream& Stream = cout) const
+  {
+    cnode()->Dump(Skip, Stream);
+  }
+
+  bool IsShared() const noexcept
+  {
+    return p_.use_count() > 1;
+  }
+
+  bool IsUnique() const noexcept
+  {
+    return p_.use_count() == 1;
+  }
+
+  long UseCount() const noexcept
+  {
+    return p_.use_count();
+  }
+
+private:
+  shared_type p_;
 };
 
 typedef _IRSET* P_IRSET;
 
-#if 0
-# define IRSET  _IRSET
-# define PIRSET P_IRSET
+#include "irset_type.hxx"
+
+#ifdef IB_USE_COW_IRSET
+# define IRSET _IRSET
 #else
 # define IRSET atomicIRSET
-# define PIRSET PatomicIRSET
 #endif
+
 
 #endif
