@@ -605,3 +605,38 @@ FC FCACHE::FcInField (const GPTYPE HitGp, FILE *fp) const
   // NOT FOUND
   return FC(0,0);
 }
+
+
+
+FC FCACHE::FcInField_Mapped(const GPTYPE HitGp) const
+{
+  const FC* Base = (const FC*)Cache.Ptr(); 
+  size_t Total = Cache.Size() / sizeof(FC); 
+
+  if (Total == 0 || Base == NULL)
+    return FC(0,0);
+
+  size_t Low = 0;
+  size_t High = Total - 1;
+  size_t X = High / 2;
+  size_t OldX;
+
+  do
+    {
+      OldX = X;
+      const FC& Fc = Base[X];          // no seek, no read — direct memory access
+
+      if (Fc.Contains(HitGp))
+        return Fc;
+      if (HitGp < Fc)
+        High = X;
+      else
+        Low = X + 1;
+
+      if ((X = (Low + High) / 2) >= Total)
+        X = Total - 1;
+    }
+  while (X != OldX);
+
+  return FC(0,0);
+}

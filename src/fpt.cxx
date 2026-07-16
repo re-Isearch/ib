@@ -687,3 +687,29 @@ void FPT::Revalidate()
         }
     }
 }
+
+
+
+off_t FPT::ffsize (const STRING& FileName, const CHR* Type)
+{
+  size_t z = Lookup(FileName);
+  if (z == 0)
+    return -1;
+
+  FPREC& Fprec = Table[z - 1];
+  const STRING Om(Fprec.GetOpenMode());
+  if (Om[0] != 'r')
+    return -1;               // write/append: never cached, always -1
+
+  off_t cached = Fprec.GetCachedSize();
+  if (cached >= 0)
+    return cached;            // valid until next InvalidateAllCachedSizes()
+
+  PFILE Fp = Fprec.GetFilePointer();
+  if (!Fp)
+    return -1;
+
+  off_t length = GetFileSize(Fp);
+  Fprec.SetCachedSize(length);
+  return length;
+}

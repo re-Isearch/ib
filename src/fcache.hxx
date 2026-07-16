@@ -31,6 +31,7 @@ public:
    bool ValidateInField(const FC& HitFc, STRSTACK Stack, bool Disk);
 
    FC FcInField (const GPTYPE HitGp, FILE *fp) const;
+   FC FcInField_Mapped(const GPTYPE HitGp) const;
 
    // The workhorses..
    bool ValidateInField (const GPTYPE HitGp, const STRING& FieldName) const;

@@ -98,6 +98,36 @@ VLIST *VLIST::GetNodePtr (const size_t Index) const
   return NULL;			// Index was never matched
 }
 
+#if 1
+
+void VLIST::Clear()
+{
+  if (Next == this)
+    return;
+
+  VLIST* node = Next;
+
+  // Break the circle at the tail.
+  if (Prev)
+    Prev->Next = NULL;
+
+  // Isolate this node.
+  Next = Prev = this;
+
+  while (node != NULL)
+  {
+    VLIST* next = node->Next;
+
+    node->Next = node;
+    node->Prev = node;
+
+    delete node;
+    node = next;
+  }
+}
+
+#else
+
 void VLIST::Clear ()
 {
   if (this->Next != this)
@@ -108,6 +138,7 @@ void VLIST::Clear ()
       Next = Prev =  this;	// reattach circle of one
     }
 }
+#endif
 
 void VLIST::EraseAfter (const size_t Index)
 {
@@ -142,6 +173,9 @@ void VLIST::Sort( int (*compar) (const void *, const void *))
 
 VLIST::~VLIST ()
 {
+#if 1
+  Clear();
+#else
   // Disattach from previous node
   if (Prev)
     Prev->Next = NULL;
@@ -149,4 +183,5 @@ VLIST::~VLIST ()
   if (Next)
     delete Next;
   Next = Prev = this; // a circle of one
+#endif
 }

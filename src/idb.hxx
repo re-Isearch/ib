@@ -631,8 +631,9 @@ public:
   INT ffclose(PFILE FilePointer) {
 	return MainFpt.ffclose (FilePointer); }
   INT ffclose(const STRING& Filename) {
-	return MainFpt.ffclose(Filename);
-  }
+	return MainFpt.ffclose(Filename); }
+  INT ffsize(const STRING& Filename, const CHR* Type) {
+        return MainFpt.ffsize(Filename, Type); }
   INT ffdispose(PFILE FilePointer) {
 	return MainFpt.ffdispose(FilePointer); }
   INT ffdispose(const STRING& Filename) {

@@ -21,9 +21,15 @@ public:
   int GetPriority() const                     { return Priority;        }
   void SetClosed()                            { RefCount--;             }
   void SetOpened()                            { RefCount++;             }
-  bool GetClosed() const               { return RefCount <= 0;   }
-  bool GetOpened() const               { return RefCount > 0;    }
+  bool GetClosed() const                      { return RefCount <= 0;   }
+  bool GetOpened() const                      { return RefCount > 0;    }
   void SetOpenMode(const STRING& NewMode)     { OpenMode = NewMode;     }
+
+  // -1 means unknown or append/write mode
+  off_t GetCachedSize() const                 { return CachedSize;      }
+  void  SetCachedSize(off_t sz)               { CachedSize = sz;        }
+  void  InvalidateCachedSize()                { CachedSize = -1;        }
+
   const STRING& GetOpenMode() const           { return OpenMode;        }
   void Dispose();
   operator       STRING () const;
@@ -35,6 +41,8 @@ private:
   STRING OpenMode;
   int    Priority;
   int    RefCount;
+  off_t  CachedSize = -1;  // -1 == unknown, must stat
+
 };
 
 typedef FPREC* PFPREC;

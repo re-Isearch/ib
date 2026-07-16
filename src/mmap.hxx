@@ -9,6 +9,9 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include <sys/types.h>
 #include "string.hxx"
 
+#include <list>
+#include <unordered_map>
+
 // Forward define internal types if missing
 typedef unsigned char UCHR;
 typedef unsigned char* PUCHR;
@@ -196,5 +199,138 @@ private:
   size_t MaxElements;
   MMAP *Table;
 };
+
+
+#if 1
+
+class MultiMMapSession
+{
+public:
+  explicit MultiMMapSession(size_t maxBytes = 512ULL * 1024 * 1024) // e.g. 512MB budget
+    : m_MaxBytes(maxBytes), m_CurrentBytes(0) {}
+
+  ~MultiMMapSession() { Clear(); }
+
+  const unsigned char* GetMemoryBase(const STRING& FileName,
+                                      enum mapping_access flag = MapRandom)
+  {
+    auto it = m_Index.find(FileName);
+    if (it != m_Index.end())
+      {
+        TouchMRU(it->second);
+        return it->second->second.BaseAddress;
+      }
+
+    MMAP* Mapped = new MMAP(FileName, flag);
+    if (!Mapped || !Mapped->Ok())
+      {
+        delete Mapped;
+        return nullptr;
+      }
+
+    const size_t FileBytes = Mapped->Size();
+
+    // Evict LRU entries until there's room for this one, or nothing left to evict.
+    // A single huge file (e.g. 97MB "is") is allowed in even if it alone
+    // exceeds a modest budget — see note below.
+    while (m_CurrentBytes + FileBytes > m_MaxBytes && !m_List.empty())
+      EvictLRU();
+
+    Slot S;
+    S.FileName     = FileName;
+    S.MMapInstance = Mapped;
+    S.BaseAddress  = reinterpret_cast<const unsigned char*>(Mapped->Ptr());
+    S.Bytes        = FileBytes;
+
+    m_List.push_front({FileName, S});
+    m_Index[FileName] = m_List.begin();
+    m_CurrentBytes += FileBytes;
+
+    return S.BaseAddress;
+  }
+
+  void Invalidate(const STRING& FileName)
+  {
+    auto it = m_Index.find(FileName);
+    if (it != m_Index.end())
+      {
+        m_CurrentBytes -= it->second->second.Bytes;
+        CloseSlot(it->second->second);
+        m_List.erase(it->second);
+        m_Index.erase(it);
+      }
+  }
+
+  void Clear()
+  {
+    for (auto& entry : m_List)
+      CloseSlot(entry.second);
+    m_List.clear();
+    m_Index.clear();
+    m_CurrentBytes = 0;
+  }
+
+  size_t CurrentBytes() const { return m_CurrentBytes; }
+
+private:
+  struct Slot
+    {
+      STRING FileName;
+      MMAP*  MMapInstance = nullptr;
+      const unsigned char* BaseAddress = nullptr;
+      size_t Bytes = 0;
+    };
+
+  using ListEntry = std::pair<STRING, Slot>;
+  using ListType  = std::list<ListEntry>;
+
+  size_t   m_MaxBytes;
+  size_t   m_CurrentBytes;
+  ListType m_List;
+  std::unordered_map<STRING, ListType::iterator> m_Index;
+
+  void TouchMRU(ListType::iterator it)
+  {
+    m_List.splice(m_List.begin(), m_List, it);
+  }
+
+  void EvictLRU()
+  {
+    if (m_List.empty())
+      return;
+    auto& lru = m_List.back();
+    m_CurrentBytes -= lru.second.Bytes;
+    CloseSlot(lru.second);
+    m_Index.erase(lru.first);
+    m_List.pop_back();
+  }
+
+  void CloseSlot(Slot& S)
+  {
+    if (S.MMapInstance)
+      {
+        S.MMapInstance->Unmap();
+        delete S.MMapInstance;
+        S.MMapInstance = nullptr;
+      }
+  }
+};
+
+
+
+
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
 
 #endif

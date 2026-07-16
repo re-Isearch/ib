@@ -3610,6 +3610,17 @@ size_t INDEX::BuildGpList(const DOCTYPE_ID& Doctype,
 # define ERROR_SET ((PIRSET)0)	/* Null */
 
 
+static void DiscardOpStack(OPSTACK& Stack)
+{
+  POPOBJ Object = NULL;
+
+  while (Stack >> Object) {
+    delete Object;
+    Object = NULL;
+  }
+}
+
+
 PIRSET INDEX::Search (const QUERY& Query)
 {
   enum NormalizationMethods Method = Query.GetNormalizationMethod();
@@ -3793,10 +3804,15 @@ PIRSET INDEX::Search (const QUERY& Query)
                       break;
                     case OperatorAnd:
 		      SwapOp(Op1,Op2);
-		      OPOBJ* Result = Op1->And(*Op2);
-		      Stack << Result; 
-		      if (Query.CanTerminateOnEmpty() && Result != NULL && Result->GetTotalEntries() == 0)
+		      { OPOBJ* Result = Op1->And(*Op2);
+			if (Query.CanTerminateOnEmpty() && Result != NULL && Result->GetTotalEntries() == 0) {
+			/* Normally Result would be pushed onto Stack and processed on the
+			 * next iteration as a TypeRset operand. Since we are terminating,
+			 * place it directly onto TempStack instead.  */
+			TempStack << Result;
 			StopEvaluation = true;
+		        } else Stack << Result;
+		      }
                       break;
                     case OperatorNotAnd:
                       // A B NOTAND := B A ANDNOT
@@ -4357,16 +4373,18 @@ for (size_t i = 1; i <= NewIrset->GetTotalEntries(); i++)
 #endif
 
 #if 1
-  if (!Stack.IsEmpty())
-    {
-      message_log (LOG_INFO, "Query stack was not empty. Malformed query.");
-      Parent->SetErrorCode(108); // "Malformed query";
-    }
-  if (!TempStack.IsEmpty())
-    {
-      message_log (LOG_INFO, "Search stack was not empty. Malformed RPN.");
-      Parent->SetErrorCode(108); // "Malformed query";
-    }
+  if (!StopEvaluation) {
+    if (!Stack.IsEmpty())
+      {
+        message_log (LOG_INFO, "Query stack was not empty. Malformed query.");
+        Parent->SetErrorCode(108); // "Malformed query";
+      }
+    if (!TempStack.IsEmpty())
+      {
+        message_log (LOG_INFO, "Search stack was not empty. Malformed RPN.");
+        Parent->SetErrorCode(108); // "Malformed query";
+      }
+   }
 #endif
 
   // Do we want to clip the set?

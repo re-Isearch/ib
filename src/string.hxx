@@ -1281,6 +1281,20 @@ bool Read(PSTRING s, PFILE Fp);
 
 inline STRING XMLCommentStrip(const STRING& Input) { return STRING(Input).XMLCommentStrip(); };
 
+// Put this near STRING's declaration, or in mmap.hxx before first use.
+namespace std
+{
+  template<>
+  struct hash<STRING>
+  {
+    size_t operator()(const STRING& s) const noexcept
+    {
+      return s.Hash();
+    }
+  };
+}
+
+
 #if 0
 // International String
 class I18nSTRING: public STRING {

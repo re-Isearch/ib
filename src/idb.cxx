@@ -1826,6 +1826,98 @@ FC IDB::GetNextFC (const GPTYPE& HitGp, const STRING& fieldname, size_t offset)
 // or path (such as XQuery) of where the HitGp is located..
 //
 
+#if 1
+
+FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
+{
+  const size_t TotalEntries = MainDfdt->GetTotalEntries();
+  FC     PeerFC;
+  STRING PeerFieldName;
+  size_t PeerCount = 0;
+  bool   haveCount = false;
+
+  if (lastPeerField < 1 || lastPeerField > TotalEntries)
+    if ((lastPeerField = TotalEntries / 3) < 1) lastPeerField = 1;
+
+  const size_t start = lastPeerField - 1;
+  const size_t end   = TotalEntries + lastPeerField - 1;
+
+  for (size_t i = start; i < end; i++)
+    {
+      DFD dfd;
+      size_t x = (i % TotalEntries) + 1;
+      MainDfdt->GetEntry(x, &dfd);
+
+      STRING Fn, fieldname(dfd.GetFieldName());
+      DfdtGetFileName(fieldname, &Fn);
+
+      size_t fieldNameCount = fieldname.Count();
+      if (fieldNameCount > 0 && PeerCount == 0)
+        haveCount = true;
+      else if (haveCount && fieldNameCount == 0)
+        continue;
+      else if (PeerCount && !fieldname.Contains(PeerFieldName))
+        continue;
+
+      PFILE Fp = ffopen(Fn, "rb");
+      if (!Fp)
+        continue;
+
+      // Record count for this field file.
+      const off_t fsize = ffsize(Fn, "rb"); // avoid fstat per call
+      const size_t nRecords = fsize / sizeof(FC);
+      if (nRecords == 0)
+        continue;
+
+      // --- Binary search for rightmost record with GetFieldStart() < HitGp ---
+      size_t lo = 0, hi = nRecords; // [lo, hi)
+      FC mid_fc;
+
+      while (lo < hi)
+        {
+          const size_t mid = lo + (hi - lo) / 2;
+          fseek(Fp, (off_t)mid * sizeof(FC), SEEK_SET);
+          mid_fc.Read(Fp);
+
+          if (mid_fc.GetFieldStart() < HitGp)
+            lo = mid + 1;
+          else
+            hi = mid;
+        }
+      // lo is now the first record whose start >= HitGp; step back one
+      // to land where the original backward scan used to stop.
+      size_t idx = (lo > 0) ? lo - 1 : 0;
+
+      // --- Forward scan from idx, same containment logic as before ---
+      fseek(Fp, (off_t)idx * sizeof(FC), SEEK_SET);
+      FC Fc2;
+      if (Fc2.Read(Fp))
+        PeerFC = Fc2;
+
+      while (Fc2.Read(Fp))
+        {
+          if (Fc2.GetFieldEnd() > HitGp)
+            break;
+          if (Fc2.GetFieldStart() >= PeerFC.GetFieldStart())
+            {
+              PeerFC = Fc2;
+              PeerCount = (PeerFieldName = fieldname).Count();
+              lastPeerField = x;
+            }
+        }
+       ffclose(Fp);
+    }
+
+  if (NodeNamePtr)
+    *NodeNamePtr = PeerFieldName;
+  return PeerFC;
+}
+
+
+
+
+#else
+
 FC IDB::GetPeerFc (const GPTYPE& HitGp, STRING *NodeNamePtr)
 {
   const size_t TotalEntries = MainDfdt->GetTotalEntries ();
@@ -1865,7 +1957,7 @@ FC IDB::GetPeerFc (const GPTYPE& HitGp, STRING *NodeNamePtr)
       else if (PeerCount && !fieldname.Contains(PeerFieldName))
         continue;
 
-      PFILE Fp = fopen (Fn, "rb");
+      PFILE Fp = ffopen (Fn, "rb");
       if (Fp)
 	{
 	  looks++;
@@ -1898,13 +1990,14 @@ FC IDB::GetPeerFc (const GPTYPE& HitGp, STRING *NodeNamePtr)
 		    }
 		}
 	    }
-	  fclose(Fp);
+	  ffclose(Fn);
 	}
     }				// for()
   if (NodeNamePtr)
     *NodeNamePtr = PeerFieldName;
   return PeerFC;
 }
+#endif
 
 
 // This code does the heavy lifting to figure out what is the name
@@ -1951,7 +2044,7 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
       else if (PeerCount && !fieldname.Contains(PeerFieldName))
 	continue;
 
-      PFILE Fp = fopen (Fn, "rb");
+      PFILE Fp = ffopen (Fn, "rb");
       if (Fp)
 	{
 	  looks++;
@@ -1999,7 +2092,7 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
 		    }
 		}
 	    }
-	  fclose(Fp);
+	  ffclose(Fp);
 	}
     }				// for()
 //cerr << "(2)Looks = " << looks << "/" << TotalEntries << "  " << PeerFieldName << " x=" << lastPeerField << endl;
@@ -2768,9 +2861,8 @@ PIRSET IDB::Search (const QUERY& nQuery)
 
 #if 1
    // Now optimise
-   OptimizeQuery(&Query);
-
-cerr << "OPTIMZED: " << STRING(Query) << endl;
+   if (OptimizeQuery(&Query))
+     message_log(LOG_INFO, "Optimzed query: %s", STRING(Query).c_str());
 #endif
 
   IRSET *IrsetPtr = MainIndex->Search (Query);
@@ -2839,6 +2931,8 @@ void IDB::BeforeSearching (QUERY* QueryPtr)
 
 IRSET *IDB::AfterSearching (IRSET* ResultSetPtr)
 {
+  MainFpt.InvalidateAllCachedSizes();
+
   if (GlobalDoctype.IsDefined())
     {
       PDOCTYPE DoctypePtr = GetDocTypePtr (GlobalDoctype);

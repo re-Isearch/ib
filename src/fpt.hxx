@@ -26,6 +26,8 @@ public:
   FILE *ffreopen(const STRING& Filename, const CHR* mode, FILE *stream);
   INT   ffclose(FILE *FilePointer);
 
+  off_t ffsize (const STRING& FileName, const CHR* Type);
+
   INT   ffdispose(FILE *FilePointer); // Hard Close
   INT   ffdispose(const STRING& Filename); // Remove Entry
 
@@ -47,6 +49,14 @@ public:
 
   void Revalidate() ; // Work around should a 3rd part lib init close things !
 
+  // Call once, after a full search request has completed processing
+  // (i.e. at the top level, once per incoming query), before the
+  // next search begins using cached field sizes.
+  void InvalidateAllCachedSizes() {
+    if (Table == NULL) return;
+    for (size_t i = 0; i < TotalEntries; i++) 
+      Table[i].InvalidateCachedSize();
+  }
   ~FPT();
 private:
   void   Init(size_t TableSize);
