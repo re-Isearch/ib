@@ -56,6 +56,28 @@ inline UINT8 UINT8of(const void *ptr, int y = 0)
 }
 
 
+inline UINT4 UINT4of(const void *ptr, int y = 0)
+{
+#if IS_BIG_ENDIAN
+  REGISTER UINT4 Gpp;
+  memcpy(&Gpp, (const BYTE *)ptr+y, 4);
+  return Gpp;
+#else
+  const BYTE *x = (const BYTE *)ptr;
+  return (((UINT4)x[y]) << 24)  + (((UINT4)x[y+1]) << 16) + (((UINT4)x[y+2])  << 8)  + x[y+3];
+#endif
+}
+
+inline GPTYPE getGPTYPE(const void *buffer, size_t x)
+{
+#ifdef O_BUILD_IB64
+  return (GPTYPE)UINT8of(buffer, (int)x);
+#else
+  return (GPTYPE)UINT4of(buffer, (int)x); 
+#endif
+}
+
+
 #if IS_BIG_ENDIAN
 # define htonll(x)    (x)
 # define ntohll(x)    (x)
@@ -142,6 +164,26 @@ inline UINT4 getINT4(const void *buffer, size_t x)
 	(((UINT4)((const char *)buffer)[x+1]) << 16) |
 	(((UINT4)((const char *)buffer)[x+2]) << 8)  |
 	(UINT4)((const char *)buffer)[x+3] );
+#endif
+}
+
+inline UINT8 getINT8(const void *buffer, size_t x)
+{
+#if IS_BIG_ENDIAN
+  UINT8 val;
+  memcpy(&val, ((const char *)buffer)+x, 8);
+  return val;
+#else
+  const unsigned char *p = (const unsigned char *)buffer;
+  return
+      (((UINT8)p[x])   << 56) |
+      (((UINT8)p[x+1]) << 48) |
+      (((UINT8)p[x+2]) << 40) |
+      (((UINT8)p[x+3]) << 32) |
+      (((UINT8)p[x+4]) << 24) |
+      (((UINT8)p[x+5]) << 16) |
+      (((UINT8)p[x+6]) << 8)  |
+       (UINT8)p[x+7];
 #endif
 }
 

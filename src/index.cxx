@@ -461,6 +461,7 @@ INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSiz
         }
     }
   FieldCache = new FCACHE(Parent);
+  PeerFieldCache = NULL;        // lazy -- allocated on first GetPeerFieldCache() call
 
   NumFieldCache   = NULL;
 
@@ -7281,6 +7282,7 @@ INDEX::~INDEX ()
       SetCache = NULL;
     }
   if (FieldCache) delete FieldCache;
+  if (PeerFieldCache) delete PeerFieldCache;
   if (NumFieldCache) delete NumFieldCache;
   if (MemorySISCache)
     {

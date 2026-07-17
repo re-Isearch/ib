@@ -707,6 +707,7 @@ public:
   }
 
   FCACHE     *GetFieldCache()      { return MainIndex->GetFieldCache(); }
+  FCACHE     *GetPeerFieldCache()  { return MainIndex->GetPeerFieldCache(); }
 
   METADATA   *GetMetadefaults(const STRING& MdType);
 

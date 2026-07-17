@@ -17,7 +17,6 @@ public:
    FCACHE(const PIDBOBJ parent);
    FCACHE(const PIDBOBJ parent, const STRING& fieldName, bool useDisk = false);
 
-
    bool Ok() const { return FieldTotal != 0; }
 
    // Normal entry points...
@@ -50,13 +49,20 @@ public:
    bool GetFieldName(STRING *fieldNamePtr) const;
    STRING      GetFieldName() const { return FieldName; }
 
+   FC          GetRecordFc(size_t idx) const;
+
    ~FCACHE();
-private:
    size_t LoadFieldCache(const STRING& fieldName, bool useDisk);
+
+private:
    size_t GetZones (const GPTYPE HitGp, const STRING& fieldName, FCT *Zones);
 
-/* Private data */
+#if 1
+   MultiMMapSession      Sessions;      // pooled, LRU/byte-budget backed
+   const unsigned char  *BaseAddress;   // current field's mapped base, if Disk == false
+#else
    MMAP        Cache;    	// Memory Maped 
+#endif
    FILE       *Fp;		// Stream
    bool Disk;     	// Use disk or memory?
    FC          Range;    	// Start and End points

@@ -84,6 +84,11 @@ public:
   bool ValidateInField (const FC& HitFc, FILE *Fp,  const size_t Total) const;
 
   FCACHE      *GetFieldCache() { return FieldCache; }
+  FCACHE      *GetPeerFieldCache () {
+     if (PeerFieldCache == NULL) PeerFieldCache = new FCACHE(Parent);
+     return PeerFieldCache;
+  };
+
 
   bool Ok() const { return OK && Version() != -1; }
 
@@ -410,6 +415,7 @@ private:
 
   RCACHE              *SetCache;
   FCACHE              *FieldCache;
+  FCACHE              *PeerFieldCache;
 
   volatile Dictionary  *NumFieldCache;
 

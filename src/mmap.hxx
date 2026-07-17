@@ -272,6 +272,13 @@ public:
 
   size_t CurrentBytes() const { return m_CurrentBytes; }
 
+ size_t Size(const STRING& FileName) const {
+     auto it = m_Index.find(FileName);
+     return (it != m_Index.end() && it->second->second.MMapInstance)
+           ? it->second->second.MMapInstance->Size()
+           : 0;
+    }
+
 private:
   struct Slot
     {

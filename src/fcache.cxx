@@ -61,6 +61,145 @@ bool FCACHE::SetFieldName(const STRING& fieldName, bool useDisk)
 }
 
 // Load the Attribute Cache..
+#if 1
+
+size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
+{
+  if (!FieldName.CaseEquals(fieldName))
+    {
+      STRING Fn;
+
+      FieldName   = fieldName;
+      FieldTotal  = 0;
+      Disk        = true;
+      BaseAddress = NULL;
+
+#if 0
+      bool resolved = !FieldName.IsEmpty() && Parent->DfdtGetFileName(FieldName, &Fn);
+      message_log(LOG_INFO, "LoadFieldCache: field=%s Parent=%p resolved=%d Fn=%s",
+                  FieldName.c_str(), (void*)Parent, resolved, Fn.c_str());
+#endif
+
+      if (!FieldName.IsEmpty() && Parent->DfdtGetFileName(FieldName, &Fn))
+        {
+          if (!useDisk)
+            {
+              BaseAddress = Sessions.GetMemoryBase(Fn, MapRandom);
+
+#if 0
+const size_t sessSize = Sessions.Size(Fn);
+message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%zu",
+            Fn.c_str(), (void*)BaseAddress, sessSize);
+#endif
+
+              if (BaseAddress)
+                {
+                  message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
+                  Disk       = false;
+                  FieldTotal = Sessions.Size(Fn) / sizeof(FC);
+                }
+              else
+                message_log(LOG_ERRNO, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
+            }
+
+          if (Disk)
+            {
+              if (Fp)
+                {
+                  Parent->ffclose(Fp);
+                  Fp = NULL;
+                }
+
+              if ((Fp = Parent->ffopen(Fn, "rb")) != NULL)
+                FieldTotal = GetFileSize(Fp) / sizeof(FC);
+              else
+                message_log(LOG_ERRNO, "Could not open field table %s (%s)", Fn.c_str(), FieldName.c_str());
+            }
+        }
+      // else: no field available -- FieldTotal stays 0, Disk stays true,
+      // BaseAddress stays NULL. Nothing to unmap explicitly; the pool
+      // still owns whatever was previously mapped for other fields.
+    }
+  // else: same field as last call -- Disk, FieldTotal, BaseAddress, Fp
+  // are all already correct from the prior successful load. Do nothing.
+
+  return FieldTotal;
+}
+
+
+#elif 0
+size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
+{
+  if (!FieldName.CaseEquals(fieldName))
+    {
+      STRING Fn;
+
+      FieldName  = fieldName;
+      FieldTotal = 0;
+      Disk       = true;
+      BaseAddress = NULL;      // no longer valid for the new field until (re)set below
+
+      if (!FieldName.IsEmpty() && Parent->DfdtGetFileName(FieldName, &Fn))
+        {
+          if (!useDisk)
+            {
+              // Ask the pool for this field's mapping. Cheap if already
+              // resident (MRU touch, no syscall); maps fresh + evicts LRU
+              // if not. Old field's mapping is NOT torn down here — it
+              // just becomes one step less-recently-used in the pool.
+              BaseAddress = Sessions.GetMemoryBase(Fn, MapRandom);
+
+              if (BaseAddress)
+                {
+                  message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
+                  Disk       = false;
+                  FieldTotal = Sessions.Size(Fn) / sizeof(FC);
+                }
+              else
+                message_log(LOG_ERRNO, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
+            }
+
+          if (Disk)
+            {
+              // Fp itself is already handle-cached inside Parent (FPT),
+              // keyed by filename -- so repeatedly calling ffopen() across
+              // field switches reuses cached handles rather than reopening.
+              if (Fp)
+                {
+                  Parent->ffclose(Fp);
+                  Fp = NULL;
+                }
+
+              if ((Fp = Parent->ffopen(Fn, "rb")) != NULL)
+                FieldTotal = GetFileSize(Fp) / sizeof(FC);
+              else
+                message_log(LOG_ERRNO, "Could not open field table %s (%s)", Fn.c_str(), FieldName.c_str());
+            }
+        }
+    }
+  else
+    {
+      // Same field as last call -- re-derive whether we're in mapped
+      // or disk mode by checking whether the pool still holds it
+      // (it may have been LRU-evicted since we last asked).
+      if (!useDisk)
+        {
+          BaseAddress = Sessions.GetMemoryBase(FieldName, MapRandom);
+          if (BaseAddress)
+            {
+              Disk       = false;
+              FieldTotal = Sessions.Size(FieldName) / sizeof(FC);
+              return FieldTotal;
+            }
+        }
+      Disk = true; // fall through to Fp, which FPT keeps cached regardless
+    }
+
+  return FieldTotal;
+}
+
+
+#else
 size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
 {
   if (!FieldName.CaseEquals(fieldName)) {
@@ -107,6 +246,7 @@ size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
     Disk = (FieldTotal != 0);
   return FieldTotal;
 }
+#endif
 
 bool FCACHE::ValidateInField(const GPTYPE HitGp)
 {
@@ -114,9 +254,9 @@ bool FCACHE::ValidateInField(const GPTYPE HitGp)
     {
       return true;
     }
-  else if (Cache.Ok())
+  else if (!Disk && BaseAddress)
     {
-      return ValidateInField(HitGp, (const void *)Cache.Ptr(), Cache.Size());
+      return ValidateInField(HitGp, (const GPTYPE *)BaseAddress, FieldTotal);
     }
   else if (Fp)
     {
@@ -129,8 +269,8 @@ bool FCACHE::ValidateInField(const FC& HitFc)
 {
   if (FieldName.GetLength() == 0)
     return true;
-  else if (Cache.Ok())
-    return ValidateInField(HitFc, (const void *)Cache.Ptr(), Cache.Size());
+  else if (!Disk && BaseAddress)
+    return ValidateInField(HitFc, (const void *)BaseAddress, FieldTotal * sizeof(FC));
   else if (Fp)
     return ValidateInField(HitFc, Fp, FieldTotal);
   return ValidateInField(HitFc, FieldName);
@@ -142,16 +282,7 @@ bool FCACHE::ValidateInField(const GPTYPE HitGp, const STRING& fieldName, bool u
 {
   if (fieldName.GetLength() == 0)
     return true;
-  if (LoadFieldCache(fieldName, useDisk))
-    {
-      if (Cache.Ok())
-	return ValidateInField(HitGp, (const void *)Cache.Ptr(), Cache.Size());
-      else if (Fp)
-	return ValidateInField(HitGp, Fp, FieldTotal);
-      else
-	return ValidateInField(HitGp, FieldName);
-    }
-  return false;
+  return LoadFieldCache(fieldName, useDisk) ? ValidateInField(HitGp) : false;
 }
 
 // Is a range in the field..
@@ -159,17 +290,7 @@ bool FCACHE::ValidateInField (const FC& HitFc, const STRING& fieldName, bool use
 {
   if (fieldName.GetLength() == 0)
     return true;
-  if (LoadFieldCache(fieldName, useDisk))
-    {
-      if (Cache.Ok())
-	return ValidateInField(HitFc, (const void *)Cache.Ptr(), Cache.Size());
-      else if (Fp)
-	return ValidateInField(HitFc, Fp, FieldTotal);
-      else
-	return ValidateInField(HitFc, FieldName);
-    }
-  return false;
-
+  return LoadFieldCache(fieldName, useDisk) ? ValidateInField(HitFc) : false;
 }
 
 size_t FCACHE::GetZones (const GPTYPE HitGp, const STRING& fieldName, FCT *Zones)
@@ -181,18 +302,16 @@ size_t FCACHE::GetZones (const GPTYPE HitGp, const STRING& fieldName, FCT *Zones
   size_t i = Parent->GetMainMdt ()->LookupByGp (HitGp, &range);
   size_t TotalZones = 0;
 
-  if (i == 0 ||
-	LoadFieldCache(fieldName, false) == 0 ||
-	FieldTotal == 0 || !Cache.Ok())
+  if (i == 0 || LoadFieldCache(fieldName, false) == 0 || !Ok())
     return TotalZones;
 
   bool result = false;
   size_t Low = 0;
   size_t High = FieldTotal - 1;
   INT X = High / 2, OX;
-  const GPTYPE *Buffer = (GPTYPE *)Cache.Ptr();
-  GPTYPE GpS, GpE;
+  const GPTYPE *Buffer = (GPTYPE *) BaseAddress;
 
+  GPTYPE GpS, GpE;
 
   bool found = false;
   // Find Any...
@@ -610,8 +729,9 @@ FC FCACHE::FcInField (const GPTYPE HitGp, FILE *fp) const
 
 FC FCACHE::FcInField_Mapped(const GPTYPE HitGp) const
 {
-  const FC* Base = (const FC*)Cache.Ptr(); 
-  size_t Total = Cache.Size() / sizeof(FC); 
+  const FC* Base = (const FC*)BaseAddress;
+  size_t   Total = FieldTotal;
+
 
   if (Total == 0 || Base == NULL)
     return FC(0,0);
@@ -640,3 +760,32 @@ FC FCACHE::FcInField_Mapped(const GPTYPE HitGp) const
 
   return FC(0,0);
 }
+
+
+// Returns the FC at position idx within the currently loaded field.
+// Transparently reads from the mapped buffer or the disk stream,
+// whichever mode LoadFieldCache left us in.
+FC FCACHE::GetRecordFc(size_t idx) const
+{
+  if (idx < FieldTotal) {   // out-of-range guard
+
+    if (!Disk && BaseAddress) {
+      const size_t offset = idx * sizeof(FC);
+      GPTYPE start = getGPTYPE(BaseAddress, offset);
+      GPTYPE end   = getGPTYPE(BaseAddress, offset + sizeof(GPTYPE));
+      return FC(start, end);
+    }
+
+    if (Fp)
+      {
+        FC fc;
+        if (fseek(Fp, (off_t)idx * sizeof(FC), SEEK_SET) == 0)
+          fc.Read(Fp);
+        return fc;
+      }
+  }
+  return FC(0, 0);
+}
+
+
+
