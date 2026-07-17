@@ -2,7 +2,7 @@
 Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
-#pragma ident  "@(#)fcache.cxx  1.19 02/24/01 17:32:27 BSN"
+#pragma ident  "@(#)fcache.cxx"
 
 //#include <arpa/inet.h>
 #include "common.hxx"
@@ -94,7 +94,7 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
 
               if (BaseAddress)
                 {
-                  message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
+                  // message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
                   Disk       = false;
                   FieldTotal = Sessions.Size(Fn) / sizeof(FC);
                 }
@@ -151,7 +151,7 @@ size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
 
               if (BaseAddress)
                 {
-                  message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
+                  // message_log(LOG_DEBUG, "Using mapped Field Cache for %s", FieldName.c_str());
                   Disk       = false;
                   FieldTotal = Sessions.Size(Fn) / sizeof(FC);
                 }
@@ -770,9 +770,10 @@ FC FCACHE::GetRecordFc(size_t idx) const
   if (idx < FieldTotal) {   // out-of-range guard
 
     if (!Disk && BaseAddress) {
-      const size_t offset = idx * sizeof(FC);
-      GPTYPE start = getGPTYPE(BaseAddress, offset);
-      GPTYPE end   = getGPTYPE(BaseAddress, offset + sizeof(GPTYPE));
+      const GPTYPE *B = (const GPTYPE *)BaseAddress;
+      const size_t  base = idx * (sizeof(FC) / sizeof(GPTYPE)); // 2 GPTYPEs per FC
+      const GPTYPE start = GpOf(B[base]);
+      const GPTYPE end   = GpOf(B[base + 1]);
       return FC(start, end);
     }
 
