@@ -81,6 +81,10 @@ bool INFIX2RPN::Parse (const STRING& StrInput, STRING *StrOutput)
 	{
 	  TheStack.Push ("REDUCE:0");
 	}
+      else if (token == "FOCUS")
+        {
+          TheStack.Push ("FOCUS:0");
+        }
       else if (token == "WITH")
 	{
 	  if (field.GetLength())
@@ -110,6 +114,7 @@ bool INFIX2RPN::Parse (const STRING& StrInput, STRING *StrOutput)
 		|| TmpVal.CaseCompare("within:", 7) == 0 || TmpVal.CaseCompare("xwithin:", 8) == 0
 		|| TmpVal.CaseCompare("inside:", 7) == 0
 		|| TmpVal.Compare(    "REDUCE:", 7) == 0
+		|| TmpVal.Compare(    "FOCUS:",  6) == 0
 		))
 	    {
 	      // Add a space

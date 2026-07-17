@@ -238,7 +238,7 @@ public:
   const IRESULT& operator[](size_t n) const { return t_Data[n]; }
   const IRESULT* GetData() const { return t_Data; }
 
-  bool    SetEntry(size_t n, const IRESULT& Record);
+  bool           SetEntry(size_t n, const IRESULT& Record);
   void           AddEntry(const IRESULT& Record);
 
   DOUBLE         GetMinScore() const { return MinScore; }

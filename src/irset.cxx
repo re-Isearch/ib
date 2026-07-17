@@ -1429,7 +1429,311 @@ OPOBJ *atomicIRSET::HitCount (const float Level)
   return this;
 }
 
-OPOBJ *atomicIRSET::Reduce (const float Level)
+#if 1
+
+
+/*
+ * REDUCE:n
+ *   Strictly retain records whose AuxCount is at least n.
+ *   REDUCE:0 retains records at the maximum observed AuxCount.
+ *
+ * FOCUS:n
+ *   Adaptively narrow an OR result toward higher AuxCount tiers.
+ *   If tier n is unavailable, fall back to the strongest useful
+ *   lower tier(s) rather than returning an empty set.
+ */
+
+
+OPOBJ *atomicIRSET::Focus(const float Level)
+{
+  size_t TermCount = static_cast<size_t>(Level);
+
+  // Need at least one entry, but do not reduce a singleton.
+  if (TotalEntries <= 1)
+    return this;
+
+  struct AUX_REF
+  {
+    UINT   Count;
+    size_t Index;
+  };
+
+  std::vector<AUX_REF> refs;
+  refs.reserve(TotalEntries);
+
+  for (size_t n = 0; n < TotalEntries; ++n)
+    {
+      AUX_REF ref;
+      ref.Count = Table[n].GetAuxCount();
+      ref.Index = n;
+      refs.push_back(ref);
+    }
+
+  /*
+   * Sort only lightweight metadata, not IRESULT objects and their
+   * associated hit tables.
+   *
+   * The index tie-break makes the operation deterministic.
+   */
+  std::sort(
+    refs.begin(),
+    refs.end(),
+    [](const AUX_REF& left, const AUX_REF& right)
+    {
+      if (left.Count != right.Count)
+        return left.Count > right.Count;
+
+      return left.Index < right.Index;
+    });
+
+  UINT Count0 = refs[0].Count;
+
+  if (TermCount == 0)
+    TermCount = Count0;
+
+  size_t cutoff = TermCount > 2 ? 1 : 0;
+  size_t i = 0;
+
+  /*
+   * Preserve the existing Focus() cutoff calculation.
+   */
+  if (Count0 == TermCount)
+    {
+      cutoff = TermCount - 1;
+    }
+  else if (TotalEntries > 1)
+    {
+      UINT Count1 = refs[1].Count;
+
+      if (Count1 == TermCount)
+        {
+          i = 1;
+          cutoff = TermCount - 1;
+        }
+      else if (Count1 > Count0 || TotalEntries < 4)
+        {
+          i = 1;
+        }
+      else
+        {
+          Count0 = Count1;
+
+          for (i = 2;
+               i < TotalEntries &&
+                 ((Count1 = refs[i].Count) > Count0);
+               ++i)
+            {
+              // Nothing.
+            }
+        }
+    }
+
+  /*
+   * Determine how many entries the old sorted-table algorithm
+   * would have retained.
+   */
+  size_t retained = TotalEntries;
+
+  for (size_t n = i; n < TotalEntries; ++n)
+    {
+      if (n != 0 && refs[n].Count <= cutoff)
+        {
+          retained = n;
+          break;
+        }
+    }
+
+  /*
+   * Nothing was removed. Since the actual IRESULT table was never
+   * reordered, no restoration sort is needed.
+   */
+  if (retained == TotalEntries)
+    {
+      HitTotal = 0;
+      return this;
+    }
+
+  /*
+   * Mark the original table positions belonging to the retained
+   * prefix of the auxiliary-count ordering.
+   */
+  std::vector<unsigned char> keep(TotalEntries, 0);
+
+  for (size_t n = 0; n < retained; ++n)
+    keep[refs[n].Index] = 1;
+
+  /*
+   * Compact in the original ordering. This preserves the existing
+   * Sort value and avoids SortBy(oldSort).
+   *
+   * IRESULT move assignment transfers HitTable ownership cheaply.
+   */
+  size_t out = 0;
+
+  for (size_t in = 0; in < TotalEntries; ++in)
+    {
+      if (keep[in])
+        {
+          if (out != in)
+            Table[out] = std::move(Table[in]);
+
+          ++out;
+        }
+    }
+
+  TotalEntries = out;
+
+  /*
+   * Recalculate score bounds over the actual retained table.
+   */
+  MinScore = MAXFLOAT;
+  MaxScore = 0.0;
+
+  for (size_t n = 0; n < TotalEntries; ++n)
+    {
+      const DOUBLE score = Table[n].GetScore();
+
+      if (score < MinScore)
+        MinScore = score;
+
+      if (score > MaxScore)
+        MaxScore = score;
+    }
+
+  if (TotalEntries == 0)
+    {
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+    }
+
+  HitTotal = 0;
+
+  return this;
+}
+
+#elif 0
+
+OPOBJ *atomicIRSET::Focus(const float Level)
+{
+  size_t TermCount = (size_t)Level;
+  const enum SortBy oldSort = Sort;
+
+  // Need at least 1, but don't reduce a set of one element.
+  if (TotalEntries <= 1)
+    return this;
+
+  /*
+   * Fast path for an explicit reduction level.
+   *
+   * If every result already has at least TermCount contributing
+   * operands, the later cutoff can remove nothing. Avoid sorting
+   * the entire IRESULT table twice.
+   */
+  if (TermCount > 0)
+    {
+      UINT minAuxCount = Table[0].GetAuxCount();
+
+      for (size_t n = 1; n < TotalEntries; ++n)
+        {
+          const UINT auxCount = Table[n].GetAuxCount();
+
+          if (auxCount < minAuxCount)
+            minAuxCount = auxCount;
+
+          if (minAuxCount < TermCount)
+            break;
+        }
+
+      if (minAuxCount >= TermCount)
+        {
+          HitTotal = 0;
+          return this;
+        }
+
+message_log(
+  LOG_INFO,
+  "Focus:%lu entries=%lu minimum AuxCount=%u",
+  (unsigned long)TermCount,
+  (unsigned long)TotalEntries,
+  minAuxCount);
+
+
+    }
+
+  SortByAuxCount();
+
+  UINT Count0 = Table[0].GetAuxCount();
+
+  if (TermCount == 0)
+    TermCount = Count0;
+
+  size_t cutoff = TermCount > 2 ? 1 : 0;
+  size_t i = 0;
+
+  if (Count0 == TermCount)
+    {
+      cutoff = TermCount - 1;
+    }
+  else if (TotalEntries > 1)
+    {
+      UINT Count1 = Table[1].GetAuxCount();
+
+      if (Count1 == TermCount)
+        {
+          i = 1;
+          cutoff = TermCount - 1;
+        }
+      else if (Count1 > Count0 || TotalEntries < 4)
+        {
+          i = 1;
+        }
+      else
+        {
+          Count0 = Count1;
+
+          for (i = 2;
+               i < TotalEntries &&
+                 ((Count1 = Table[i].GetAuxCount()) > Count0);
+               ++i)
+            {
+              // Nothing.
+            }
+        }
+    }
+
+  MinScore = MAXFLOAT;
+  MaxScore = 0.0;
+
+  for (; i < TotalEntries; ++i)
+    {
+      const DOUBLE score = Table[i].GetScore();
+
+      if (MinScore > score)
+        MinScore = score;
+
+      if (MaxScore < score)
+        MaxScore = score;
+
+      if (i && Table[i].GetAuxCount() <= cutoff)
+        {
+          TotalEntries = i;
+          break;
+        }
+    }
+
+  HitTotal = 0;
+
+  SortBy(oldSort);
+
+  return this;
+}
+
+
+
+
+#else
+
+OPOBJ *atomicIRSET::Focus (const float Level)
 {
   size_t      TermCount = (size_t)Level;
   enum SortBy oldSort = Sort;
@@ -1487,6 +1791,7 @@ OPOBJ *atomicIRSET::Reduce (const float Level)
 
   return this;
 }
+#endif
 
 
 OPOBJ *atomicIRSET::Or (const OPOBJ& OtherIrset)
@@ -5559,4 +5864,64 @@ void atomicIRSET::SetPrecomputed(enum NormalizationMethods Method)
         MinScore = MaxScore = 0.0;
     }
     ComputedS = Method;
+}
+
+
+
+// Strict REDUCE (old REDUCE renamed FOCUS)
+
+OPOBJ *atomicIRSET::Reduce(const float Level)
+{
+  size_t required = static_cast<size_t>(Level);
+
+  if (TotalEntries == 0)
+    return this;
+
+  if (required == 0)
+    {
+      required = Table[0].GetAuxCount();
+
+      for (size_t i = 1; i < TotalEntries; ++i)
+        {
+          const size_t count = Table[i].GetAuxCount();
+
+          if (count > required)
+            required = count;
+        }
+    }
+
+  size_t out = 0;
+
+  MinScore = MAXFLOAT;
+  MaxScore = 0.0;
+
+  for (size_t in = 0; in < TotalEntries; ++in)
+    {
+      if (Table[in].GetAuxCount() >= required)
+        {
+          if (out != in)
+            Table[out] = std::move(Table[in]);
+
+          const DOUBLE score = Table[out].GetScore();
+
+          if (score < MinScore)
+            MinScore = score;
+
+          if (score > MaxScore)
+            MaxScore = score;
+
+          ++out;
+        }
+    }
+
+  TotalEntries = out;
+  HitTotal = 0;
+
+  if (TotalEntries == 0)
+    {
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+    }
+
+  return this;
 }

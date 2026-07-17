@@ -74,7 +74,10 @@ public:
 
   // Set Or and Push REDUCE
   bool PushReduce(int Reduce=0);
+  bool PushFocus(int Reduce=0);
   bool SetOperatorOrReduce(int Reduce = 0);
+  bool SetOperatorOrFocus(int Reduce = 0);
+
 
   bool PushUnaryOperator(const OPERATOR& UnaryOperator);
 

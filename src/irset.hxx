@@ -190,6 +190,7 @@ public:
 
   // Unary
   virtual OPOBJ *Reduce(const float Metric=0.0) override;
+  virtual OPOBJ *Focus(const float Metric=0.0) override;
   virtual OPOBJ *Trim(const float Metric=0.0) override;
   virtual OPOBJ *HitCount(const float Metric=0.0) override;
 
@@ -1087,6 +1088,12 @@ public:
   {
     return node()->Not(FieldName);
   }
+
+  OPOBJ* Focus(const float Metric = 0.0F) override
+  {
+    return node()->Focus(Metric);
+  }
+
 
   OPOBJ* Reduce(const float Metric = 0.0F) override
   {

@@ -423,6 +423,7 @@ static void HelpUsage(const char *progname)
 #endif
 
         "                   //   REDUCE[:nnn]   := Reduce set to those records with nnn matching terms" << endl <<
+        "                   //   FOCUS[:nnn]    := Prefer records with stronger joint-term evidence" << endl <<
 	"                   //   NOTE: REDUCE:metric is a special kind of unary operator that trims the result" << endl <<
         "                   //   to metric cutoff regarding the number of different terms (see -h and -joint)." << endl
 <<

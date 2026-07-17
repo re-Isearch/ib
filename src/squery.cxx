@@ -474,7 +474,18 @@ if (arg_pos)
               }
             return OperatorAfter;
           }
+
+       if (Operator.Compare("FOCUS", 5) == 0)
+          {
+            const char   *ptr = Operator.c_str() + 6;
+            DOUBLE metric = atof (  ptr );
+            if (metric < 0 || (metric == 0 && !isdigit(*ptr)) || (DOUBLE)((int)(metric)) != metric)
+              return OperatorERR; // Bad metric
+            if (Metric) *Metric = metric;
+            return OperatorFocus;
+          }
         break;
+
       case 7:
         if (Operator.Compare("BEFORE",  6) == 0)
           {
@@ -1968,6 +1979,21 @@ bool SQUERY::SetOperatorOrReduce(int Reduce)
   return false;
 }
 
+bool SQUERY::PushFocus(int Reduce)
+{  
+  OPERATOR op (OperatorFocus);
+  op.SetOperatorMetric(Reduce);
+  return PushUnaryOperator (op);
+}
+
+bool SQUERY::SetOperatorOrFocus(int Reduce)
+{
+  if (SetOperatorOr())
+    return PushFocus(Reduce);
+  return false;
+}
+
+
 
 
 // Rebuild the Term
@@ -2141,6 +2167,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                   case OperatorBeforePeer:
                   case OperatorAfterPeer:
                   case OperatorReduce:
+		  case OperatorFocus:
 		  case OperatorHitCount:
 		  case OperatorTrim:
 		  case OperatorSortBy:
@@ -2162,6 +2189,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                           case OperatorAfterPeer: what = SOperatorAfterPeer; break;
                           case OperatorXPeer:     what =  SOperatorXPeer;  break;
                           case OperatorReduce:    what = "REDUCE"; break;
+			  case OperatorFocus:     what = "FOCUS"; break;
 			  case OperatorHitCount:  what = "HITCOUNT"; break;
 			  case OperatorTrim:      what = "TRIM"; break;
 			  case OperatorSortBy:    what = "SORTBY"; break;
@@ -2193,6 +2221,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                         case OperatorAfterPeer: S = SOperatorAfterPeer; break;
 			case OperatorSibling:   S = "SIBLING";          break;
                         case OperatorReduce:    S = "REDUCE:0";         break; // SPECIAL CASE
+			case OperatorFocus:     S = "FOCUS:0";          break; // SPECIAL CASE
 			case OperatorHitCount:  S = "HITCOUNT:0";       break; // SPECIAL CASE
 			case OperatorTrim:      S = "TRIM:0";           break; // Clear set
 			case OperatorBoostScore:S = "BOOST:1";          break;
@@ -2606,11 +2635,11 @@ int QUERY::Run ()
                 }
 	       TempStack << Foo;
             }
-          else if (op_t == OperatorReduce || op_t == OperatorHitCount || op_t == OperatorTrim ||
-		op_t == OperatorBoostScore )
+          else if (op_t == OperatorReduce || op_t == OperatorFocus ||
+		op_t == OperatorHitCount || op_t == OperatorTrim || op_t == OperatorBoostScore )
             {
               FLOAT metric =  OpPtr->GetOperatorMetric();
-              if ((op_t == OperatorReduce || op_t == OperatorTrim) && metric < 0)
+              if ((op_t == OperatorReduce || op_t == OperatorFocus ||  op_t == OperatorTrim) && metric < 0)
                 {
                   return 107;
                 }

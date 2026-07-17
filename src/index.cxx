@@ -3688,11 +3688,11 @@ PIRSET INDEX::Search (const QUERY& Query)
 		}
 	      Stack << Op1->Sibling ();
 	    }
-          else if (op_t == OperatorReduce || op_t == OperatorHitCount || op_t == OperatorTrim ||
-		op_t == OperatorBoostScore )
+          else if (op_t == OperatorReduce || op_t == OperatorFocus ||
+		op_t == OperatorHitCount || op_t == OperatorTrim || op_t == OperatorBoostScore )
             {
               FLOAT metric =  OpPtr->GetOperatorMetric();
-              if ((op_t == OperatorReduce || op_t == OperatorTrim) && metric < 0)
+              if ((op_t == OperatorReduce || op_t == OperatorFocus || op_t == OperatorTrim) && metric < 0)
                 {
                   Parent->SetErrorCode(107); // "Query type not supported";
                   return ERROR_SET;
@@ -3707,6 +3707,8 @@ PIRSET INDEX::Search (const QUERY& Query)
 		Stack << Op1->HitCount(metric);
 	      else if (op_t == OperatorReduce)
 		Stack << Op1->Reduce(metric);
+	      else if (op_t == OperatorFocus)
+		Stack << Op1->Focus(metric);
 	      else if (op_t == OperatorBoostScore)
 		Stack << Op1->BoostScore(metric);
 	      else

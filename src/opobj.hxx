@@ -41,6 +41,7 @@ typedef enum {
   OperatorInclusive,
   OperatorSibling,
   OperatorNotWithin,  // Like NOT but to field
+  OperatorFocus,
   OperatorReduce,     // Trim set
   OperatorHitCount,   // Trim set by hits
   OperatorTrim,       // Trim set to max.
@@ -147,6 +148,7 @@ public:
   virtual OPOBJ *BoostScore (const float Weight) { return NULL; }
 
   virtual OPOBJ *Reduce (const float metric) { return NULL; }
+  virtual OPOBJ *Focus (const float metric) { return NULL; }
   virtual OPOBJ *Trim (const float Metric)   { return NULL; }
   virtual OPOBJ *HitCount (const float Metric) { return NULL; }
 

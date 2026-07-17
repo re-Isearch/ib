@@ -2548,7 +2548,7 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
    // Search as literal phrase?
    if (terms >= 2)
     {
-clock_t t0 = clock();
+// clock_t t0 = clock();
 
       SQUERY newQuery; 
       newQuery.SetLiteralPhrase(QueryString);
@@ -2561,14 +2561,14 @@ clock_t t0 = clock();
 	    }
 	  else squery = newQuery;
 	}
-message_log(LOG_INFO, "SearchSmart: literal-phrase took %ld ms", (long)((clock() - t0) * 1000 / CLOCKS_PER_SEC));
+// message_log(LOG_INFO, "SearchSmart: literal-phrase took %ld ms", (long)((clock() - t0) * 1000 / CLOCKS_PER_SEC));
     }
   if (pIrset == NULL)
     {
       bool res;
       STRING      field (DefaultField);
 
-clock_t t1 = clock();
+// clock_t t1 = clock();
 
       // Search as Peer
       if (field.Trim(STRING::both).IsEmpty())
@@ -2587,21 +2587,22 @@ clock_t t1 = clock();
 		}
 	    }
 	  // Search
-message_log(LOG_INFO, "SearchSmart: PEER attempt took %ld ms", (long)((clock() - t1) * 1000 / CLOCKS_PER_SEC));
+// message_log(LOG_INFO, "SearchSmart: PEER attempt took %ld ms", (long)((clock() - t1) * 1000 / CLOCKS_PER_SEC));
 	  if (pIrset == NULL)
 	    {
-clock_t t2 = clock();
-
+// clock_t t2 = clock();
 	      squery.SetOperatorOr();
 	      if ((pIrset = Search(squery, Sort, Method)) != NULL)
 		{
+// message_log(LOG_INFO, "SearchSmart: OR took %ld ms", (long)((clock() - t2) * 1000 / CLOCKS_PER_SEC));
+
 		  size_t total = pIrset->GetTotalEntries();
-		  pIrset->Reduce(terms);
+		  pIrset->Focus(terms);
 		  if (pIrset->GetTotalEntries() != total)
-		    squery.PushReduce(terms);
+		    squery.PushFocus(terms);
 		}
 	    
-message_log(LOG_INFO, "SearchSmart: OR+Reduce took %ld ms", (long)((clock() - t2) * 1000 / CLOCKS_PER_SEC));
+// message_log(LOG_INFO, "SearchSmart: OR+Reduce took %ld ms", (long)((clock() - t2) * 1000 / CLOCKS_PER_SEC));
 	    }
 	}
     }
