@@ -61,7 +61,7 @@ const size_t StringCompLength = 0x7fffffff;
 #define COUT cout
 #define CERR cerr
 
-#define QSORT _IB_Qsort /* BentleyQsort */
+#define QSORT _IB_Qsort 
 extern void BentleyQsort(void *, size_t, size_t, int (*)(const void *, const void *));
 extern void SedgewickQsort(void *, size_t, size_t, int (*)(const void *, const void *));
 extern void DualPivotQsort( void *, size_t, size_t, int (*)(const void *, const void *));

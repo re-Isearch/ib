@@ -150,6 +150,8 @@ public:
      p_ = Fctable.p_;
   }
   FCT& operator= (const FCT& Fctable) {
+    if (this == &Fctable)
+      return *this;
     if (Fctable.p_ == NULL)
       {
 	message_log (LOG_PANIC, "FCT pointer backstore nulled!?");
@@ -274,12 +276,14 @@ public:
  private:
   void    lock() { p_->count_++; }
   void    unlock() {
+    if (p_ == NULL) return;
     if (--p_->count_ == 0)
       {
         delete p_;
 #ifdef DEBUG_MEMORY
 	__IB_FCT_allocated_count--;
 #endif
+	p_ = NULL;
       }
   }
   FCLIST * node() {

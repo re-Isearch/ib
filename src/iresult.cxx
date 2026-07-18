@@ -102,6 +102,63 @@ IRESULT::IRESULT(const IRESULT& OtherIresult)
 }
 
 
+#if 1
+
+
+IRESULT& IRESULT::operator=(const IRESULT& OtherIresult)
+{
+  if (this == &OtherIresult)
+    return *this;
+#ifdef DEBUG_MEMORY
+  __IB_IRESULT_allocated_count++;
+#endif
+
+  UINT4 *newTermHitsVector = NULL;
+  size_t newMaxTermHitsVector = 0;
+
+  /*
+   * Construct the replacement before modifying this object.
+   */
+  if (OtherIresult.TermHitsVector != NULL && OtherIresult.AuxCount > 0)
+    {
+      const size_t count = static_cast<size_t>(OtherIresult.AuxCount);
+
+      newTermHitsVector = static_cast<UINT4 *>( calloc(count + 1, sizeof(UINT4)));
+
+      if (newTermHitsVector != NULL)
+        {
+          memcpy(newTermHitsVector, OtherIresult.TermHitsVector, count * sizeof(UINT4));
+          newMaxTermHitsVector = count + 1;
+        }
+    } // else TermVector is not defined 
+
+  HitTable = OtherIresult.HitTable;
+
+  if (TermHitsVector != NULL)
+    free(TermHitsVector);
+
+  TermHitsVector = newTermHitsVector;
+  maxTermHitsVector = newMaxTermHitsVector;
+
+  Index     = OtherIresult.Index;
+  SortIndex = OtherIresult.SortIndex;
+  HitCount  = OtherIresult.HitCount;
+  AuxCount  = OtherIresult.AuxCount;
+  Date      = OtherIresult.Date;
+  Score     = OtherIresult.Score;
+
+#if USE_GEOSCORE
+  gScore = OtherIresult.gScore;
+#endif
+
+  Mdt = OtherIresult.Mdt;
+
+  return *this;
+}
+
+
+#else
+
 IRESULT& IRESULT::operator=(const IRESULT& OtherIresult) 
 {
 #ifdef DEBUG_MEMORY
@@ -141,6 +198,7 @@ IRESULT& IRESULT::operator=(const IRESULT& OtherIresult)
 
   return *this;
 }
+#endif
 
 IRESULT::IRESULT(IRESULT&& Other) noexcept
 {
@@ -188,6 +246,11 @@ IRESULT& IRESULT::operator=(IRESULT&& Other) noexcept
   TermHitsVector    = Other.TermHitsVector;   // steal
   maxTermHitsVector = Other.maxTermHitsVector;
 
+  /*
+   * Leave Other in a completely valid empty state. This matters because
+   * moved-from IRESULT objects remain alive in the unused tail of an
+   * in-place-compacted result table and may later be assigned or destroyed.
+   */
   Other.TermHitsVector    = nullptr;
   Other.maxTermHitsVector = 0;
   Other.AuxCount          = 0;

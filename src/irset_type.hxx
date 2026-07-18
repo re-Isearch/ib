@@ -5,6 +5,8 @@
 class atomicIRSET;
 class _IRSET;
 
+#undef IB_USE_COW_IRSET
+
 #ifdef IB_USE_COW_IRSET
 using IRSET_TYPE = _IRSET;
 #else

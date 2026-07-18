@@ -5771,7 +5771,7 @@ static int IrsetCompareNewsrank(const void* p1, const void* p2)
    return IrsetIndexCompare(p2, p1);
 }
 
-void IRSET::SortByNewsrank()
+void atomicIRSET::SortByNewsrank()
 {
   if (Sort != ByNewsrank)
     {
