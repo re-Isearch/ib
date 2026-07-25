@@ -15,4 +15,13 @@ FILE *_IB_popen(const char *command, const char *type = "r");
 FILE *_IB_popen(const char * const argv[], const char *type = "r");
 int   _IB_pclose(FILE *fp, int Zombie=0);
 
+
+extern int _IB_run_filter(
+    const char * const argv[],
+    const void *input,
+    size_t input_size,
+    FILE *output,
+    size_t *output_size
+);
+
 #endif

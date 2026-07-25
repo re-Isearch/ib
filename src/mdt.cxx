@@ -54,6 +54,8 @@ extern   uint32_t ntohl(uint32_t);
 #include "index.hxx"
 #include "fpt.hxx"
 
+#include <iomanip>
+
 #ifdef _WIN32
 # define EIDRM  82              /* Identifier removed */
 #endif
@@ -1752,6 +1754,125 @@ STRING& MDT::GetUniqueKey (PSTRING StringPtr, bool Override)
   return *StringPtr = NewKey;  
 }
 
+#if 1
+
+
+#include <iomanip>
+#include <stdio.h>
+
+void MDT::Dump(INT Skip, ostream& os) const
+{
+  STRING key;
+  MDTREC Mdtrec;
+
+  const size_t skipped =
+    Skip > 0 ? static_cast<size_t>(Skip) : 0;
+
+  const int RangeWidth      = 24;
+  const int KeyWidth        = 32;
+  const int GlobalWidth     = 12;
+  const int LocalStartWidth = 14;
+  const int LocalEndWidth   = 14;
+
+  const ios::fmtflags savedFlags = os.flags();
+  const char savedFill = os.fill();
+
+  os << '\n'
+     << "Total Entries in MDT: "
+     << TotalEntries
+     << '\n';
+
+  if (TotalEntries > skipped)
+    {
+      os << std::left
+         << std::setw(RangeWidth)
+         << "Range"
+
+         << std::setw(KeyWidth)
+         << "Record Key"
+
+         << std::right
+         << std::setw(GlobalWidth)
+         << "Global"
+
+         << std::setw(LocalStartWidth)
+         << "Local Start"
+
+         << std::setw(LocalEndWidth)
+         << "Local End"
+
+         << "  File"
+         << '\n';
+    }
+
+  char tmp[64];
+
+  for (size_t x = skipped + 1; x <= TotalEntries; ++x)
+    {
+      STRING s0;
+      STRING s1;
+
+      GetEntry(x, &Mdtrec);
+      Mdtrec.GetKey(&key);
+
+      const long globalStart = static_cast<long>(Mdtrec.GetGlobalFileStart());
+
+      const long localStart = static_cast<long>(Mdtrec.GetLocalRecordStart());
+
+      const long localEnd = static_cast<long>(Mdtrec.GetLocalRecordEnd());
+
+      snprintf( tmp, sizeof(tmp), "%ld-%ld", globalStart + localStart, globalStart + localEnd);
+
+      os << std::setfill(' ') << std::left << std::setw(RangeWidth) << tmp;
+
+      os << key;
+
+      const size_t keyLength = key.GetLength();
+
+      if (keyLength < static_cast<size_t>(KeyWidth))
+        {
+          const size_t padding =
+            static_cast<size_t>(KeyWidth) - keyLength;
+
+          for (size_t n = 0; n < padding; ++n)
+            os.put(' ');
+        }
+      else
+        {
+          // Ensure separation when the key exceeds KeyWidth.
+          os.put(' ');
+        }
+
+      os << std::right
+         << std::setw(GlobalWidth)
+         << globalStart
+
+         << std::setw(LocalStartWidth)
+         << localStart
+
+         << std::setw(LocalEndWidth)
+         << localEnd
+
+         << "  \""
+         << (s0 = Mdtrec.GetFileName())
+         << '"';
+
+      if ((s1 = Mdtrec.GetOrigFileName()) != s0)
+        os << " <orig: \"" << s1 << "\">";
+
+      if (Mdtrec.GetDeleted())
+        os << " <deleted>";
+
+      os << '\n';
+    }
+
+  os.flags(savedFlags);
+  os.fill(savedFill);
+}
+
+
+#else
+
 void MDT::Dump (INT Skip, ostream& os) const
 {
   STRING key;
@@ -1772,22 +1893,23 @@ void MDT::Dump (INT Skip, ostream& os) const
       STRING  s0, s1;
       GetEntry (x, &Mdtrec);
       Mdtrec.GetKey (&key);
+
       sprintf(tmp, "%ld-%ld ",
 	(long)(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordStart ()),
 	(long)(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordEnd ()) );
 #ifdef SOLARIS
       os << setw(16) << tmp <<  
-	setw(DocumentKeySize - key.GetLength()) << setfill(' ') << key <<
-	"0x" << setw(6) << setfill('0') << hex << Mdtrec.GetGlobalFileStart () <<
-	"   0x" << setw(6) << setfill('0') << hex << Mdtrec.GetLocalRecordStart () <<
-	"-0x" << setw(6) << setfill('0') << hex << Mdtrec.GetLocalRecordEnd () <<
+	setw(DocumentKeySize - key.GetLength()) << std::setfill(' ') << key <<
+	"0x" << setw(6) << std::setfill('0') << hex << Mdtrec.GetGlobalFileStart () <<
+	"   0x" << setw(6) << std::setfill('0') << hex << Mdtrec.GetLocalRecordStart () <<
+	"-0x" << setw(6) << std::setfill('0') << hex << Mdtrec.GetLocalRecordEnd () <<
 	"\t\"" << '\"' << (s0 = Mdtrec.GetFileName ()) << '\"';
       if ((s1 = Mdtrec.GetOrigFileName()) != s0)
         os << " <orig: \"" << s1 << "\" >";
 
       if (Mdtrec.GetDeleted())
 	os << " <deleted> ";
-      os << setfill(' ') << endl;
+      os << std::setfill(' ') << endl;
 #else
       os << tmp << '\t' << key << '\t' << Mdtrec.GetGlobalFileStart () << '\t' <<
 	Mdtrec.GetLocalRecordStart () << "\t" << Mdtrec.GetLocalRecordEnd () << "\t\"" <<
@@ -1801,6 +1923,7 @@ void MDT::Dump (INT Skip, ostream& os) const
 #endif
     }
 }
+#endif
 
 bool MDT::KillAll()
 {

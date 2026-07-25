@@ -202,7 +202,7 @@ typedef INT2    _ib_priority_t; // Priority
   typedef UINT4  _index_id_t;
   const unsigned long MdtIndexCapacity = (1L << (32-4)) - 1; // See below
   static const _index_id_t  _vert_mask = 0xFF000000;
-  static coant _index_id_t  _index_mask = 0x00FFFFFF;
+  static const _index_id_t  _index_mask = 0x00FFFFFF;
 #  endif
 #else /* 32-bit default addressing */
 

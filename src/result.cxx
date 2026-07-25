@@ -594,7 +594,7 @@ StringBuffer->form("ERROR (%ld,%ld) not inside Record (%ld,%ld)",  start, end, R
 	  CHARSET charset (charsetId);
 	  for (i=1; i <= Context_len; i++)
 	    {
-	      char buf[11]; // max 4294967295 although most is only short (UCS-2)
+	      char buf[14]; // max 4294967295 although most is only short (UCS-2)
 	      unsigned int wchar;
 	      unsigned char ch;
 
@@ -631,8 +631,8 @@ StringBuffer->form("ERROR (%ld,%ld) not inside Record (%ld,%ld)",  start, end, R
 	      else
 		{
 		  // Non-ASCII character -- Map to UCS
-		  sprintf(buf, "&#%u;", wchar);
-		  StringBuffer-> Cat (buf);
+		  const int length = std::snprintf( buf, sizeof buf, "&#%lu;", static_cast<unsigned long>(wchar));
+		  if (length >= 0) StringBuffer-> Cat (buf);
 		}
 	    }
 	}
@@ -754,7 +754,7 @@ StringBuffer->form("ERROR (%ld,%ld) not inside Record (%ld,%ld)",  start, end, R
 	  CHARSET charset (charsetId);
 	  for (i=1; i <= Context_len; i++)
 	    {
-	      char buf[11]; // max 4294967295 although most is only short (UCS-2)
+	      char buf[14]; // max 4294967295 although most is only short (UCS-2)
 	      unsigned int wchar;
 	      unsigned char ch;
 
@@ -791,8 +791,8 @@ StringBuffer->form("ERROR (%ld,%ld) not inside Record (%ld,%ld)",  start, end, R
 	      else
 		{
 		  // Non-ASCII character -- Map to UCS
-		  sprintf(buf, "&#%u;", wchar);
-		  StringBuffer-> Cat (buf);
+                  const int length = std::snprintf( buf, sizeof buf, "&#%lu;", static_cast<unsigned long>(wchar));
+		  if (length) StringBuffer-> Cat (buf);
 		}
 	    }
 	}

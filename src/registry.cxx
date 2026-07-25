@@ -155,6 +155,8 @@ void REGISTRY::PrintSgml(FILE* fp, const STRLIST& Position) const
     }
 }
 
+
+#if 0
 static STRING EntityFix(const STRING& Input)
 {
   STRING String;
@@ -182,45 +184,122 @@ static STRING EntityFix(const STRING& Input)
   return String;
 }
 
-static STRING EntityDeFix(const char *Input)
+#else
+static STRING EntityFix(const STRING& Input)
 {
-  STRING String;
-  for (const char *tp = Input; *tp; tp++)
+    STRING Output;
+    const size_t length = Input.GetLength();
+
+    for (size_t i = 1; i <= length; ++i)
     {
-      if (*tp == '&')
-	{
-	  if (tp[1] == '#' && isdigit(tp[2]) && isdigit(tp[3]) && tp[4] == ';')
-	    {
-	      String.Cat ( (char)( tp[2]*10 + tp[3] ));
-	      tp += 4;
-	    }
-	  else if (tp[1] == '#' && isdigit(tp[2]) && tp[3] == ';')
-	    {
-	      String.Cat ( tp[2] );
-	      tp += 3;
-	    }
-	  else if (tp[1] == 'l' && tp[2] == 't' && tp[3] == ';')
-	    {
-	      String.Cat ('<');
-	      tp += 3;
-	    }
-	  else if (tp[1] == 'g' && tp[2] == 't' && tp[3] == ';')
-	   {
-	      String.Cat ('>');
-	      tp += 3;
-	   }
-	  else if (tp[1] == 'a' && tp[2] == 'm' && tp[3] == 'p' && tp[4] == ';')
-	   {
-	      String.Cat ('&');
-	      tp += 4;
-	   }
-	  else
-	   String.Cat ('&');
-	}
-      else
-	String.Cat (*tp);
+        // Get and retain the original byte value.
+        const UCHR ch = Input.GetUChr(i);
+
+        switch (ch)
+        {
+            case '<': Output.Cat("&lt;"); break;
+            case '>': Output.Cat("&gt;"); break;
+            case '&': Output.Cat("&amp;"); break;
+
+            // Keep the three control characters permitted by XML 1.0.
+            case '\t': case '\n': case '\r':
+                Output.Cat(ch);
+                break;
+
+            default:
+                if (ch < 0x20)
+                {
+                    /*
+                     * Other C0 control characters are forbidden in XML 1.0,
+                     * even when written as numeric character references.
+                     * Insert the Unicode replacement character as an ASCII
+                     * numeric reference.
+                     */
+                    Output.Cat("&#xFFFD;");
+                }
+                else
+                {
+                    /*
+                     * Copy the byte unchanged:
+                     *   UTF-8: preserves every byte in the sequence.
+                     *   8-bit charset: preserves the original byte.
+                     */
+                    Output.Cat(ch);
+                }
+                break;
+        }
     }
-  return String;
+
+    return Output;
+}
+#endif
+
+
+
+static STRING EntityDeFix(const char* Input)
+{
+    STRING Output;
+
+    if (!Input)
+        return Output;
+
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(Input);
+
+    while (*p)
+    {
+        if (*p != '&')
+        {
+            // Preserve UTF-8 and 8-bit bytes exactly.
+            Output.Cat(static_cast<char>(*p));
+            ++p;
+        }
+        else if (p[1] == 'l' && p[2] == 't' && p[3] == ';')
+        {
+            Output.Cat('<');
+            p += 4;
+        }
+        else if (p[1] == 'g' && p[2] == 't' && p[3] == ';')
+        {
+            Output.Cat('>');
+            p += 4;
+        }
+        else if (p[1] == 'a' && p[2] == 'm' && p[3] == 'p' && p[4] == ';')
+        {
+            Output.Cat('&');
+            p += 5;
+        }
+        else if (p[1] == '#' && p[2] >= '0' && p[2] <= '9')
+        {
+            const unsigned char* q = p + 2;
+            unsigned int value = 0;
+
+            while (*q >= '0' && *q <= '9')
+            {
+                value = value * 10 + (*q - '0');
+                ++q;
+            }
+
+            // EntityFix only produces byte-sized numeric entities.
+            if (*q == ';' && value <= 255)
+            {
+                Output.Cat(static_cast<char>(value));
+                p = q + 1;
+            }
+            else
+            {
+                // Should not happen for EntityFix-generated input.
+                Output.Cat('&');
+                ++p;
+            }
+        }
+        else
+        {
+            // Should not happen for EntityFix-generated input.
+            Output.Cat('&');
+            ++p;
+        }
+    }
+    return Output;
 }
 
 

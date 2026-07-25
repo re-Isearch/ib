@@ -68,6 +68,10 @@ This module is NOW placed into the public domain: 2020. Edward C. Zimmermann
 # define wxASSERT(x) {assert(x);}
 #endif
 
+#include <charconv>
+#include <system_error>
+#include <limits>
+
 #define DELETEA(p)      if ( (p) != NULL ) delete [] p
 
 // ---------------------------------------------------------------------------
@@ -977,7 +981,7 @@ STRING STRING::Escape () const
 	      {
 		// Escape as Octal
 		char buf[5];
-		::sprintf(buf, "\\%03o", (unsigned)Ch);
+		std::snprintf(buf, sizeof buf, "\\%03o", static_cast<unsigned int>(Ch));
 		Temp += buf;
 	      }
 	    else
@@ -1525,103 +1529,147 @@ STRING& STRING::operator =(const unsigned short ShortValue)
   return *this = (unsigned int)ShortValue;
 }
 
-
-STRING& STRING::operator =(const signed IntValue)
+STRING& STRING::operator=(const signed int IntValue)
 {
-  char s[16];
+   // Maximum decimal digits plus terminating '\0'.
+    char s[std::numeric_limits<signed>::digits10 + 2];
 
-  ::sprintf(s, "%i", IntValue);
-  return Assign(s);
-}
+    auto [end, error] = std::to_chars( std::begin(s), std::end(s) - 1, IntValue);
 
-STRING& STRING::operator =(const unsigned IntValue)
-{
-  char s[16];
-
-  ::sprintf(s, "%u", IntValue);
-  return Assign(s);
-}
-
-
-STRING& STRING::operator=(const signed long LongValue)
-{
-  char s[16];
-
-  ::sprintf(s, "%ld", LongValue);
-  return Assign(s);
-}
-
-
-STRING& STRING::operator=(const unsigned long LongValue)
-{
-  char s[16];
-
-  ::sprintf(s, "%lu", LongValue);
-  return Assign(s);
-}
-
-STRING& STRING::operator=(const signed long long LongLongValue)
-{
-  char s[16];
-#ifdef _WIN32
-  ::sprintf(s, "%I64d", (__int64)LongLongValue);
-#else
-  ::sprintf(s, "%lld", LongLongValue);
-#endif
-  return Assign(s);
-}
-
-
-STRING& STRING::operator=(const unsigned long long LongLongValue)
-{
-  char s[16];
-
-#ifdef _WIN32
-  ::sprintf(s, "%I64u", (__int64)LongLongValue);
-#else
-  ::sprintf(s, "%llu", LongLongValue);
-#endif
-  return Assign(s);
-}
-
-
-STRING& STRING::operator=(const float val)
-{
-  if ((val - (long)val) == 0.0)
-    {
-      return *this = (long)val;
+    if (error != std::errc{}) {
+        // Handle conversion failure.
     }
 
-  char s[32];
-
-  ::sprintf(s, "%f", val);
-  return Assign(s);
+    *end = '\0';
+    return Assign(s);
 }
 
-STRING& STRING::operator=(const double val)
+
+STRING& STRING::operator=(const unsigned IntValue)
 {
-  if ((val - (long)val) == 0.0)
-    {
-      return *this = (long)val;
+    // Maximum decimal digits plus terminating '\0'.
+    char s[std::numeric_limits<unsigned>::digits10 + 2];
+
+    const auto result = std::to_chars( s, s + sizeof(s) - 1, IntValue);
+
+    if (result.ec != std::errc{}) {
+        return Assign(""); // ERROR
+    }
+    *result.ptr = '\0';
+    return Assign(s);
+}
+
+STRING& STRING::operator=(const signed long value)
+{
+    // Decimal digits + optional minus sign + terminating '\0'.
+    char s[std::numeric_limits<signed long>::digits10 + 3];
+
+    const auto result = std::to_chars(s, s + sizeof(s) - 1, value);
+
+    if (result.ec != std::errc{}) {
+        return Assign(""); // ERROR 
+    }
+    *result.ptr = '\0';
+    return Assign(s);
+}
+
+
+STRING& STRING::operator=(const unsigned long value)
+{
+   char s[std::numeric_limits<unsigned long>::digits10 + 2];
+
+   const auto result = std::to_chars(s, s + sizeof(s) - 1, value);
+
+    if (result.ec != std::errc{}) { 
+        return Assign(""); // ERROR
+    }
+    *result.ptr = '\0';
+    return Assign(s);
+}
+
+STRING& STRING::operator=(const signed long long value)
+{
+    char s[21];
+
+    const auto result = std::to_chars( s, s + sizeof s, value);
+
+    if (result.ec != std::errc{}) {
+        // Conversion failed.
+        return Assign("");
+    }
+    return Assign(s, static_cast<unsigned>(result.ptr - s));
+}
+
+STRING& STRING::operator=(unsigned long long value)
+{
+    char s[21];
+
+    const auto result = std::to_chars( s, s + sizeof(s) - 1, value);
+
+    if (result.ec != std::errc{}) {
+        return Assign("");
     }
 
-  char s[32];
+    *result.ptr = '\0';
+    return Assign(s);
+}
 
-  ::sprintf(s, "%g", val);
-  return Assign(s);
+
+STRING& STRING::operator=(float val)
+{
+    char s[64];
+
+    // Normalize both +0.0 and -0.0 to "0".
+    if (val == 0.0f)
+        return Assign("0");
+    const auto result = std::to_chars( s, s + sizeof(s) - 1, val, std::chars_format::fixed, 6);
+
+    if (result.ec != std::errc{}) {
+        return Assign("");  // ERROR  
+    }
+
+    char* end = result.ptr;
+
+    // Remove trailing fractional zeros.
+    while (end > s && end[-1] == '0')
+        --end;
+
+    // Remove the decimal point if nothing follows it.
+    if (end > s && end[-1] == '.')
+        --end;
+
+    *end = '\0';
+    return Assign(s);
+}
+
+STRING& STRING::operator=(double val)
+{
+    if (val == 0.0)
+        return Assign("0");
+
+    char s[64];
+
+    const auto result = std::to_chars(s, s + sizeof(s) - 1, val);
+
+    if (result.ec != std::errc{})
+        return Assign("");
+
+    *result.ptr = '\0';
+    return Assign(s);
 }
 
 STRING& STRING::operator=(const long double val)
 {
-  if ((val - (long)val) == 0.0)
-    {
-      return *this = (long long)val;
-    }
+    // Significant digits, sign, decimal point, exponent, and '\0'.
+    char s[std::numeric_limits<long double>::max_digits10 + 16];
 
-  char s[64];
-  
-  ::sprintf(s, "%Lg", val);
-  return Assign(s);
+    const auto result = std::to_chars( s, s + sizeof(s) - 1, val);
+
+    if (result.ec != std::errc{}) {
+        return Assign(""); // ERROR 
+    }
+    *result.ptr = '\0';
+    return Assign(s);
 }
 
 
@@ -1865,26 +1913,35 @@ STRING& STRING::Cat(double Val)
 
 STRING& STRING::HexCat(long long val)
 {
-  char tmp[26];
-#ifdef _WIN32
-  sprintf(tmp, "%I64x", val);
-#else
-  sprintf(tmp, "%llx", val);
-#endif
-  return Cat (tmp);
+  constexpr size_t HexDigits =
+      (std::numeric_limits<unsigned long long>::digits + 3) / 4;
+
+  char tmp[HexDigits + 1];
+
+  const auto result = std::to_chars( tmp, tmp + HexDigits, static_cast<unsigned long long>(val), 16);
+
+  if (result.ec != std::errc())
+    return *this; // ERROR 
+
+  *result.ptr = '\0';
+  return Cat(tmp);
 }
 
 STRING& STRING::OctCat(long long val)
 {
-  char tmp[26];
-#ifdef _WIN32
-  sprintf(tmp, "%I64o", val);
-#else
-  sprintf(tmp, "%llo", val);
-#endif
-  return Cat (tmp);
-}
+  constexpr size_t OctalDigits =
+      (std::numeric_limits<unsigned long long>::digits + 2) / 3;
 
+  char tmp[OctalDigits + 1];
+
+  const auto result = std::to_chars( tmp, tmp + OctalDigits, static_cast<unsigned long long>(val), 8);
+
+  if (result.ec != std::errc())
+    return *this; // ERROR
+
+  *result.ptr = '\0';
+  return Cat(tmp);
+}
 
 /*
  * Same as above but return the result

@@ -178,7 +178,7 @@ public:
 	NUMBER WestBC, NUMBER EastBC);
   PIRSET Interval(NUMBER WestLongitude, NUMBER EastLongitude,
                 NUMBER SouthLatitude, NUMBER NorthLatitude);
-  void   SetSpatialScores(IRSET* pirset, STRING FieldName,
+  void   SetSpatialScores(PIRSET pirset, STRING FieldName,
 	NUMBER NorthBC, NUMBER SouthBC, NUMBER WestBC, NUMBER EastBC);
 
   // Simple date searches
@@ -221,7 +221,7 @@ public:
                                  IntBlock FindBlock,
                                  bool EndpointFlag);
   // This searches indexes of intervals
-  IRSET* DateSearch(const DOUBLE fKey, const STRING& FieldName, 
+  PIRSET DateSearch(const DOUBLE fKey, const STRING& FieldName, 
                         INT4 Relation, IntBlock FindBlock);
 
 

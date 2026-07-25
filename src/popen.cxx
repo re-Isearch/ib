@@ -66,6 +66,8 @@ int _IB_pclose(FILE *iop, int Zombie)
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include "common.hxx"
+#include "string.hxx"
 
 
 #ifdef __GNUG__
@@ -155,8 +157,9 @@ FILE *_IB_popen(const char *Command, const char *type)
   char        cmd[len];
 # else
   char       *cmd = (char *)alloca(len);
-# endif
-  if (cmd) memcpy(cmd, Command, len);
+  if (cmd) 
+#endif 
+   memcpy(cmd, Command, len);
 #endif
 
   char *tcp = (char *)cmd;
@@ -325,10 +328,17 @@ FILE *_IB_popen(const char * const argv[], const char *type)
 
 int _IB_pclose(FILE *iop, int Zombie)
 {
+	auto Warn = [](const struct process_table& process, const char* state)
+	{ STRING text;
+  	  text << "Sub-Process '" << (process.command ? process.command : "(unknown)") << "'[PID="
+		<< process.pid << "] " << (state ? state : "");
+	  _IB_WarningMessage(text.c_str());
+	};
+
 	int fdes, omask, status, runtime;
 	pid_t pid;
-	const char message[] = "Sub-Process '%s'[PID=%d] %s";
-#define Warn(x,s) {char tmp[64]; sprintf(tmp, message, x.command, x.pid, s); _IB_WarningMessage(tmp); }
+//	const char message[] = "Sub-Process '%s'[PID=%d] %s";
+// #define Warn(x,s) {char tmp[64]; sprintf(tmp, message, x.command, x.pid, s); _IB_WarningMessage(tmp); }
 
 	/*
 	 * pclose returns -1 if stream is not associated with a
@@ -381,5 +391,291 @@ int _IB_pclose(FILE *iop, int Zombie)
 	if (WIFEXITED(status))
 		return (WEXITSTATUS(status));
 	return (1);
+}
+
+
+/*
+ * Run argv[0] directly without a shell.
+ *
+ * input/input_size are written to the program's stdin.
+ * stdout and stderr are copied to output.
+ *
+ * Returns:
+ *   child exit status
+ *   -1 for a local launch or I/O failure
+ *
+ * output_size receives the number of bytes written to output.
+ */
+int _IB_run_filter( const char * const argv[], const void *input, size_t input_size, FILE *output, size_t *output_size)
+{
+  if (output_size)
+    *output_size = 0;
+
+  if (argv == NULL || argv[0] == NULL || output == NULL || (input == NULL && input_size != 0))
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
+  int input_pipe[2];
+  int output_pipe[2];
+
+  if (pipe(input_pipe) < 0)
+    return -1;
+
+  if (pipe(output_pipe) < 0)
+    {
+      const int saved_errno = errno;
+
+      close(input_pipe[0]);
+      close(input_pipe[1]);
+
+      errno = saved_errno;
+      return -1;
+    }
+
+  const pid_t child = fork();
+
+  if (child < 0)
+    {
+      const int saved_errno = errno;
+
+      close(input_pipe[0]);
+      close(input_pipe[1]);
+      close(output_pipe[0]);
+      close(output_pipe[1]);
+
+      errno = saved_errno;
+      return -1;
+    }
+
+  if (child == 0)
+    {
+      /*
+       * Filter stdin.
+       */
+      if (input_pipe[0] != STDIN_FILENO)
+        {
+          if (dup2(input_pipe[0], STDIN_FILENO) < 0)
+            _exit(126);
+        }
+
+      /*
+       * Filter stdout.
+       */
+      if (output_pipe[1] != STDOUT_FILENO)
+        {
+          if (dup2(output_pipe[1], STDOUT_FILENO) < 0)
+            _exit(126);
+        }
+
+      /*
+       * Preserve the existing _IB_popen("r") behaviour:
+       * stderr is merged into stdout.
+       */
+      if (dup2(STDOUT_FILENO, STDERR_FILENO) < 0)
+        _exit(126);
+
+      /*
+       * Avoid closing a descriptor if it has become one of
+       * stdin, stdout, or stderr.
+       */
+      if (input_pipe[0] > STDERR_FILENO)
+        close(input_pipe[0]);
+
+      if (input_pipe[1] > STDERR_FILENO)
+        close(input_pipe[1]);
+
+      if (output_pipe[0] > STDERR_FILENO)
+        close(output_pipe[0]);
+
+      if (output_pipe[1] > STDERR_FILENO)
+        close(output_pipe[1]);
+
+      execvp(argv[0], (char * const *)argv);
+
+      /*
+       * Conventionally means executable not found.
+       */
+      _exit(127);
+    }
+
+  /*
+   * Parent does not use the child's pipe ends.
+   */
+  close(input_pipe[0]);
+  close(output_pipe[1]);
+
+  /*
+   * Use a separate input-pump process.
+   *
+   * The main process must continuously drain stdout while input is
+   * being written. Otherwise the filter can deadlock when both pipes
+   * become full.
+   */
+  const pid_t writer = fork();
+
+  if (writer < 0)
+    {
+      const int saved_errno = errno;
+
+      close(input_pipe[1]);
+      close(output_pipe[0]);
+
+      kill(child, SIGKILL);
+
+      while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
+        ;
+
+      errno = saved_errno;
+      return -1;
+    }
+
+  if (writer == 0)
+    {
+      close(output_pipe[0]);
+
+      const unsigned char *data =
+          (const unsigned char *)input;
+
+      size_t remaining = input_size;
+
+      while (remaining != 0)
+        {
+          const size_t chunk = remaining > 65536 ? 65536 : remaining;
+
+          const ssize_t written = write(input_pipe[1], data, chunk);
+
+          if (written > 0)
+            {
+              data += written;
+              remaining -= (size_t)written;
+            }
+          else if (written < 0 && errno == EINTR)
+            {
+              continue;
+            }
+          else
+            {
+              close(input_pipe[1]);
+              _exit(1);
+            }
+        }
+
+      /*
+       * This sends EOF to the filter's stdin.
+       */
+      close(input_pipe[1]);
+      _exit(0);
+    }
+
+  /*
+   * Only the writer process retains the input pipe.
+   */
+  close(input_pipe[1]);
+
+  unsigned char buffer[32768];
+  size_t total = 0;
+  int io_errno = 0;
+
+  for (;;)
+    {
+      const ssize_t received =
+          read(output_pipe[0], buffer, sizeof(buffer));
+
+      if (received > 0)
+        {
+          if (io_errno == 0)
+            {
+              size_t done = 0;
+
+              while (done < (size_t)received)
+                {
+                  const size_t amount = fwrite( buffer + done, 1, (size_t)received - done, output);
+
+                  if (amount == 0)
+                    {
+                      io_errno = errno ? errno : EIO;
+                      break;
+                    }
+
+                  done += amount;
+                  total += amount;
+                }
+            }
+
+          /*
+           * Continue draining stdout after an output error.
+           * Otherwise the filter could remain blocked forever.
+           */
+        }
+      else if (received == 0)
+        {
+          break;
+        }
+      else if (errno == EINTR)
+        {
+          continue;
+        }
+      else
+        {
+          io_errno = errno;
+          break;
+        }
+    }
+
+  close(output_pipe[0]);
+
+  int child_status = 0;
+  int writer_status = 0;
+  pid_t waited;
+
+  do
+    {
+      waited = waitpid(child, &child_status, 0);
+    }
+  while (waited < 0 && errno == EINTR);
+
+  if (waited < 0 && io_errno == 0)
+    io_errno = errno;
+
+  do
+    {
+      waited = waitpid(writer, &writer_status, 0);
+    }
+  while (waited < 0 && errno == EINTR);
+
+  if (waited < 0 && io_errno == 0)
+    io_errno = errno;
+
+  if (output_size)
+    *output_size = total;
+
+  if (io_errno != 0)
+    {
+      errno = io_errno;
+      return -1;
+    }
+
+  int exit_status = 1;
+
+  if (WIFEXITED(child_status))
+    exit_status = WEXITSTATUS(child_status);
+
+  /*
+   * Prefer the filter's own error status.
+   *
+   * If the filter says it succeeded but the input writer failed,
+   * report an input-pipe error.
+   */
+  if (exit_status == 0 &&
+      (!WIFEXITED(writer_status) ||
+       WEXITSTATUS(writer_status) != 0))
+    {
+      errno = EPIPE;
+      return -1;
+    }
+
+  return exit_status;
 }
 #endif

@@ -154,10 +154,12 @@ void FILTERDOC::ParseRecords(const RECORD& FileRecord)
   const UCHR *Buffer  = (const UCHR *)mapping.Ptr();
   const size_t MemSize = mapping.Size();
 
+#if 0 
   char tmpfile[L_tmpnam+1];
 
   char *tempfile = tmpnam(tmpfile);
   FILE *fp = fopen(tempfile, "wb");
+
   if (fp == NULL)
     {
       message_log (LOG_ERRNO, "Could not create temporarily file stream '%s'", tempfile);
@@ -170,13 +172,12 @@ void FILTERDOC::ParseRecords(const RECORD& FileRecord)
   mapping.Unmap(); // Clear map
   fclose(fp);
   if (length < MemSize)
-     message_log (LOG_WARN|LOG_ERRNO, "Temp file '%s' short write by %d bytes", tempfile,
-	(int)(MemSize-length));
+     message_log (LOG_WARN|LOG_ERRNO, "Temp file short write by %d bytes", (int)(MemSize-length));
 
   if ((fp = fopen(outfile, "w")) == NULL)
    {
      message_log (LOG_ERRNO, "%s: Could not create '%s'", outfile.c_str());
-     UnlinkFile(tempfile);
+     // UnlinkFile(tempfile);
      return;
    }
 
@@ -208,8 +209,54 @@ void FILTERDOC::ParseRecords(const RECORD& FileRecord)
       len++;
     }
   _IB_pclose(pp);
-  fclose(fp);
+  std::fclose(fp);
   UnlinkFile(tempfile);
+#else
+
+  FILE *fp = fopen(outfile, "wb");
+  if (fp == NULL)
+  {
+    message_log( LOG_ERRNO, "%s: Could not create '%s'", Doctype.c_str(), outfile.c_str());
+    mapping.Unmap();
+    return;
+  }
+
+  const char *argv[] = { Filter.c_str(), NULL };
+  size_t len = 0;
+  errno = 0;
+
+  const int status = _IB_run_filter( argv, Buffer, MemSize, fp, &len);
+  const int run_errno = errno;
+
+  mapping.Unmap();
+
+  const int close_status = fclose(fp);
+  const int close_errno = errno;
+
+  if (status < 0) {
+      errno = run_errno;
+      message_log( LOG_ERRNO, "%s: Could not run filter '%s'", Doctype.c_str(), Filter.c_str());
+      UnlinkFile(outfile);
+      return;
+  }
+  if (close_status != 0) {
+    errno = close_errno;
+    message_log( LOG_ERRNO, "%s: Error closing filtered output '%s'", Doctype.c_str(), outfile.c_str());
+    UnlinkFile(outfile);
+    return;
+  }
+
+  if (status != 0) {
+    message_log( LOG_ERROR, "%s: Filter '%s' exited with status %d", Doctype.c_str(), Filter.c_str(), status);
+    UnlinkFile(outfile);
+    return;
+  }
+  if (len == 0) {
+    message_log( LOG_WARN, "%s: Filter '%s' produced no output", Doctype.c_str(), Filter.c_str());
+    UnlinkFile(outfile);
+    return;
+  }
+#endif
 
   RECORD NewRecord(FileRecord);
   // We now have a record in outfile from 0 to len
