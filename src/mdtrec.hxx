@@ -145,13 +145,13 @@ public:
   void FlipBytes();
 
   // In the structure read/write..
-  bool Write(FILE *fp, INT Index = 0) const;
-  bool Read(FILE *fp, INT Index = 0);
-  SRCH_DATE   GetDate(FILE *fp, INT Index=0) const;
+  bool Write(FILE *fp, size_t Index = 0) const;
+  bool Read(FILE *fp, size_t Index = 0);
+  SRCH_DATE GetDate(FILE *fp, size_t Index = 0) const;
 
 
   // Is the MDT Index deleted?
-  bool IsDeleted(FILE *fp, INT Index);
+  bool IsDeleted(FILE *fp, size_t Index);
 
 
   STRING        Dump() const;

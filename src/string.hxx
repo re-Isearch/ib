@@ -313,11 +313,10 @@ public:
     // begin/end pattern
     const char*             begin() const { return data(); }
     const char*             end()   const { return data() + Len(); }
-
+#endif
     // Interface to std::string
     operator std::string_view() const noexcept { return std::string_view(data(), size()); }
     std::string toStdString() const { return std::string(data(), size()); }
-#endif
 
     ///
     const char* GetData() const { return m_pchData; }

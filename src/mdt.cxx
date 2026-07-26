@@ -2,11 +2,8 @@
 It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #pragma ident  "@(#)mdt.cxx"
 
-//// TODO: htonll etc... Current implmentation is 32-bit!!!
-
-// LARGE INDEXES DON'T YET WORK.. 
-
 const int MaxMDTInstances = 20; // 100000;
+
 
 /************************************************************************
 ************************************************************************/
@@ -21,6 +18,7 @@ Author:		Edward C. Zimmermann
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits>
 
 #if defined(_MSDOS) || defined(_WIN32)
 #include <io.h>
@@ -64,11 +62,6 @@ extern   uint32_t ntohl(uint32_t);
 
 #include <unistd.h>
 
-#if defined(_MSDOS) || defined(_WIN32)
-# define ftruncate(_fd,_len) chsize(_fd, _len)
-# include <io.h>
-#endif
-
 #if USE_MDTHASHTABLE
 MDTHASHTABLE *_globalMDTHashTable = NULL;
 #endif
@@ -91,37 +84,114 @@ MDTHASHTABLE *_globalMDTHashTable = NULL;
 #endif
 
 
-static const _index_id_t MDT_CAPACITY (MdtIndexCapacity/sizeof(MDTREC)) ;
+#define SIZEOF_MAGIC 16 /* See mdtrec.cxx */
 
+static UINT8 MdtMaximumFileOffset()
+{
+#ifdef _WIN32
+  return MAX_UINT8 >> 1;
+#else
+  return static_cast<UINT8>(std::numeric_limits<off_t>::max());
+#endif
+}
 
-#define SIZEOF_MAGIC 16 /* See mdt.cxx */
+static bool GetStreamLength(FILE *fp, UINT8 *length)
+{
+  if (fp == NULL || length == NULL)
+    return false;
+#ifdef _WIN32
+  const INT8 current = _ftelli64(fp);
+  if (current < 0 || _fseeki64(fp, 0, SEEK_END) != 0)
+    return false;
+  const INT8 end = _ftelli64(fp);
+  const bool restored = _fseeki64(fp, current, SEEK_SET) == 0;
+#else
+  const off_t current = ftello(fp);
+  if (current < 0 || fseeko(fp, 0, SEEK_END) != 0)
+    return false;
+  const off_t end = ftello(fp);
+  const bool restored = fseeko(fp, current, SEEK_SET) == 0;
+#endif
+  if (end < 0 || !restored)
+    return false;
+  *length = static_cast<UINT8>(end);
+  return true;
+}
+
+static bool GetFdLength(int fd, UINT8 *length)
+{
+  if (fd < 0 || length == NULL)
+    return false;
+#ifdef _WIN32
+  const INT8 current = _lseeki64(fd, 0, SEEK_CUR);
+  if (current < 0)
+    return false;
+  const INT8 end = _lseeki64(fd, 0, SEEK_END);
+  const bool restored = _lseeki64(fd, current, SEEK_SET) >= 0;
+#else
+  const off_t current = lseek(fd, 0, SEEK_CUR);
+  if (current < 0)
+    return false;
+  const off_t end = lseek(fd, 0, SEEK_END);
+  const bool restored = lseek(fd, current, SEEK_SET) >= 0;
+#endif
+  if (end < 0 || !restored)
+    return false;
+  *length = static_cast<UINT8>(end);
+  return true;
+}
+
+static bool TruncateMdtFile(int fd, UINT8 length)
+{
+#ifdef _WIN32
+  if (length > (MAX_UINT8 >> 1))
+    return false;
+  return _chsize_s(fd, static_cast<INT8>(length)) == 0;
+#else
+  const off_t nativeLength = static_cast<off_t>(length);
+  if (nativeLength < 0 || static_cast<UINT8>(nativeLength) != length)
+    return false;
+  return ftruncate(fd, nativeLength) == 0;
+#endif
+}
+
+static size_t CalculateMdtCapacity()
+{
+  UINT8 capacity = static_cast<UINT8>(MdtRecordIdCapacity);
+  const UINT8 maxOffset = MdtMaximumFileOffset();
+  if (maxOffset < SIZEOF_MAGIC)
+    return 0;
+
+  const UINT8 byFile =
+    (maxOffset - SIZEOF_MAGIC + 1) / static_cast<UINT8>(sizeof(MDTREC));
+  if (capacity > byFile)
+    capacity = byFile;
+
+  const UINT8 bySizeT = static_cast<UINT8>(std::numeric_limits<size_t>::max());
+  if (capacity > bySizeT)
+    capacity = bySizeT;
+
+  return static_cast<size_t>(capacity);
+}
+
+const size_t MDT_CAPACITY = CalculateMdtCapacity();
+
+_index_id_t MDT::GetCapacity() { return MDT_CAPACITY; }
 
 #define _NextGlobal(_c) ((_c).GetGlobalFileStart()+(_c).GetLocalRecordEnd() + 1)
 
 int _IB_MDT_SEED = 5039;
 #define GROWTH_FACTOR(_x) ((_x)*3 + _IB_MDT_SEED)
 
-
-// static const _index_id_t  _vert_mask  = 0xFF00000000000000ULL;
-//  static const _index_id_t  _index_mask = 0x00FFFFFFFFFFFFFFULL;
-
-
-#if defined(LARGE_INDEX) && defined(O_BUILD_IB64)
-#  define DELETED_BITS        0xF000000000000000ULL
-#else
-#  define DELETED_BITS        0xF0000000UL
-#endif 
-
-#define INDEX_BITS          (0x0FFFFFFFUL | ((UINT8)(0xFFFFFFFFUL)) << 32)
-
-
+/* The cache stores a local record id plus deletion state, never a virtual id. */
+static const _index_id_t DELETED_BITS =
+  static_cast<_index_id_t>(0xFULL) << (sizeof(_index_id_t) * 8U - 4U);
+static const _index_id_t INDEX_BITS = _index_mask;
 
 #define DELETED_MASK(_x)    (((_x) & DELETED_BITS) ? true : false)
 #define INDEX_MASK(_x)      ((_x) & INDEX_BITS)
-
-#define KEYHASH_MASK(_x)    (UINT4)((_x) >> 32)
 #define SET_DELETE_BITS(_x) ((_x) |= DELETED_BITS)
-#define CLR_DELETE_BITS(_x) ((_x) &= INDEX_BITS) 
+#define CLR_DELETE_BITS(_x) ((_x) &= INDEX_BITS)
 #define SET_DELETE_STATE(_x, _y)  ((_y) ? SET_DELETE_BITS(_x) : CLR_DELETE_BITS(_x))
 
 // One at a time hash:
@@ -141,18 +211,6 @@ static UINT4 KeyHash32(const char *key, size_t len=0)
 static inline UINT4 KeyHash32(const STRING& Key)
 {
   return KeyHash32(Key.c_str(), Key.GetLength());
-}
-
-// Idx := which record in MDT (count)
-// Key := Record Key
-//
-//  [4 bytes][4 bytes]
-//    ^          \ the index where the top byte is deleted/not deleted
-//    \ the 32-bit one_time_hash of the key.
-//
-static UINT8 IndexValueEncode(_index_id_t Idx, const STRING& Key)
-{
-  return (((UINT8)KeyHash32(Key)) << 32) | (UINT8)Idx;
 }
 
 //
@@ -198,45 +256,58 @@ class KEYSORT {
 
 bool MDT::BuildKeySortTable()
 {
-  size_t     entries = 0;
+  size_t entries = 0;
 
   if (useIndexMap)
     {
-      message_log (LOG_ERROR, "MDT Can't build Key Sort Table while tables are mapped.");
+      message_log(LOG_ERROR,
+                  "MDT can't build the key sort table while tables are mapped");
       return false;
     }
 
-  if (KeyIndexSorted == false)
+  if (!KeyIndexSorted)
+    SortKeyIndex();
+
+  delete[] KeySortTable;
+  KeySortTable = NULL;
+
+  if (TotalEntries == 0)
+    return true;
+
+  try
     {
-      SortKeyIndex ();
+      KeySortTable = new KEYSORT[TotalEntries];
+    }
+  catch (...)
+    {
+      message_log(LOG_PANIC | LOG_ERRNO,
+                  "Can't allocate key sort table for %llu records",
+                  static_cast<unsigned long long>(TotalEntries));
+      return false;
     }
 
-  if (KeySortTable)
+  for (size_t i = 0; i < TotalEntries; ++i)
     {
-      delete[] KeySortTable;
-      KeySortTable = NULL;
+      const size_t index = static_cast<size_t>(
+        INDEX_MASK(NTOHL(KeyIndex[i].Index)));
+      if (index == 0)
+        message_log(LOG_WARN, "Undefined key index[%llu]",
+                    static_cast<unsigned long long>(i));
+      else if (index > TotalEntries)
+        message_log(LOG_PANIC,
+                    "MDT SortTable/KeyIndex[%llu] invalid (%llu>%llu)",
+                    static_cast<unsigned long long>(i),
+                    static_cast<unsigned long long>(index),
+                    static_cast<unsigned long long>(TotalEntries));
+      else
+        {
+          KeySortTable[index - 1].Position = static_cast<_index_id_t>(i);
+          ++entries;
+        }
     }
-
-  if (TotalEntries)
-    {
-      size_t  index;
-
-      KeySortTable = new KEYSORT[TotalEntries+1];
-      for (_index_id_t i =0; i< TotalEntries; i++)
-	{
-	  if ((index = (size_t)INDEX_MASK(KeyIndex[i].Index)) == 0) {
-	    message_log (LOG_WARN, "Undefined key index[%u]", (unsigned)i);
-	  } else if (index > TotalEntries) {
-	    message_log (LOG_PANIC, "MDT SortTable/KeyIndex[%u] grok (%u>%u)",
-		(unsigned)i, (unsigned)index, (unsigned)TotalEntries);
-	  } else {
-	    KeySortTable[index-1].Position = i;
-	    entries++;
-	  }
-	}
-    }
-  return entries == TotalEntries; // Any errors?
+  return entries == TotalEntries;
 }
+
 
 
 // Uses the KeySortTable
@@ -256,7 +327,65 @@ size_t MDT::KeySortPosition(_index_id_t Idx) const
 
 typedef MDTREC MDTRECORD;
 
-static const GPTYPE CacheVersion = 1;
+/*
+ * This cache contains raw GPREC, KEYREC and KEYSORT objects.  Encode both
+ * widths in the version so an incompatible cache is rebuilt automatically.
+ */
+static const GPTYPE CacheVersion =
+  static_cast<GPTYPE>(0x0200U + sizeof(GPTYPE) * 0x10U + sizeof(_index_id_t));
+
+static bool CacheFileSize(size_t entries, size_t *bytes)
+{
+  const size_t header = 2 * sizeof(GPTYPE);
+  const size_t perEntry = sizeof(GPREC) + sizeof(KEYREC) + sizeof(KEYSORT);
+  if (bytes == NULL ||
+      entries > (std::numeric_limits<size_t>::max() - header) / perEntry)
+    return false;
+  *bytes = header + entries * perEntry;
+  return true;
+}
+
+static bool CacheCountToSize(GPTYPE stored, size_t *entries)
+{
+  const size_t value = static_cast<size_t>(stored);
+  if (entries == NULL || static_cast<GPTYPE>(value) != stored ||
+      value >  MDT_CAPACITY)
+    return false;
+  *entries = value;
+  return true;
+}
+
+static bool ReadFully(int fd, void *buffer, size_t bytes)
+{
+  BYTE *out = static_cast<BYTE *>(buffer);
+  const size_t maxChunk = 0x40000000U;
+  while (bytes != 0)
+    {
+      const size_t chunk = bytes < maxChunk ? bytes : maxChunk;
+      const long count = static_cast<long>(_sys_read(fd, out, chunk));
+      if (count <= 0)
+        return false;
+      out += count;
+      bytes -= static_cast<size_t>(count);
+    }
+  return true;
+}
+
+static bool WriteFully(int fd, const void *buffer, size_t bytes)
+{
+  const BYTE *in = static_cast<const BYTE *>(buffer);
+  const size_t maxChunk = 0x40000000U;
+  while (bytes != 0)
+    {
+      const size_t chunk = bytes < maxChunk ? bytes : maxChunk;
+      const long count = static_cast<long>(write(fd, in, chunk));
+      if (count <= 0)
+        return false;
+      in += count;
+      bytes -= static_cast<size_t>(count);
+    }
+  return true;
+}
 
 #if 0
 class INDEXREC {
@@ -373,7 +502,8 @@ MDT::MDT (const STRING& DbFileStem, const bool WrongEndian)
 
 void MDT::Init()
 {
-  GPTYPE realTotal = 0;
+  size_t realTotal = 0;
+  bool rebuiltIndex = false;
 
   if (MdtFp)
     {
@@ -381,286 +511,293 @@ void MDT::Init()
       MdtFp = NULL;
     }
   InstanceCount++;
-  message_log (LOG_DEBUG, "MDT::Init() instance %d", InstanceCount);
+  message_log(LOG_DEBUG, "MDT::Init() instance %d", InstanceCount);
 
-  if (IsBigEndian ())
-    {
-      if (MdtWrongEndian) Magic = "!MDT"; // Wrong endian on a little endian system
-     else                 Magic = "<MDT";
-    }
+  if (IsBigEndian())
+    Magic = MdtWrongEndian ? "!MDT" : "<MDT";
+  else
+    Magic = MdtWrongEndian ? "!mdt" : "!MDT";
+
+  if (useIndexMap)
+    IndexMap.Unmap();
   else
     {
-      if (MdtWrongEndian) Magic = "!mdt";
-      else                Magic = "!MDT";
+      delete[] KeyIndex;
+      delete[] GpIndex;
+      delete[] KeySortTable;
     }
+  if (useMdtMap)
+    MdtMap.Unmap();
 
-  if (GpIndex || KeyIndex || KeySortTable)
-    {
-      if (!useIndexMap)
-	{
-	  if (KeyIndex)     delete[] KeyIndex;
-	  if (GpIndex)      delete[] GpIndex;
-	  if (KeySortTable) delete[] KeySortTable;
-	}
-      else
-	IndexMap.Unmap();
-      GpIndex   = NULL;
-      KeyIndex  = NULL;
-      KeySortTable = NULL; 
-    }
-
+  GpIndex = NULL;
+  KeyIndex = NULL;
+  KeySortTable = NULL;
+  MdtIndex = NULL;
   TotalEntries = 0;
   NextGlobalGp = 0;
-#if 0
-  GPTYPE totalDeleted = 0;
-#endif
-  MdtName = FileStem+DbExtMdt;
-  MdtIndexName = FileStem+DbExtMdtIndex;
+  MdtName = FileStem + DbExtMdt;
+  MdtIndexName = FileStem + DbExtMdtIndex;
 
   if (useMdtMap)
     {
       MdtMap.CreateMap(MdtName, MapRandom);
-      if (MdtMap.Ok())
-	{
-	  // Here we map it in...
-	  MdtIndex = (MDTRECORD *)(MdtMap.Ptr() + SIZEOF_MAGIC);
-	  realTotal = TotalEntries = (size_t)((MdtMap.Size() - SIZEOF_MAGIC)/ sizeof (MDTRECORD));
-	  if (TotalEntries == 0)
-	    {
-	      useIndexMap = useMdtMap = false;
-	      MdtMap.Unmap();
-	    }
-	}
+      if (MdtMap.Ok() && MdtMap.Size() >= SIZEOF_MAGIC &&
+          ((MdtMap.Size() - SIZEOF_MAGIC) % sizeof(MDTRECORD)) == 0)
+        {
+          const size_t mappedTotal =
+            (MdtMap.Size() - SIZEOF_MAGIC) / sizeof(MDTRECORD);
+          if (mappedTotal <= MDT_CAPACITY)
+            {
+              realTotal = mappedTotal;
+              MdtIndex = reinterpret_cast<MDTRECORD *>(
+                MdtMap.Ptr() + SIZEOF_MAGIC);
+            }
+          else
+            {
+              MdtMap.Unmap();
+              useMdtMap = false;
+            }
+        }
       else
-	{
-	  useMdtMap = false;
-	}
+        {
+          MdtMap.Unmap();
+          useMdtMap = false;
+        }
     }
 
-  bool reBuildIndexCache = false;
-
-  bool try_open_stream = true;
+  bool cacheLoaded = false;
   if (useIndexMap)
     {
       IndexMap.CreateMap(MdtIndexName, MapRandom);
-      if (IndexMap.Ok())
-	{
-	  const BYTE *ptr = IndexMap.Ptr();
-	  const GPTYPE cache_version = *((GPTYPE *)ptr);
-	  if (cache_version != CacheVersion || IndexMap.Size() < (2*sizeof(GPTYPE)))
-	    {
-	      message_log (LOG_ERROR, "Key/Index Cache version mis-match (!%d)!", CacheVersion);
-	      IndexMap.Unmap();
-	      GpIndex = NULL;
-	      KeyIndex = NULL;
-	      KeySortTable = NULL; 
-	      useIndexMap = false;
-	      reBuildIndexCache = true;
-	      goto done;
-	    }
-	  else
-	    {
-	      GPTYPE GpTotal;
-	      memcpy((void *)&GpTotal, ptr+sizeof(GPTYPE), sizeof(GPTYPE));
-	      if (IndexMap.Size() >= (2*sizeof(GPTYPE)+GpTotal*(sizeof(GPREC)+sizeof(KEYREC))))
-		{
-		  GpIndex  =(GPREC *) (2*sizeof(GPTYPE) + ptr);
-		  KeyIndex =(KEYREC *)(2*sizeof(GPTYPE) + ptr + GpTotal*sizeof(GPREC));
-		  KeySortTable = (KEYSORT *)((BYTE *)KeyIndex + GpTotal*sizeof(KEYREC));
-		  useIndexMap = ((TotalEntries = GpTotal) != 0);
-		}
-	      else // ERROR
-		{
-		  if (GpTotal || TotalEntries)
-		    message_log (LOG_WARN, "Key/Index cache defective");
-		  IndexMap.Unmap();
-		  GpIndex   = NULL;
-		  KeyIndex  = NULL;
-		  KeySortTable = NULL;
-		  useIndexMap = false;
-		}
-	  }
-	}
-      else
-	{
-	  useIndexMap = false;
-	}
+      if (IndexMap.Ok() && IndexMap.Size() >= 2 * sizeof(GPTYPE))
+        {
+          const BYTE *ptr = IndexMap.Ptr();
+          GPTYPE cacheVersion = 0;
+          GPTYPE storedTotal = 0;
+          memcpy(&cacheVersion, ptr, sizeof(cacheVersion));
+          memcpy(&storedTotal, ptr + sizeof(GPTYPE), sizeof(storedTotal));
+          storedTotal = NTOHL(storedTotal);
+
+          size_t cacheTotal = 0;
+          size_t expectedBytes = 0;
+          if (cacheVersion == CacheVersion &&
+              CacheCountToSize(storedTotal, &cacheTotal) &&
+              CacheFileSize(cacheTotal, &expectedBytes) &&
+              expectedBytes == IndexMap.Size() && cacheTotal != 0)
+            {
+              GpIndex = reinterpret_cast<GPREC *>(
+                const_cast<BYTE *>(ptr + 2 * sizeof(GPTYPE)));
+              KeyIndex = reinterpret_cast<KEYREC *>(
+                reinterpret_cast<BYTE *>(GpIndex) +
+                cacheTotal * sizeof(GPREC));
+              KeySortTable = reinterpret_cast<KEYSORT *>(
+                reinterpret_cast<BYTE *>(KeyIndex) +
+                cacheTotal * sizeof(KEYREC));
+              TotalEntries = cacheTotal;
+              cacheLoaded = true;
+            }
+        }
+
+      if (!cacheLoaded)
+        {
+          IndexMap.Unmap();
+          useIndexMap = false;
+          GpIndex = NULL;
+          KeyIndex = NULL;
+          KeySortTable = NULL;
+        }
     }
-  message_log (LOG_DEBUG, "Index %sMapped, MDT %sMapped", useIndexMap ? "" : "not ", useMdtMap ? "" : "not ");
 
-if (!useIndexMap) {
-  // Load Gp Index
-  int fd;
-
-  if ((fd = open (MdtIndexName, O_RDONLY)) != -1)
+  if (!cacheLoaded)
     {
-      struct stat s;
-      GPTYPE version;
+      const int fd = open(MdtIndexName, O_RDONLY);
+      if (fd != -1)
+        {
 #ifdef _WIN32
-      setmode(fd, O_BINARY);
+          setmode(fd, O_BINARY);
 #endif
+          GPTYPE cacheVersion = 0;
+          GPTYPE storedTotal = 0;
+          UINT8 cacheBytes = 0;
+          bool valid = ReadFully(fd, &cacheVersion, sizeof(cacheVersion)) &&
+                       ReadFully(fd, &storedTotal, sizeof(storedTotal)) &&
+                       GetFdLength(fd, &cacheBytes);
+          storedTotal = NTOHL(storedTotal);
 
-#pragma GCC diagnostic ignored "-Wunused-result"
-      read(fd, &version, sizeof(GPTYPE));
-      read(fd, &realTotal, sizeof(GPTYPE));
-      realTotal = HTONL(realTotal);
+          size_t cacheTotal = 0;
+          size_t expectedBytes = 0;
+          valid = valid && cacheVersion == CacheVersion &&
+                  CacheCountToSize(storedTotal, &cacheTotal) &&
+                  CacheFileSize(cacheTotal, &expectedBytes) &&
+                  cacheBytes == static_cast<UINT8>(expectedBytes) &&
+                  cacheTotal != 0;
 
-      if (fstat(fd, &s) != -1)
-	{
-	  TotalEntries = (size_t)((s.st_size - 2*sizeof(GPTYPE))/ ( sizeof(GPREC)+sizeof(KEYREC) + sizeof(KEYSORT)));
-	}
-      if (version != CacheVersion)
-	message_log (LOG_WARN, "MDT: Version of '%s' %d!=%d!", MdtIndexName.c_str(),
-		version, CacheVersion);
+          if (valid)
+            {
+              try
+                {
+                  GpIndex = new GPREC[cacheTotal];
+                  KeyIndex = new KEYREC[cacheTotal];
+                  KeySortTable = new KEYSORT[cacheTotal];
+                }
+              catch (...)
+                {
+                  delete[] GpIndex;
+                  delete[] KeyIndex;
+                  delete[] KeySortTable;
+                  GpIndex = NULL;
+                  KeyIndex = NULL;
+                  KeySortTable = NULL;
+                  valid = false;
+                }
+            }
 
-      if (TotalEntries != (size_t)realTotal)
-	{
-	  long diff = realTotal - TotalEntries;
-	  if (diff < 0) diff *= -1;
-	  message_log (LOG_ERROR, "MDT: Format error on Gp/Key cache file '%s' %ld!=%ld [%ld %s] (recoverable)",
-		MdtIndexName.c_str(), TotalEntries, realTotal, diff, realTotal > TotalEntries ? "missing" : "excess");
-	  TotalEntries = 0;
-	}
-      else
-	TotalEntries = (size_t)realTotal;
+          if (valid)
+            valid = ReadFully(fd, GpIndex, cacheTotal * sizeof(GPREC)) &&
+                    ReadFully(fd, KeyIndex, cacheTotal * sizeof(KEYREC)) &&
+                    ReadFully(fd, KeySortTable, cacheTotal * sizeof(KEYSORT));
+          close(fd);
 
-      if (TotalEntries)
-	{
-	  try {
-	    GpIndex = new GPREC[TotalEntries];
-	  } catch (...) {
-	    message_log (LOG_PANIC, "Can't allocate %ld bytes for Gp cache (recoverable)", TotalEntries*sizeof(GPREC) );
-	    GpIndex = NULL;
-	    TotalEntries = 0;
-	  }
-
-	  size_t bytes = sizeof(GPREC)*TotalEntries;
-	  if (GpIndex && (bytes != (size_t)_sys_read (fd, GpIndex, bytes)))
-	    {
-	      // Error
-	      TotalEntries = 0;
-	      message_log (LOG_ERROR, "Read error on Gp cache file (recoverable)");
-	    }
-	  // Load Key Index
-	  if (TotalEntries)
-	    {
-	      try {
-		KeyIndex = new KEYREC[TotalEntries];
-		KeySortTable = new KEYSORT[TotalEntries];
-	      } catch (...) {
-		message_log (LOG_PANIC, "Can't allocate memory for %ld element key cache and/or key sort table (recoverable)", TotalEntries);
-		KeyIndex = NULL;
-		KeySortTable = NULL;
-		TotalEntries = 0;
-	      }
-	      bytes = sizeof(KEYREC)*TotalEntries;
-
-	      if (KeyIndex && (bytes != (size_t)_sys_read (fd, (void *)KeyIndex, bytes)))
-		{
-		  // Error
-		  message_log (LOG_ERROR, "Read error on key cache file (recoverable)");
-		  TotalEntries = 0;
-		}
-	     bytes = sizeof(KEYSORT)*TotalEntries;
-	      if (KeySortTable && (bytes != (size_t)_sys_read (fd, (void *)KeyIndex, bytes)))
-		{
-		  message_log (LOG_ERROR, "Read error on key sort table");
-		}
-	    }
-	  close(fd);
-	  if (TotalEntries == 0)
-	    {
-	      if (GpIndex)
-		{
-		  delete[] GpIndex; GpIndex = NULL;
-		}
-	      if (KeyIndex)
-		{
-		  delete[] KeyIndex; KeyIndex = NULL;
-		}
-	      if (KeySortTable)
-		{
-		  delete[] KeySortTable; KeySortTable = NULL;
-		}
-	    }
-	}
-      else
-	{
-	  close (fd);
-	}
+          if (valid)
+            {
+              TotalEntries = cacheTotal;
+              cacheLoaded = true;
+            }
+          else
+            {
+              delete[] GpIndex;
+              delete[] KeyIndex;
+              delete[] KeySortTable;
+              GpIndex = NULL;
+              KeyIndex = NULL;
+              KeySortTable = NULL;
+            }
+        }
     }
 
-  if (TotalEntries == 0)
-    reBuildIndexCache = true;
-}
+  message_log(LOG_DEBUG, "Index %sMapped, MDT %sMapped",
+              useIndexMap ? "" : "not ", useMdtMap ? "" : "not ");
 
-done:
-  // Open on-disk MDT Stream
+  bool tryOpenStream = true;
+open_mdt_stream:
   ReadOnly = false;
-  if ((MdtFp = fopen (MdtName, "r+b")) == NULL)
+  MdtFp = fopen(MdtName, "r+b");
+  if (MdtFp == NULL)
     {
-      if ((MdtFp = fopen (MdtName, "w+b")) != NULL)
-	{
-	  WriteHeader();
-	  fclose (MdtFp);
-	  MdtFp = fopen (MdtName, "r+b");
-	}
+      MdtFp = fopen(MdtName, "w+b");
+      if (MdtFp != NULL)
+        {
+          WriteHeader();
+          fclose(MdtFp);
+          MdtFp = fopen(MdtName, "r+b");
+        }
       else
-	{
-	  MdtFp = fopen (MdtName, "rb");
-	  ReadOnly = true;
-	}
+        {
+          MdtFp = fopen(MdtName, "rb");
+          ReadOnly = true;
+        }
     }
-  if (MdtFp != NULL)
+
+  if (MdtFp == NULL)
     {
-      message_log (LOG_DEBUG, "MDT %s -> %d", MdtName.c_str(), fileno(MdtFp));
-      ReadTimestamp(); // Get timestamp
+      if (errno == EMFILE && tryOpenStream && Fpt != NULL)
+        {
+          message_log(LOG_INFO, "Insufficient file/stream handles in O/S");
+          Fpt->CloseAll();
+          tryOpenStream = false;
+          goto open_mdt_stream;
+        }
+      message_log(LOG_FATAL | LOG_ERRNO, "Could not create/open %s (MDT)",
+                  MdtName.c_str());
     }
   else
     {
-#if 1 
-     // Need to define in the init and a member FPT * = Index->Parent->MainFpt
-      if (errno == EMFILE && try_open_stream) 
-	{
-	  if (Fpt != NULL)
-	    {
-	      message_log (LOG_INFO, "Insufficient file/stream handles in O/S");
-	      Fpt->CloseAll();
-	      try_open_stream = false;
-	      goto done;
-	    }
-	}
-#endif
-      message_log (LOG_FATAL|LOG_ERRNO, "Could not create/open %s (MDT)", MdtName.c_str());
+      message_log(LOG_DEBUG, "MDT %s -> %d", MdtName.c_str(), fileno(MdtFp));
+      ReadTimestamp();
+
+      UINT8 mdtBytes = 0;
+      if (!GetStreamLength(MdtFp, &mdtBytes) || mdtBytes < SIZEOF_MAGIC ||
+          ((mdtBytes - SIZEOF_MAGIC) % sizeof(MDTRECORD)) != 0)
+        message_log(LOG_FATAL, "MDT '%s' has an invalid file length",
+                    MdtName.c_str());
+      else
+        {
+          const UINT8 count =
+            (mdtBytes - SIZEOF_MAGIC) / sizeof(MDTRECORD);
+          if (count > static_cast<UINT8>(MDT_CAPACITY))
+            message_log(LOG_FATAL,
+                        "MDT '%s' contains %llu records; this build supports %llu",
+                        MdtName.c_str(),
+                        static_cast<unsigned long long>(count),
+                        static_cast<unsigned long long>(MDT_CAPACITY));
+          else
+            realTotal = static_cast<size_t>(count);
+        }
     }
 
-  if (reBuildIndexCache)
+  if (useMdtMap && realTotal !=
+      (MdtMap.Size() - SIZEOF_MAGIC) / sizeof(MDTRECORD))
     {
-      TotalEntries = (size_t)realTotal;
-      RebuildIndex();
+      MdtMap.Unmap();
+      MdtIndex = NULL;
+      useMdtMap = false;
     }
+
+  if (!cacheLoaded || TotalEntries != realTotal)
+    {
+      if (useIndexMap)
+        {
+          IndexMap.Unmap();
+          useIndexMap = false;
+        }
+      else
+        {
+          delete[] GpIndex;
+          delete[] KeyIndex;
+          delete[] KeySortTable;
+        }
+      GpIndex = NULL;
+      KeyIndex = NULL;
+      KeySortTable = NULL;
+      TotalEntries = realTotal;
+
+      if (TotalEntries != 0)
+        {
+          if (!RebuildIndex())
+            message_log(LOG_FATAL, "Could not rebuild MDT lookup indexes");
+          else
+            rebuiltIndex = true;
+        }
+    }
+  else
+    TotalEntries = realTotal;
 
 #if USE_MDTHASHTABLE
   if (MDTHashTable != NULL)
     {
-      message_log (LOG_ERROR, "MDT Hash Table was already inited in '%s'", MDTHashTable->Filename().c_str());
+      message_log(LOG_ERROR, "MDT Hash Table was already inited in '%s'",
+                  MDTHashTable->Filename().c_str());
       delete MDTHashTable;
     }
-  try {
-    MDTHashTable = new MDTHASHTABLE( FileStem, fastAdd ); 
-  } catch (...) {
-    message_log (LOG_PANIC|LOG_ERRNO, "Can't allocate multiple document strings table!");
-    MDTHashTable = NULL;
-  }
+  try
+    {
+      MDTHashTable = new MDTHASHTABLE(FileStem, fastAdd);
+    }
+  catch (...)
+    {
+      message_log(LOG_PANIC | LOG_ERRNO,
+                  "Can't allocate multiple document strings table!");
+      MDTHashTable = NULL;
+    }
   if (_globalMDTHashTable == NULL)
     _globalMDTHashTable = MDTHashTable;
 #endif
 
-  Changed = false;
+  Changed = rebuiltIndex;
   KeyIndexSorted = true;
   GpIndexSorted = true;
   MaxEntries = TotalEntries;
-  lastKeyIndex = lastIndex = TotalEntries/2;
+  lastKeyIndex = lastIndex = TotalEntries / 2;
 }
 
 bool MDT::RebuildIndex()
@@ -668,64 +805,77 @@ bool MDT::RebuildIndex()
   if (!Ok())
     {
       if (useIndexMap)
-	{
+        {
           IndexMap.Unmap();
-	  useIndexMap = false;
-	  KeySortTable = NULL;
+          useIndexMap = false;
+          KeySortTable = NULL;
         }
       return false;
     }
-  else if (TotalEntries)
+
+  if (TotalEntries == 0)
+    return true;
+
+  message_log(LOG_NOTICE, "Rebuilding Key/Gp indexes..");
+  if (useIndexMap)
     {
-      message_log (LOG_NOTICE, "Rebuilding Key/Gp indexes..");
-      // Rebuild by reading MDT
-      MDTREC Mdtrec;
-      if (useIndexMap)
-	{
-	  IndexMap.Unmap();
-	  useIndexMap = false;
-	  KeySortTable = NULL;
-	}
-      else
-	{
-	  if (KeyIndex)     { delete[]KeyIndex;     KeyIndex = NULL; }
-	  if (GpIndex)      { delete[]GpIndex;      GpIndex  = NULL; }
-          if (KeySortTable) { delete[]KeySortTable; KeySortTable = NULL; }
-	}
-     
-      try {
-	GpIndex = new GPREC[TotalEntries];
-	KeyIndex = new KEYREC[TotalEntries];
-      } catch (...) {
-	message_log (LOG_PANIC|LOG_ERRNO,
-		"MDT: Gp Index memory allocation for %ld elements failed.", TotalEntries) ;
-	return false;
-      }
+      IndexMap.Unmap();
+      useIndexMap = false;
+    }
+  else
+    {
+      delete[] KeyIndex;
+      delete[] GpIndex;
+      delete[] KeySortTable;
+    }
+  KeyIndex = NULL;
+  GpIndex = NULL;
+  KeySortTable = NULL;
 
-      // The following loop is safe for running in threads.
-#pragma omp parallel for 
-      for (_index_id_t i = 0; i < TotalEntries; i++)
-	{
-	  // Gp Index
-	  GetEntry(i+1, &Mdtrec);
-	  GpIndex[i].GpStart = HTONL(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordStart ());
-	  GpIndex[i].GpEnd   = HTONL(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordEnd ());
-	  GpIndex[i].Date    = Mdtrec.GetDate();	
-	  _index_id_t  index = i+1; // INDEX Increment
-	  if (Mdtrec.GetDeleted())
-	    SET_DELETE_BITS(index);
-	  GpIndex[i].Index   = HTONL(index);
-
-#define SET_KEYINDEX_KEY(_slot, _key) \
-	KeyIndex[_slot].Hash = KeyHash32 ((const char *)memcpy(KeyIndex[_slot].Key, _key, DocumentKeySize));
-
-	  // Key Index: Set the key, caculate its hash
-	  SET_KEYINDEX_KEY(i, Mdtrec.Key);
-	  KeyIndex[i].Index  = index;
-	}
+  try
+    {
+      GpIndex = new GPREC[TotalEntries];
+      KeyIndex = new KEYREC[TotalEntries];
+    }
+  catch (...)
+    {
+      delete[] GpIndex;
+      delete[] KeyIndex;
+      GpIndex = NULL;
+      KeyIndex = NULL;
+      message_log(LOG_PANIC | LOG_ERRNO,
+                  "MDT index allocation for %llu records failed",
+                  static_cast<unsigned long long>(TotalEntries));
+      return false;
     }
 
-  return BuildKeySortTable() ;
+  for (size_t i = 0; i < TotalEntries; ++i)
+    {
+      MDTREC Mdtrec;
+      if (!GetEntry(i + 1, &Mdtrec))
+        return false;
+
+      GpIndex[i].GpStart = HTONL(Mdtrec.GetGlobalFileStart() +
+                                  Mdtrec.GetLocalRecordStart());
+      GpIndex[i].GpEnd = HTONL(Mdtrec.GetGlobalFileStart() +
+                                Mdtrec.GetLocalRecordEnd());
+      GpIndex[i].Date = Mdtrec.GetDate();
+
+      _index_id_t index = static_cast<_index_id_t>(i + 1);
+      if (Mdtrec.GetDeleted())
+        SET_DELETE_BITS(index);
+      GpIndex[i].Index = HTONL(index);
+
+#define SET_KEYINDEX_KEY(_slot, _key) \
+  KeyIndex[_slot].Hash = KeyHash32((const char *)memcpy(KeyIndex[_slot].Key, _key, DocumentKeySize));
+
+      SET_KEYINDEX_KEY(i, Mdtrec.Key);
+      KeyIndex[i].Index = HTONL(index);
+    }
+
+  KeyIndexSorted = false;
+  GpIndexSorted = true;
+  return BuildKeySortTable();
 }
 
 
@@ -881,195 +1031,221 @@ bool MDT::IsSystemFile (const STRING& Filename)
   return ((MdtName == Filename) || (MdtIndexName == Filename));
 }
 
-size_t MDT::AddEntry (const MDTREC& MdtRecord)
+size_t MDT::AddEntry(const MDTREC& MdtRecord)
 {
-  if (ReadOnly == true)
+  if (ReadOnly)
+    return 0;
+
+  if (TotalEntries >= MDT_CAPACITY)
     {
+      message_log(LOG_PANIC,
+                  "MDT capacity of %llu records has been exceeded!",
+                  static_cast<unsigned long long>(MDT_CAPACITY));
       return 0;
     }
-  if (TotalEntries >=  MDT_CAPACITY)
-    {
-      message_log (LOG_PANIC, "MDT Capacity of %lu records has been exceeded!", MDT_CAPACITY);
-      return 0;
-    }
-//if (TotalEntries == 0) WriteHeader();
+
   if (TotalEntries == MaxEntries)
     {
-      Resize (GROWTH_FACTOR(MaxEntries));
+      size_t requested = GROWTH_FACTOR(MaxEntries);
+      if (requested <= MaxEntries || requested > MDT_CAPACITY)
+        requested = MDT_CAPACITY;
+      Resize(requested);
+      if (MaxEntries <= TotalEntries || KeyIndex == NULL || GpIndex == NULL)
+        return 0;
     }
 
-  size_t Slot = TotalEntries;
-  bool unique = true;
-  // Add to Key Index
-  const char *key =  MdtRecord.Key;
+  size_t slot = TotalEntries;
+  const char *key = MdtRecord.Key;
 
-  if (KeyIndexSorted && TotalEntries)
+  if (KeyIndexSorted && TotalEntries != 0)
     {
-      if (strncmp(key, KeyIndex[TotalEntries-1].Key, DocumentKeySize) < 0)
+      const int tailCompare =
+        strncmp(key, KeyIndex[TotalEntries - 1].Key, DocumentKeySize);
+      if (tailCompare == 0)
         {
-	  size_t left = TotalEntries;
-	  if (TotalEntries == 1)
-	    {
-	      left = 0;
-	    }
-          else for (size_t i = (left-1)/2, oip, low = 0, high = left-1;;)
-            {
-	      int res;
-              /* binary search */
-	      oip = i;
-              if ((res  = strncmp(key, KeyIndex[i].Key, DocumentKeySize)) == 0)
-		{
-		  const STRING Key(key, DocumentKeySize);
-		  // Change Key....
-		  STRING newKey (Key);
-		  MDTREC mdtrec (MdtRecord);
-		  GetUniqueKey (&newKey, false);
-		  mdtrec.SetKey(newKey);
-		  message_log (LOG_ERROR, "Duplicate Key \"%s\" (found at %d). Setting key to \"%s\".",
-			Key.c_str(), i, newKey.c_str());
-		  return AddEntry (mdtrec);
-		  // left = i; break;
-		}
-	      else if (res < 0)
-                high = i;
-              else
-                low = i;
-              if (high - low <= 0 || ( i= (high + low) / 2) == oip)
-                {
-                  left = high;
-                  break;
-                }
-            }
-	 size_t rest = TotalEntries - left;
-	 Slot = left;
-         if (rest)
-            memmove((void *)&KeyIndex[Slot+1], (void *)&KeyIndex[Slot], rest*sizeof (KEYREC));
+          const STRING oldKey(key, DocumentKeySize);
+          STRING newKey(oldKey);
+          MDTREC mdtrec(MdtRecord);
+          GetUniqueKey(&newKey, false);
+          mdtrec.SetKey(newKey);
+          message_log(LOG_ERROR,
+                      "Duplicate Key \"%s\". Setting key to \"%s\".",
+                      oldKey.c_str(), newKey.c_str());
+          return AddEntry(mdtrec);
+        }
+      if (tailCompare < 0)
+        {
+          size_t left = TotalEntries;
+          if (TotalEntries == 1)
+            left = 0;
+          else
+            for (size_t i = (left - 1) / 2, oldPosition,
+                        low = 0, high = left - 1;;)
+              {
+                oldPosition = i;
+                const int result =
+                  strncmp(key, KeyIndex[i].Key, DocumentKeySize);
+                if (result == 0)
+                  {
+                    const STRING oldKey(key, DocumentKeySize);
+                    STRING newKey(oldKey);
+                    MDTREC mdtrec(MdtRecord);
+                    GetUniqueKey(&newKey, false);
+                    mdtrec.SetKey(newKey);
+                    message_log(LOG_ERROR,
+                                "Duplicate Key \"%s\" (found at %llu). Setting key to \"%s\".",
+                                oldKey.c_str(),
+                                static_cast<unsigned long long>(i),
+                                newKey.c_str());
+                    return AddEntry(mdtrec);
+                  }
+                if (result < 0)
+                  high = i;
+                else
+                  low = i;
+                if (high - low <= 0 ||
+                    (i = (high + low) / 2) == oldPosition)
+                  {
+                    left = high;
+                    break;
+                  }
+              }
+          slot = left;
         }
     }
-  if (unique)
-    {
-      // Set the key
-      SET_KEYINDEX_KEY(Slot, key);
-    }
 
-  // Set the index..
-  GPTYPE index = TotalEntries + 1; // INDEX Increment 
-  if (MdtRecord.GetDeleted())
-    SET_DELETE_BITS(index);
-  KeyIndex[Slot].Index  = HTONL ( index );
-
-  const GPTYPE oldGlobalGp = NextGlobalGp;
-  // Add to Gp Index
-  NextGlobalGp = MdtRecord.GetGlobalFileStart ();
-
-  // Here is where the GpIndex gets its additional value:
-  GpIndex[TotalEntries].Date    = MdtRecord.GetDate();
-  GpIndex[TotalEntries].GpStart = HTONL(NextGlobalGp + MdtRecord.GetLocalRecordStart ());
-
-  NextGlobalGp += MdtRecord.GetLocalRecordEnd ();
-  GpIndex[TotalEntries].GpEnd   = HTONL(NextGlobalGp);
-  NextGlobalGp++; // Increment
-
-  // Have we exceeded the address space of GPTYPE?
-  if (NextGlobalGp < oldGlobalGp)
-    {
-      message_log (LOG_FATAL|LOG_PANIC, "Physical database capacity exceeded (max %lu MB).",
-	MAX_GPTYPE/(1024L*1024L));
-    }
-  else if (NextGlobalGp > (MAX_GPTYPE -  1048576 /*(2^20)*/))
-    {
-      message_log (LOG_WARN, "Physical database capacity nearly reached (%luK, max %lu MB).",
-	NextGlobalGp/1024L, MAX_GPTYPE/(1024L*1024L));
-    }
-
-  GpIndex[TotalEntries].Index   = HTONL(index);
-  if (GpIndexSorted && TotalEntries > 1)
-    {
-      if (GpIndex[TotalEntries-1].GpStart < GpIndex[TotalEntries-2].GpStart)
-        {
-          GpIndexSorted = false;
-        }
-    }
-  // Add to on-disk MDT
+  const size_t newTotal = TotalEntries + 1;
+  bool written = false;
   if (MdtWrongEndian)
     {
-      MDTREC TempMdtrec;
-      TempMdtrec = MdtRecord;
-      TempMdtrec.FlipBytes ();
-      TempMdtrec.Write(MdtFp, ++TotalEntries);
+      MDTREC temp(MdtRecord);
+      temp.FlipBytes();
+      written = temp.Write(MdtFp, newTotal);
     }
   else
+    written = MdtRecord.Write(MdtFp, newTotal);
+
+  if (!written)
     {
-      MdtRecord.Write(MdtFp, ++TotalEntries);
+      message_log(LOG_ERROR | LOG_ERRNO, "Could not write MDT record %llu",
+                  static_cast<unsigned long long>(newTotal));
+      return 0;
     }
+
+  if (slot < TotalEntries)
+    memmove(&KeyIndex[slot + 1], &KeyIndex[slot],
+            (TotalEntries - slot) * sizeof(KEYREC));
+  SET_KEYINDEX_KEY(slot, key);
+
+  _index_id_t index = static_cast<_index_id_t>(newTotal);
+  if (MdtRecord.GetDeleted())
+    SET_DELETE_BITS(index);
+  KeyIndex[slot].Index = HTONL(index);
+
+  const GPTYPE oldGlobalGp = NextGlobalGp;
+  NextGlobalGp = MdtRecord.GetGlobalFileStart();
+  GpIndex[TotalEntries].Date = MdtRecord.GetDate();
+  GpIndex[TotalEntries].GpStart =
+    HTONL(NextGlobalGp + MdtRecord.GetLocalRecordStart());
+  NextGlobalGp += MdtRecord.GetLocalRecordEnd();
+  GpIndex[TotalEntries].GpEnd = HTONL(NextGlobalGp);
+  ++NextGlobalGp;
+
+  if (NextGlobalGp < oldGlobalGp)
+    message_log(LOG_FATAL | LOG_PANIC,
+                "Physical database capacity exceeded (max %llu MB).",
+                static_cast<unsigned long long>(MAX_GPTYPE / (1024ULL * 1024ULL)));
+  else if (NextGlobalGp > (MAX_GPTYPE - 1048576))
+    message_log(LOG_WARN,
+                "Physical database capacity nearly reached (%lluK, max %llu MB).",
+                static_cast<unsigned long long>(NextGlobalGp / 1024),
+                static_cast<unsigned long long>(MAX_GPTYPE / (1024ULL * 1024ULL)));
+
+  GpIndex[TotalEntries].Index = HTONL(index);
+  if (GpIndexSorted && TotalEntries > 1 &&
+      GpIndex[TotalEntries - 1].GpStart <
+        GpIndex[TotalEntries - 2].GpStart)
+    GpIndexSorted = false;
+
+  TotalEntries = newTotal;
   Changed = true;
   return TotalEntries;
 }
 
 
-STRING MDT::GetKey (const size_t Index, int *Hash) const
+STRING MDT::GetKey(const size_t Index, int *Hash) const
 {
   STRING Key;
-  if (KeyIndex)
+  if (KeyIndex == NULL || Index == 0 || Index > TotalEntries)
+    return Key;
+
+  size_t position = TotalEntries;
+  if (KeySortTable != NULL)
+    position = KeySortPosition(static_cast<_index_id_t>(Index));
+  else
     {
-      size_t Position = KeySortPosition(Index);
-      if (KeyIndex[Position].Index != Index)
-	message_log (LOG_PANIC, "MDT::GetKey() table glitch"); 
-      Key = STRING(KeyIndex[Position].Key, DocumentKeySize);
-      if (Hash) *Hash = KeyIndex[Position].Hash;
-#if 0
-      MDTREC Mdtrec;
-      GetEntry(Index, &Mdtrec);
-      if (Key != Mdtrec.GetKey())
-	cerr << "Ooooooops!!!!!!" << endl;
-#endif
+      for (size_t i = 0; i < TotalEntries; ++i)
+        {
+          if (INDEX_MASK(NTOHL(KeyIndex[i].Index)) ==
+              static_cast<_index_id_t>(Index))
+            {
+              position = i;
+              break;
+            }
+        }
     }
+
+  if (position >= TotalEntries ||
+      INDEX_MASK(NTOHL(KeyIndex[position].Index)) !=
+        static_cast<_index_id_t>(Index))
+    {
+      message_log(LOG_PANIC, "MDT::GetKey() table glitch for record %llu",
+                  static_cast<unsigned long long>(Index));
+      return Key;
+    }
+
+  Key = STRING(KeyIndex[position].Key, DocumentKeySize);
+  if (Hash)
+    *Hash = KeyIndex[position].Hash;
   return Key;
 }
 
 
 
-static int MdtCompareKeysByIndex (const void *KeyRecPtr1, const void *KeyRecPtr2)
+static int MdtCompareKeysByIndex(const void *KeyRecPtr1,
+                                     const void *KeyRecPtr2)
 {
-  const GPTYPE index1 = KeyRecPtr1 ? NTOHL(((KEYREC *) KeyRecPtr1)->Index) : 0;
-  const GPTYPE index2 = KeyRecPtr2 ? NTOHL(((KEYREC *) KeyRecPtr2)->Index) : 0;
-  return  INDEX_MASK(index1) -   INDEX_MASK(index2);
+  const _index_id_t index1 = KeyRecPtr1 ?
+    INDEX_MASK(NTOHL(static_cast<const KEYREC *>(KeyRecPtr1)->Index)) : 0;
+  const _index_id_t index2 = KeyRecPtr2 ?
+    INDEX_MASK(NTOHL(static_cast<const KEYREC *>(KeyRecPtr2)->Index)) : 0;
+  return index1 < index2 ? -1 : (index1 > index2 ? 1 : 0);
 }
 
-static int MdtCompareGpByIndex (const void *GpRecPtr1, const void *GpRecPtr2)
+static int MdtCompareGpByIndex(const void *GpRecPtr1,
+                               const void *GpRecPtr2)
 {
-  const GPTYPE index1 =  GpRecPtr1 ? NTOHL(((GPREC *) GpRecPtr1)->Index) : 0;
-  const GPTYPE index2 =  GpRecPtr2 ? NTOHL(((GPREC *) GpRecPtr2)->Index) : 0;
-  return  INDEX_MASK(index1) -  INDEX_MASK(index2);
+  const _index_id_t index1 = GpRecPtr1 ?
+    INDEX_MASK(NTOHL(static_cast<const GPREC *>(GpRecPtr1)->Index)) : 0;
+  const _index_id_t index2 = GpRecPtr2 ?
+    INDEX_MASK(NTOHL(static_cast<const GPREC *>(GpRecPtr2)->Index)) : 0;
+  return index1 < index2 ? -1 : (index1 > index2 ? 1 : 0);
 }
 
-void MDT::IndexSortByIndex ()
+
+void MDT::IndexSortByIndex()
 {
-#if 1 /* 05.2024 tweaks */
-  if (KeyIndex && !KeyIndexSorted && useIndexMap)
-    {
-      QSORT (KeyIndex, TotalEntries, sizeof (KEYREC), MdtCompareKeysByIndex);
-      KeyIndexSorted = Changed = true;
-    }
-  if (GpIndex && !GpIndexSorted)
-    {
-      QSORT (GpIndex, TotalEntries, sizeof (GPREC), MdtCompareGpByIndex);
-      GpIndexSorted = Changed = true;
-    }
-#else
-  if (KeyIndex)
-    {
-      if (useIndexMap)
-        qsort (KeyIndex, TotalEntries, sizeof (KEYREC), MdtCompareKeysByIndex);
-      KeyIndexSorted = false;
-    }
-  if (GpIndex)
-    {
-      qsort (GpIndex, TotalEntries, sizeof (GPREC), MdtCompareGpByIndex);
-      GpIndexSorted = false;
-    }
+  if (KeyIndex != NULL && TotalEntries > 1)
+    QSORT(KeyIndex, TotalEntries, sizeof(KEYREC), MdtCompareKeysByIndex);
+  if (GpIndex != NULL && TotalEntries > 1)
+    QSORT(GpIndex, TotalEntries, sizeof(GPREC), MdtCompareGpByIndex);
+
+  delete[] KeySortTable;
+  KeySortTable = NULL;
+  KeyIndexSorted = false;
+  GpIndexSorted = false;
+  lastKeyIndex = lastIndex = TotalEntries / 2;
   Changed = true;
-#endif
 }
 
 
@@ -1104,17 +1280,24 @@ size_t MDT::RemoveDeleted ()
 		{
 		  if (!ready_to_modify)
 		    {
-		      if (useIndexMap) RebuildIndex();
-		      else IndexSortByIndex ();
+                      if (useIndexMap || useMdtMap)
+                        Resize(TotalEntries);
+                      if (useIndexMap || useMdtMap)
+                        {
+                          message_log(LOG_ERROR,
+                                      "RemoveDeleted: could not detach mapped MDT indexes");
+                          return delcount;
+                        }
+                      IndexSortByIndex();
 		      ready_to_modify = 1;
 		    }
 		  if (MdtWrongEndian) Mdtrec.FlipBytes ();
 		  if (Mdtrec.Write(MdtFp, n) == false)
 		    message_log (LOG_ERROR|LOG_ERRNO, "RemoveDeleted: Could not write to MDT");
 		  KeyIndex[n - 1] = KeyIndex[x - 1];
-		  KeyIndex[n - 1].Index = n;
+		  KeyIndex[n - 1].Index = HTONL(static_cast<_index_id_t>(n));
 		  GpIndex[n - 1] = GpIndex[x - 1];
-		  GpIndex[n - 1].Index = n;
+		  GpIndex[n - 1].Index = HTONL(static_cast<_index_id_t>(n));
 		}
 	      n++;
 	    }
@@ -1129,10 +1312,15 @@ size_t MDT::RemoveDeleted ()
 	      KeyIndex[x].Clear();
 	      GpIndex[x].Clear();
 	    }
-	  if (ftruncate (fileno (MdtFp), (TotalEntries = n - 1) * sizeof (MDTRECORD) + SIZEOF_MAGIC) == -1)
-	    {
-	      message_log (LOG_ERROR|LOG_ERRNO, "Could not truncated MDT to %d entries", TotalEntries);
-	    }
+          TotalEntries = n - 1;
+          const UINT8 newLength = SIZEOF_MAGIC +
+            static_cast<UINT8>(TotalEntries) * sizeof(MDTRECORD);
+          if (!TruncateMdtFile(fileno(MdtFp), newLength))
+            message_log(LOG_ERROR | LOG_ERRNO,
+                        "Could not truncate MDT to %llu entries",
+                        static_cast<unsigned long long>(TotalEntries));
+          delete[] KeySortTable;
+          KeySortTable = NULL;
 	  NextGlobalGp = 0;
 	  Changed = true;
 	}
@@ -1143,12 +1331,16 @@ size_t MDT::RemoveDeleted ()
 
 bool MDT::GetEntry (const size_t Index, MDTREC* MdtrecPtr) const
 {
-  if (MdtFp == NULL)
-    message_log (LOG_PANIC, "MdtFp is NULL!");
+  if (MdtFp == NULL || MdtrecPtr == NULL)
+    {
+      message_log(LOG_PANIC, "MDT::GetEntry called with a null stream or record");
+      return false;
+    }
 
   if ((Index > 0) && (Index <= TotalEntries))
     {
-      message_log (LOG_DEBUG, "GetEntry(%d,..) from fd=%d", fileno(MdtFp));
+      message_log(LOG_DEBUG, "GetEntry(%llu,..) from fd=%d",
+                  static_cast<unsigned long long>(Index), fileno(MdtFp));
       if (useMdtMap)
 	{
 	  *MdtrecPtr = MdtIndex[Index - 1];
@@ -1162,7 +1354,10 @@ bool MDT::GetEntry (const size_t Index, MDTREC* MdtrecPtr) const
       MdtrecPtr->HashTable = MDTHashTable;
       return true;
     }
-  message_log (LOG_PANIC, "MDT::GetEntry Index=%ld : Out of bounds (1,%ld)", (long)Index, (long)TotalEntries);
+  message_log(LOG_PANIC,
+              "MDT::GetEntry Index=%llu: out of bounds (1,%llu)",
+              static_cast<unsigned long long>(Index),
+              static_cast<unsigned long long>(TotalEntries));
   return false;
 }
 
@@ -1176,42 +1371,71 @@ MDTREC *MDT::GetEntry(const size_t Index)
 
 bool MDT::SetDeleted(const size_t Index, bool Delete)
 {
-  if (!ReadOnly && Index <= TotalEntries)
+  if (ReadOnly || Index == 0 || Index > TotalEntries)
     {
-      MDTREC mdtrec;
-
-      if (GetEntry(Index, &mdtrec))
-	{
-	  // A request to change anything?
-	  if (mdtrec.GetDeleted() != Delete)
-	    {
-	      // YES..
-	      mdtrec.SetDeleted(Delete);
-	      mdtrec.Write(MdtFp, Index);
-	      message_log (LOG_INFO, "MDT::SetDeleted: Entry #%d %sdeleted", Index, Delete ? "" : "un");
-#if 1 /* EXPERIMENTAL April 2008 */
-	      if (useIndexMap || useMdtMap)
-		Resize(TotalEntries + 1); // To unmap
-	      if (GpIndex)
-		{
-		  _index_id_t  index = Index;
-		  if (Delete) SET_DELETE_BITS(index);
-		  GpIndex[Index].Index = HTONL(index);
-		}
-	      else
-#endif
-	      // Don't want to build KeySortTable
-	      Changed = true; // ADDED 2006 August 18
-	    }
-	  else
-	    message_log (LOG_INFO, "MDT::SetDeleted: Entry #%d already %sdeleted", Index, Delete ? "" : "un");
-	  return true;
-	}
-      message_log (LOG_ERROR, "MDT::SetDeleted failed: Index %d not available", Index);
+      if (!ReadOnly)
+        message_log(LOG_ERROR,
+                    "MDT::SetDeleted failed: MDT Index %llu OUT-OF-RANGE (>%llu)!",
+                    static_cast<unsigned long long>(Index),
+                    static_cast<unsigned long long>(TotalEntries));
+      return false;
     }
-  else if (!ReadOnly)
-    message_log (LOG_ERROR, "MDT::SetDeleted failed: MDT Index %d OUT-OF-RANGE (>%d)!", Index, TotalEntries);
-  return false;
+
+  MDTREC mdtrec;
+  if (!GetEntry(Index, &mdtrec))
+    {
+      message_log(LOG_ERROR,
+                  "MDT::SetDeleted failed: Index %llu not available",
+                  static_cast<unsigned long long>(Index));
+      return false;
+    }
+
+  if (mdtrec.GetDeleted() == Delete)
+    {
+      message_log(LOG_INFO, "MDT::SetDeleted: Entry #%llu already %sdeleted",
+                  static_cast<unsigned long long>(Index), Delete ? "" : "un");
+      return true;
+    }
+
+  if (useIndexMap || useMdtMap)
+    Resize(TotalEntries);
+  if (useIndexMap || useMdtMap || KeyIndex == NULL || GpIndex == NULL)
+    {
+      message_log(LOG_ERROR,
+                  "MDT::SetDeleted could not detach mapped indexes for record %llu",
+                  static_cast<unsigned long long>(Index));
+      return false;
+    }
+
+  mdtrec.SetDeleted(Delete);
+  if (!mdtrec.Write(MdtFp, Index))
+    return false;
+
+  message_log(LOG_INFO, "MDT::SetDeleted: Entry #%llu %sdeleted",
+              static_cast<unsigned long long>(Index), Delete ? "" : "un");
+
+  for (size_t i = 0; i < TotalEntries; ++i)
+    if (INDEX_MASK(NTOHL(GpIndex[i].Index)) ==
+        static_cast<_index_id_t>(Index))
+      {
+        _index_id_t gpId = NTOHL(GpIndex[i].Index);
+        SET_DELETE_STATE(gpId, Delete);
+        GpIndex[i].Index = HTONL(gpId);
+        break;
+      }
+
+  for (size_t i = 0; i < TotalEntries; ++i)
+    if (INDEX_MASK(NTOHL(KeyIndex[i].Index)) ==
+        static_cast<_index_id_t>(Index))
+      {
+        _index_id_t keyId = NTOHL(KeyIndex[i].Index);
+        SET_DELETE_STATE(keyId, Delete);
+        KeyIndex[i].Index = HTONL(keyId);
+        break;
+      }
+
+  Changed = true;
+  return true;
 }
 
 bool MDT::IsDeleted(const size_t Index) const
@@ -1221,7 +1445,7 @@ bool MDT::IsDeleted(const size_t Index) const
       if (!useMdtMap)
 	{
 	  MDTREC Mdtrec;
-	  return Mdtrec.IsDeleted(MdtFp, (INT)Index);
+	  return Mdtrec.IsDeleted(MdtFp, Index);
 	}
       return MdtIndex[Index - 1].GetDeleted();
    }
@@ -1229,92 +1453,103 @@ bool MDT::IsDeleted(const size_t Index) const
 }
 
 
-void MDT::SetEntry (const size_t Index, const MDTREC& MdtRecord)
+void MDT::SetEntry(const size_t Index, const MDTREC& MdtRecord)
 {
-  // TODO:
-  //    Handle when MdtRecord is deleted!
-  //
-  if (ReadOnly == true)
+  if (ReadOnly || Index == 0 || Index > TotalEntries)
+    return;
+
+  if (useIndexMap || useMdtMap)
+    Resize(TotalEntries);
+  if (useIndexMap || useMdtMap || KeyIndex == NULL || GpIndex == NULL)
     {
+      message_log(LOG_ERROR,
+                  "MDT::SetEntry could not detach mapped indexes for record %llu",
+                  static_cast<unsigned long long>(Index));
       return;
     }
-  if ((Index > 0) && (Index <= TotalEntries))
-    {
-      // Save on-disk record
-      if (MdtWrongEndian)
-	{
-	  MDTREC TempMdtrec;
-	  TempMdtrec = MdtRecord;
-	  TempMdtrec.FlipBytes ();
-	  TempMdtrec.Write(MdtFp, Index);
-	}
-      else
-	{
-	  MdtRecord.Write(MdtFp, Index);
-	}
-      size_t x;
-      // Update Key Index
-      for (x = 0; x < TotalEntries; x++)
-	{
-	  if ( INDEX_MASK( NTOHL(KeyIndex[x].Index) ) == (GPTYPE)Index )
-	    {
-	      // New value for key?
-	      if (strncmp(KeyIndex[x].Key, MdtRecord.Key, DocumentKeySize) != 0)
-		{
-		  // Yes.. Set the key..
-		  SET_KEYINDEX_KEY(x, MdtRecord.Key)
-		  Changed = true;
-		  if (KeyIndexSorted)
-		    {
-		      // Check if the sort order is still OK..
-		      if (x > 1 && (strncmp(KeyIndex[x].Key, KeyIndex[x-1].Key, DocumentKeySize) < 0)) {
-			KeyIndexSorted = false;
-		      } else if (x < (TotalEntries-1) && (strncmp(KeyIndex[x+1].Key, KeyIndex[x].Key, DocumentKeySize) < 0)) {
-			KeyIndexSorted = false;
-		      }
-		    }
-		}
-	      break;
-	    }
-	}
-      // Update Gp Index
-      for (x = 0; x < TotalEntries; x++)
-	{
-	  if ( INDEX_MASK(GpIndex[x].Index) == (GPTYPE)Index)
-	    {
-	      const GPTYPE GpStart = MdtRecord.GetGlobalFileStart () + MdtRecord.GetLocalRecordStart ();
-	      const GPTYPE GpEnd   = MdtRecord.GetGlobalFileStart () + MdtRecord.GetLocalRecordEnd ();
-	      if (GpIndexSorted)
-		{
-		  if (x > 1 && (GpStart < NTOHL(GpIndex[x-1].GpStart)))
-		    GpIndexSorted = false;
-		  else if (x < (TotalEntries-1) && (NTOHL(GpIndex[x+1].GpStart) < GpStart))
-		    GpIndexSorted = false;
-		}
-	      // Same numbers?
-	      const GPTYPE host_start = HTONL(GpStart);
-              const GPTYPE host_end   = HTONL(GpEnd);
 
-	      if (Changed == false)
-		{
-		  Changed = (GpIndex[x].GpStart != host_start || GpIndex[x].GpEnd != host_end);
-		}
-	      if (Changed)
-		{
-		  GpIndex[x].GpStart = host_start;
-		  GpIndex[x].GpEnd   = host_end; 
-		  GpIndex[x].Date    = MdtRecord.GetDate();
-		  SET_DELETE_STATE(GpIndex[x].Index, MdtRecord.GetDeleted());
-		}
-	      break;
-	    }
-	}
-    }
-  if (Index == TotalEntries)
+  bool written = false;
+  if (MdtWrongEndian)
     {
-      NextGlobalGp = _NextGlobal(MdtRecord);
+      MDTREC temp(MdtRecord);
+      temp.FlipBytes();
+      written = temp.Write(MdtFp, Index);
     }
+  else
+    written = MdtRecord.Write(MdtFp, Index);
+
+  if (!written)
+    {
+      message_log(LOG_ERROR | LOG_ERRNO,
+                  "MDT::SetEntry could not write record %llu",
+                  static_cast<unsigned long long>(Index));
+      return;
+    }
+
+  for (size_t x = 0; x < TotalEntries; ++x)
+    {
+      if (INDEX_MASK(NTOHL(KeyIndex[x].Index)) !=
+          static_cast<_index_id_t>(Index))
+        continue;
+
+      if (strncmp(KeyIndex[x].Key, MdtRecord.Key, DocumentKeySize) != 0)
+        {
+          SET_KEYINDEX_KEY(x, MdtRecord.Key)
+          delete[] KeySortTable;
+          KeySortTable = NULL;
+          if (KeyIndexSorted)
+            {
+              if (x > 0 &&
+                  strncmp(KeyIndex[x].Key, KeyIndex[x - 1].Key,
+                          DocumentKeySize) < 0)
+                KeyIndexSorted = false;
+              else if (x + 1 < TotalEntries &&
+                       strncmp(KeyIndex[x + 1].Key, KeyIndex[x].Key,
+                               DocumentKeySize) < 0)
+                KeyIndexSorted = false;
+            }
+        }
+
+      _index_id_t keyId = NTOHL(KeyIndex[x].Index);
+      SET_DELETE_STATE(keyId, MdtRecord.GetDeleted());
+      KeyIndex[x].Index = HTONL(keyId);
+      break;
+    }
+
+  const GPTYPE gpStart = MdtRecord.GetGlobalFileStart() +
+                         MdtRecord.GetLocalRecordStart();
+  const GPTYPE gpEnd = MdtRecord.GetGlobalFileStart() +
+                       MdtRecord.GetLocalRecordEnd();
+
+  for (size_t x = 0; x < TotalEntries; ++x)
+    {
+      if (INDEX_MASK(NTOHL(GpIndex[x].Index)) !=
+          static_cast<_index_id_t>(Index))
+        continue;
+
+      if (GpIndexSorted)
+        {
+          if (x > 0 && gpStart < NTOHL(GpIndex[x - 1].GpStart))
+            GpIndexSorted = false;
+          else if (x + 1 < TotalEntries &&
+                   NTOHL(GpIndex[x + 1].GpStart) < gpStart)
+            GpIndexSorted = false;
+        }
+
+      GpIndex[x].GpStart = HTONL(gpStart);
+      GpIndex[x].GpEnd = HTONL(gpEnd);
+      GpIndex[x].Date = MdtRecord.GetDate();
+      _index_id_t gpId = NTOHL(GpIndex[x].Index);
+      SET_DELETE_STATE(gpId, MdtRecord.GetDeleted());
+      GpIndex[x].Index = HTONL(gpId);
+      break;
+    }
+
+  if (Index == TotalEntries)
+    NextGlobalGp = _NextGlobal(MdtRecord);
+  Changed = true;
 }
+
 
 static int MdtCompareKeys (const void *KeyRecPtr1, const void *KeyRecPtr2)
 {
@@ -1334,75 +1569,89 @@ void MDT::SortKeyIndex ()
     }
 }
 
-void MDT::Resize (const size_t Entries)
+void MDT::Resize(const size_t Entries)
 {
-  if (Entries > TotalEntries)
+  size_t target = Entries;
+  if (target > MDT_CAPACITY)
     {
-      if (Entries > MDT_CAPACITY)
-	message_log (LOG_WARN, "MDT Capacity is %lu records in this version.", MDT_CAPACITY);
-      // Resize Key Index
-      KEYREC *OldKeyIndex = KeyIndex;
-      try {
-	KeyIndex = new KEYREC[Entries];
-      } catch (...) {
-	message_log (LOG_ERRNO, "Memory re-alloc failed for %ld KEYRECS", Entries);
-	KeyIndex = NULL;
-      }
-      if (OldKeyIndex)
-	{
-	  if (KeyIndex)
-	    memcpy (KeyIndex, OldKeyIndex, TotalEntries * sizeof (KEYREC));
-	  if (!useIndexMap) delete[]OldKeyIndex;
-	}
-      // Add to Gp Index
-      GPREC *OldGpIndex = GpIndex;
-      try {
-	GpIndex = new GPREC[Entries];
-      } catch(...) {
-	message_log (LOG_ERRNO, "Memory re-alloc failed for %ld GPRECS", Entries);
-	if (KeyIndex)
-	  {
-	    delete[] KeyIndex;
-	    KeyIndex = NULL;
-	  }
-	GpIndex = NULL;
-      }
-      if (OldGpIndex)
-	{
-	  if (GpIndex)
-	    memcpy (GpIndex, OldGpIndex, TotalEntries * sizeof (GPREC));
-	  if (!useIndexMap) delete[]OldGpIndex;
-	}
-      if (GpIndex == NULL)
-	MaxEntries = TotalEntries = 0;
-      MaxEntries = Entries;
-      if (useIndexMap || useMdtMap)
-	{
-	  useIndexMap = false;
-	  useMdtMap = false;
-	  IndexMap.Unmap();
-	  MdtMap.Unmap();
-	  KeySortTable = NULL; // This one is important!
-	}
+      message_log(LOG_WARN, "MDT capacity is %llu records in this build.",
+                  static_cast<unsigned long long>(MDT_CAPACITY));
+      target = MDT_CAPACITY;
+    }
+
+  const bool detachMaps = useIndexMap || useMdtMap;
+  if (target > TotalEntries ||
+      (detachMaps && target >= TotalEntries && target != 0))
+    {
+      if (target < TotalEntries)
+        target = TotalEntries;
+
+      KEYREC *newKeyIndex = NULL;
+      GPREC *newGpIndex = NULL;
+      try
+        {
+          newKeyIndex = new KEYREC[target];
+          newGpIndex = new GPREC[target];
+        }
+      catch (...)
+        {
+          delete[] newKeyIndex;
+          delete[] newGpIndex;
+          message_log(LOG_ERRNO,
+                      "Memory allocation failed while growing MDT caches to %llu records",
+                      static_cast<unsigned long long>(target));
+          return;
+        }
+
+      if (TotalEntries != 0)
+        {
+          memcpy(newKeyIndex, KeyIndex, TotalEntries * sizeof(KEYREC));
+          memcpy(newGpIndex, GpIndex, TotalEntries * sizeof(GPREC));
+        }
+
+      if (useIndexMap)
+        IndexMap.Unmap();
+      else
+        {
+          delete[] KeyIndex;
+          delete[] GpIndex;
+          delete[] KeySortTable;
+        }
+      if (useMdtMap)
+        MdtMap.Unmap();
+
+      KeyIndex = newKeyIndex;
+      GpIndex = newGpIndex;
+      KeySortTable = NULL;
+      MdtIndex = NULL;
+      useIndexMap = false;
+      useMdtMap = false;
+      MaxEntries = target;
     }
   else if (Entries == 0)
     {
-      MaxEntries = TotalEntries = 0;
       if (useIndexMap)
-	{
-	  useIndexMap = false;
-	  IndexMap.Unmap();
-	  KeyIndex = NULL;
-	  GpIndex = NULL;
-	  KeySortTable = NULL;
-	}
+        IndexMap.Unmap();
+      else
+        {
+          delete[] KeyIndex;
+          delete[] GpIndex;
+          delete[] KeySortTable;
+        }
       if (useMdtMap)
-	{
-	  useMdtMap = false;
-	  MdtMap.Unmap();
-	}
+        MdtMap.Unmap();
+
+      KeyIndex = NULL;
+      GpIndex = NULL;
+      KeySortTable = NULL;
+      MdtIndex = NULL;
+      useIndexMap = false;
+      useMdtMap = false;
+      MaxEntries = 0;
+      TotalEntries = 0;
     }
 }
+
 
 #if 0
 
@@ -1527,9 +1776,11 @@ size_t MDT::GetMdtRecord (const STRING& Key, MDTREC *MdtrecPtr)
   return 0; // Nope
 }
 
-static int MdtCompareGpStarts (const void *GpRecPtr1, const void *GpRecPtr2)
+static int MdtCompareGpStarts(const void *GpRecPtr1, const void *GpRecPtr2)
 {
-  return NTOHL(((GPREC *) GpRecPtr1)->GpStart) - NTOHL(((GPREC *) GpRecPtr2)->GpStart);
+  const GPTYPE left = NTOHL(static_cast<const GPREC *>(GpRecPtr1)->GpStart);
+  const GPTYPE right = NTOHL(static_cast<const GPREC *>(GpRecPtr2)->GpStart);
+  return left < right ? -1 : (left > right ? 1 : 0);
 }
 
 static int MdtCompareGps (const void *GpPtr, const void *GpRecPtr)
@@ -1815,13 +2066,15 @@ void MDT::Dump(INT Skip, ostream& os) const
       GetEntry(x, &Mdtrec);
       Mdtrec.GetKey(&key);
 
-      const long globalStart = static_cast<long>(Mdtrec.GetGlobalFileStart());
+      const unsigned long long globalStart =
+        static_cast<unsigned long long>(Mdtrec.GetGlobalFileStart());
+      const unsigned long long localStart =
+        static_cast<unsigned long long>(Mdtrec.GetLocalRecordStart());
+      const unsigned long long localEnd =
+        static_cast<unsigned long long>(Mdtrec.GetLocalRecordEnd());
 
-      const long localStart = static_cast<long>(Mdtrec.GetLocalRecordStart());
-
-      const long localEnd = static_cast<long>(Mdtrec.GetLocalRecordEnd());
-
-      snprintf( tmp, sizeof(tmp), "%ld-%ld", globalStart + localStart, globalStart + localEnd);
+      snprintf(tmp, sizeof(tmp), "%llu-%llu",
+               globalStart + localStart, globalStart + localEnd);
 
       os << std::setfill(' ') << std::left << std::setw(RangeWidth) << tmp;
 
@@ -1978,70 +2231,79 @@ bool MDT::KillAll()
 
 void MDT::FlushMDTIndexes()
 {
-  message_log (LOG_DEBUG, "Flushing MDT...");
+  message_log(LOG_DEBUG, "Flushing MDT...");
 
-  if ((Changed == true) && (ReadOnly == false))
+  if (Changed && !ReadOnly)
     {
-/*
-      if (MdtFp)
-	{
-	  fclose(MdtFp);
-	  MdtFp = NULL;
-	}
-*/
-#if 0
-      if (KeyIndexSorted)
-	{
-	  message_log (LOG_DEBUG, "Debug Code: Checking KeyIndex Sort.");
-	  for (size_t i=1; i < TotalEntries; i++)
-	    {
-	      if (strncmp(KeyIndex[i-1].Key, KeyIndex[i].Key, DocumentKeySize) > 0)
-		{
-		  message_log (LOG_ERROR, "KEY SORT ERROR. Contact edz@nonmonotonic.com!!!!");
-		  KeyIndexSorted = false;
-		}
-	    }
-	}
-#endif
-      // Sort indices
-      if (GpIndexSorted == false) SortGpIndex ();
-      if (KeyIndexSorted == false) SortKeyIndex ();
+      if (!GpIndexSorted)
+        SortGpIndex();
+      if (!KeyIndexSorted)
+        SortKeyIndex();
 
-      BuildKeySortTable();
+      bool cacheWritten = BuildKeySortTable();
+      if (cacheWritten &&
+          static_cast<size_t>(static_cast<GPTYPE>(TotalEntries)) != TotalEntries)
+        {
+          message_log(LOG_ERROR,
+                      "MDT cache cannot encode %llu records with this GPTYPE",
+                      static_cast<unsigned long long>(TotalEntries));
+          cacheWritten = false;
+        }
 
-      int fd;
-      // Save MDT lookup cache...
-      if ((fd = open (MdtIndexName, O_WRONLY|O_CREAT, 0666)) != -1)
-	{
-	  // static_cast<void>(write(int, const void *, size_t));
+      int fd = -1;
+      if (cacheWritten)
+        fd = open(MdtIndexName, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+      if (cacheWritten && fd == -1)
+        {
+          message_log(LOG_ERROR | LOG_ERRNO,
+                      "Could not open MDT lookup cache '%s' for writing",
+                      MdtIndexName.c_str());
+          cacheWritten = false;
+        }
+
+      if (fd != -1)
+        {
 #ifdef _WIN32
-	  setmode(fd, O_BINARY);
+          setmode(fd, O_BINARY);
 #endif
-	  message_log (LOG_DEBUG, "Writing MDT '%s' lookup cache v%ld %lu elements.",
-			MdtIndexName.c_str(), (long)CacheVersion, (long)TotalEntries);
-	  const GPTYPE total = (GPTYPE)HTONL(TotalEntries);
-	  // Save Gp Index
-#pragma GCC diagnostic ignored "-Wunused-result"
-	  write(fd, (const void *)&CacheVersion, sizeof(GPTYPE));
-	  write(fd, (const void *)&total, sizeof(GPTYPE));
-	  write (fd, GpIndex, sizeof(GPREC)*TotalEntries);
-	  // Save Key Index
-	  write (fd, KeyIndex, sizeof(KEYREC)*TotalEntries);
-	  // Now write the Key Sort
-	  write (fd, KeySortTable, sizeof(KEYSORT)*TotalEntries);
-	  close (fd);
-	}
+          message_log(LOG_DEBUG,
+                      "Writing MDT '%s' lookup cache v%llu, %llu elements",
+                      MdtIndexName.c_str(),
+                      static_cast<unsigned long long>(CacheVersion),
+                      static_cast<unsigned long long>(TotalEntries));
+          const GPTYPE total = HTONL(static_cast<GPTYPE>(TotalEntries));
+          cacheWritten = WriteFully(fd, &CacheVersion, sizeof(CacheVersion)) &&
+                         WriteFully(fd, &total, sizeof(total)) &&
+                         WriteFully(fd, GpIndex,
+                                    sizeof(GPREC) * TotalEntries) &&
+                         WriteFully(fd, KeyIndex,
+                                    sizeof(KEYREC) * TotalEntries) &&
+                         WriteFully(fd, KeySortTable,
+                                    sizeof(KEYSORT) * TotalEntries);
+          if (close(fd) != 0)
+            cacheWritten = false;
+        }
+
+      if (!cacheWritten)
+        {
+          message_log(LOG_ERROR,
+                      "Failed to write complete MDT lookup cache '%s'",
+                      MdtIndexName.c_str());
+          UnlinkFile(MdtIndexName);
+        }
+
       WriteTimestamp();
-      Changed = false;
+      if (cacheWritten)
+        Changed = false;
     }
-  else if ((MaxEntries == 0) && (Changed == false) && (ReadOnly == false))
+  else if (MaxEntries == 0 && !Changed && !ReadOnly)
     {
-      message_log (LOG_DEBUG, "Removing MDT rests.");
-      // did nothing so zap junk
+      message_log(LOG_DEBUG, "Removing MDT rests.");
       UnlinkFile(MdtName);
       UnlinkFile(MdtIndexName);
     }
 }
+
 
 
 MDT::~MDT ()

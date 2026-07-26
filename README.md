@@ -2,6 +2,33 @@
 
 ### NEWS
 
+Jul 26 2026
+
+Loads of optimizations. New: extended the capacity.
+
+<PRE>Physical Index Capacities for this 64-bit edition:
+  Index id:    32-bit
+  Max Input:   16384 Tbytes (Total of all files)
+  Max Words:   1099511 trillion (optimized), >8796093 trillion (non-optimized)
+  Max Unique:  135324 trillion words (optimized), >8796093 trillion (non-optimized)
+  Word Freq:   Maximum same as "Max Words"
+  Max Records: 16 million.
+  Min. disk requirements: some fixed and variable amounts plus each
+    record (168 bytes); word (8); unique word (~32); field (16).
+Virtual Database Search Capacities:
+  Max Input:   aprox. 4 Exabytes
+  Max Words:   unlimited (limit only imposed by physical index)
+  Max Unique:  unlimited (limit only imposed by physical index)
+  Max Indexes: 255
+  Max Records: 4278 million (Total all indexes)
+Preset Per-Record Limits:
+  Max Key:     48 characters
+  Max Doctype Child Names: 15 characters</PRE>
+
+Added an option: BUILD_LARGE_INDEX
+
+While the 32-bit Ids are sufficient to index the entire English Wikipedia (7 million articles) we were asked if we could not extend the capacity. BUILD_LARGE_INDEX unleashes 64-bit index IDs to effectively "unlimt" the number of records (on paper Seventy-two quadrillion). More than enough to index the entire Library of Congress's 175 million items-- albeit not in terribly good practice (instead use a subject or domain segmenation and use virtual indexes to afford a better querry routing). This is **not** the default since we can't imagine many use cases (other than logs to which this engine is sub-optimal) where more than 16 million records in a single index or 4 billion in a virtual index provides a real limit especially given our focus to run on bare metal consumer hardware).
+
 Jul 2026
 
 Moving more and more away from generic C++ towards increasingly using C++17+. The base old version stays as re-Isearch..

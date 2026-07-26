@@ -123,6 +123,8 @@ friend class MDTREC;
   // Needed by Import routine
   MDTHASHTABLE *GetMDTHashTable() { return MDTHashTable; }
 
+  static _index_id_t GetCapacity();
+
  private:
   void        Init();
   bool SetDeleted(const size_t Index, bool Delete);

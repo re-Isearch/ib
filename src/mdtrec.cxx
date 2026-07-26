@@ -25,6 +25,28 @@ Modifications:	Edward C. Zimmermann, edz@nonmonotonic.com
 
 extern MDTHASHTABLE *_globalMDTHashTable;
 
+static bool SeekMdtRecord(FILE *fp, size_t Index, size_t byteInRecord)
+{
+  if (fp == NULL || Index == 0 || byteInRecord >= sizeof(MDTREC))
+    return false;
+
+  const UINT8 record = static_cast<UINT8>(Index - 1);
+  if (record > (MAX_UINT8 - SIZEOF_MAGIC - byteInRecord) / sizeof(MDTREC))
+    return false;
+
+  const UINT8 offset = SIZEOF_MAGIC + record * sizeof(MDTREC) + byteInRecord;
+#ifdef _WIN32
+  if (offset > (MAX_UINT8 >> 1))
+    return false;
+  return _fseeki64(fp, static_cast<INT8>(offset), SEEK_SET) == 0;
+#else
+  const off_t nativeOffset = static_cast<off_t>(offset);
+  if (nativeOffset < 0 || static_cast<UINT8>(nativeOffset) != offset)
+    return false;
+  return fseeko(fp, nativeOffset, SEEK_SET) == 0;
+#endif
+}
+
 MDTREC::MDTREC(MDT *Mdt)
 {
   fileNameID = 0;
@@ -287,73 +309,70 @@ void MDTREC::SetFullFileName(const STRING& NewFullPath)
   fileNameID = HashTable->AddFileName( NewFullPath );
 }
 
-SRCH_DATE MDTREC::GetDate(FILE *fp, INT Index) const
+SRCH_DATE MDTREC::GetDate(FILE *fp, size_t Index) const
 {
   SRCH_DATE date;
-  const char msg[] = "Read error to read MDT date element %d";
-  if (Index )
+  if (Index != 0)
     {
-      if (fseek (fp, (Index - 1) * sizeof (MDTREC) + SIZEOF_MAGIC, SEEK_SET) != -1)
+      if (SeekMdtRecord(fp, Index, 0))
         {
-	  if (fread (&date, sizeof(SRCH_DATE), 1, fp) > 1)
-	     message_log (LOG_ERRNO, msg, "Read", Index);
+          if (fread(&date, sizeof(SRCH_DATE), 1, fp) != 1)
+            message_log(LOG_ERRNO, "Read error reading MDT date element %llu",
+                        static_cast<unsigned long long>(Index));
         }
       else
-	message_log (LOG_ERRNO, msg, "Seek", Index);
+        message_log(LOG_ERRNO, "Seek error reading MDT date element %llu",
+                    static_cast<unsigned long long>(Index));
     }
   return date;
 }
 
-bool MDTREC::Write(FILE *fp, INT Index) const
+bool MDTREC::Write(FILE *fp, size_t Index) const
 {
   if (fp == NULL)
     {
-      message_log (LOG_PANIC, "Can't write MDT element: MDTREC::Write(NULL, %d)", Index);
+      message_log(LOG_PANIC, "Can't write MDT element: MDTREC::Write(NULL, %llu)",
+                  static_cast<unsigned long long>(Index));
       return false;
     }
-  if (Index)
+  if (Index != 0 && !SeekMdtRecord(fp, Index, 0))
     {
-      if (fseek (fp, (Index - 1) * sizeof (MDTREC) + SIZEOF_MAGIC, SEEK_SET) == -1)
-	{
-	  message_log (LOG_ERRNO, "Seek error to write MDT element %d", Index); 
-	  return false; // ERROR
-	}
+      message_log(LOG_ERRNO, "Seek error writing MDT element %llu",
+                  static_cast<unsigned long long>(Index));
+      return false;
     }
-  // Purify and Valgrind: Ignore Unitialized Memory Warning!
-  return fwrite (this, sizeof (MDTREC),  1, fp) == 1;
+  return fwrite(this, sizeof(MDTREC), 1, fp) == 1;
 }
 
-bool MDTREC::Read(FILE *fp, INT Index)
+bool MDTREC::Read(FILE *fp, size_t Index)
 {
-  MDTHASHTABLE  *ht = HashTable;
+  MDTHASHTABLE *ht = HashTable;
   if (fp == NULL)
     {
-      message_log (LOG_PANIC, "Can't read MDT element: MDTREC::Read(NULL, %d)", Index);
+      message_log(LOG_PANIC, "Can't read MDT element: MDTREC::Read(NULL, %llu)",
+                  static_cast<unsigned long long>(Index));
       return false;
     }
-  if (Index)
+  if (Index != 0 && !SeekMdtRecord(fp, Index, 0))
     {
-      // Purify: Ignore Unitialized Memory Warning!
-      if (-1 == fseek (fp, (Index - 1) * sizeof (MDTREC) + SIZEOF_MAGIC, SEEK_SET))
-	{
-	  SetDeleted(true);
-	  return false;
-	}
+      SetDeleted(true);
+      return false;
     }
-  if (fread (this, sizeof (MDTREC), 1, fp) != 1)
+  if (fread(this, sizeof(MDTREC), 1, fp) != 1)
     return false;
 
   HashTable = ht;
   return true;
 }
 
-
-bool MDTREC::IsDeleted(FILE *fp, INT Index)
+bool MDTREC::IsDeleted(FILE *fp, size_t Index)
 {
   BYTE deleted = 0xFF;
-  if (-1 != fseek (fp, Index * sizeof (MDTREC) + SIZEOF_MAGIC - sizeof(BYTE), SEEK_SET))
-    if (fread (&deleted, sizeof (BYTE), 1, fp) != 1) return true; // Error handle as deleted
-  return deleted & 0xF0;
+  if (!SeekMdtRecord(fp, Index, sizeof(MDTREC) - sizeof(BYTE)))
+    return true;
+  if (fread(&deleted, sizeof(BYTE), 1, fp) != 1)
+    return true;
+  return (deleted & 0x80) != 0;
 }
 
 

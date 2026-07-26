@@ -100,7 +100,11 @@ Tool:
 #endif
 
 #ifndef DEFAULT_BROWSER
+#if defined(__APPLE__)
+#define DEFAULT_BROWSER "open"
+#else
 #define DEFAULT_BROWSER "firefox"
+#endif
 #endif
 
 class IDBC:public IDB
@@ -607,6 +611,7 @@ int _Iindex_main (int argc, char **argv)
 	      else
 		std::cout << "Full license installed for Host (#" << (UINT4)_IB_Hostid() << ")!" << endl;
 	      LastUsed = x;
+              if (x + 1 == argc) return 0;
 	    }
 #endif
 
@@ -635,6 +640,7 @@ distributed under the License is distributed on an \"AS IS\" BASIS,\n\
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n\
 See the License for the specific language governing permissions and\n\
 limitations under the License.  " << endl;
+              if (x + 1 == argc) return 0;
             }
 	  else if (Flag.Equals ("-s") || Flag.Equals("-sep") || Flag.Equals("-xsep"))
 	    {
@@ -1052,9 +1058,12 @@ limitations under the License.  " << endl;
 		<< _IB_kernel_max_file_descriptors() << endl
 		<< "Max file streams: "
 		<< _IB_kernel_max_streams()<<endl;
+              if (x + 1 == argc) return 0;
 	    }
 	  else if (Flag.Equals ("-capacities"))
 	    {
+		const unsigned long long maxRecords = static_cast<unsigned long long>(MDT::GetCapacity());
+
 	       cout << "Physical Index Capacities for this " << sizeof(GPTYPE)*8 << "-bit edition:" << endl <<
 			"  Index id:    " <<  sizeof(_index_id_t)*8 << "-bit" << endl <<
 #ifdef  O_BUILD_IB64
@@ -1069,16 +1078,17 @@ limitations under the License.  " << endl;
 			                   " trillion words (optimized), >" <<
 				((MAX_GPTYPE)/(2ULL*1024ULL*1024ULL*1000ULL*1000ULL)) << " trillion (non-optimized)" << endl <<
 		       "  Word Freq:   Maximum same as \"Max Words\"" << endl <<
-		       "  Max Records: " << (MdtIndexCapacity / (1024L*1024L*sizeof(MDTREC))) << " million." << endl <<
+		       "  Max Records: " << (maxRecords/1000000ULL) << " million." << endl <<
+
 		       "  Min. disk requirements: some fixed and variable amounts plus each" << endl <<
-                       "    record (" << sizeof(MDTREC) << "); word (" << sizeof(GPTYPE) << "); unique word (~"<< (DefaultSisLength+1+2*sizeof(GPTYPE)) << "); field (" << sizeof(FC) << ")." << endl <<
+                       "    record (" << sizeof(MDTREC) << " bytes); word (" << sizeof(GPTYPE) << "); unique word (~"<< (DefaultSisLength+1+2*sizeof(GPTYPE)) << "); field (" << sizeof(FC) << ")." << endl <<
 		       "Virtual Database Search Capacities:" << endl <<
 		       "  Max Input:   aprox. " << (((MAX_GPTYPE)/(1024L*1024L*(1024L/VolIndexCapacity)))/(1024UL)) / 1024.0 
 				<< " Terabyte(s) " << endl <<
 		       "  Max Words:   unlimited (limit only imposed by physical index)" << endl <<
 		       "  Max Unique:  unlimited (limit only imposed by physical index)" << endl <<
 		       "  Max Indexes: " << VolIndexCapacity << endl <<
-                       "  Max Records: " << VolIndexCapacity *(MdtIndexCapacity/(sizeof(MDTREC)*1024L*1024L)) << " million (Total all indexes)" << endl <<
+                       "  Max Records: " << (VolIndexCapacity*maxRecords/1000000ULL)  << " million (Total all indexes)" << endl <<
 		       "Preset Per-Record Limits:" << endl <<
 #if !USE_MDTHASHTABLE
                        "  Max Path:    " << MaxDocPathNameSize << " characters" << endl <<
@@ -1088,6 +1098,7 @@ limitations under the License.  " << endl;
 		if (sizeof(size_t) == 4) cout <<
 		       "INX Chunk max: ~2 GB (32-bit kernel limitations)" << endl; 
 	      LastUsed = x;
+              if (x + 1 == argc) return 0;
 	    }
 	  else if (Flag.Equals ("-api"))
 	    {
@@ -1107,6 +1118,7 @@ limitations under the License.  " << endl;
 		cout << "  [" << tmp << "]";
 	      cout << endl;
 	      LastUsed = x;
+              if (x + 1 == argc) return 0;
 	    }
 	  else if (Flag.Equals ("-help"))
 	    {
@@ -1124,16 +1136,19 @@ limitations under the License.  " << endl;
 		    {
 		      IniUsage();
 		      LastUsed = x;
+		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "lang", len) == 0)
 		    {
 		      HelpLanguage();
 		      LastUsed = x;
+		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "types", len) == 0)
 		    {
 		      HelpTypes();
 		      LastUsed = x;
+		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "locale", len) == 0)
 		    {
@@ -1141,6 +1156,7 @@ limitations under the License.  " << endl;
 			cout << endl;
 		      HelpLocale();
 		      LastUsed = x;
+		      if (x + 1 == argc) return 0;
 		    }
 		}
 	      if (LastUsed == 0)
@@ -1154,8 +1170,7 @@ limitations under the License.  " << endl;
 		  LastUsed = x;
 		}
 	    }
-	  else if (Flag.Equals ("-thelp"))
-    {
+	  else if (Flag.Equals ("-thelp")) {
       if ((x+1) < argc && isalnum(*(argv[x+1])) ) {
 	PrintDoctypeHelp(argv[++x]);
       } else {
@@ -1176,13 +1191,14 @@ print_class_list:
 	}
       cout << endl;
       LastUsed = x;
+      if (x + 1 == argc) return 0;
     }
 #ifndef _WIN32
 	  else if (Flag.Equals ("-xhelp"))
 	    {
 	      char    *browser = getenv("WWW_BROWSER");
 	      STRING   s;
-	      STRING   index_html = ResolveHtdocPath("Welcome.html", true);
+	      STRING   index_html = ResolveHtdocPath("docs/", true);
 	      if (browser == NULL || *browser == '\0')
 		{
 		  if (!IsAbsoluteFilePath(s=ResolveBinPath("www") ))
@@ -1199,6 +1215,7 @@ Using '%s' as default.", browser);
 	      if (_IB_system (gargv, 1) < 0)
 		message_log (LOG_ERRNO, "Could not run '%s'", browser);
 	      LastUsed = x;
+              if (x + 1 == argc) return 0;
 	    }
 #endif
 	  else if (Flag.Equals ("-verbose"))

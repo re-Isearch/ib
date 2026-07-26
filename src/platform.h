@@ -36,10 +36,17 @@
 
 /*  Set some platform features */
 #ifndef PLATFORM_INCLUDED
-#if (SIZEOF_LONG_INT == SIZEOF_LONG_LONG_INT)
-# define HOST_MACHINE_64 1 /* This is a 64-bit platform so its all native */
+/*
+ * Detect the address width, not the width of long.  Win64 uses LLP64:
+ * pointers are 64-bit while long remains 32-bit.
+ */
+#if defined(_WIN64) || defined(__LP64__) || defined(_LP64) || \
+    (defined(__SIZEOF_POINTER__) && (__SIZEOF_POINTER__ == 8)) || \
+    (defined(SIZEOF_VOID_P) && (SIZEOF_VOID_P == 8)) || \
+    (defined(SIZEOF_LONG_INT) && (SIZEOF_LONG_INT == 8))
+# define HOST_MACHINE_64 1
 #else
-# define HOST_MACHINE_64 0 /* Not a 64-bit platform */
+# define HOST_MACHINE_64 0
 #endif
 #define PLATFORM_INCLUDED 1
 #endif

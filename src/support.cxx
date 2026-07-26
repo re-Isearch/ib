@@ -8,7 +8,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 
 const char *  _IB_SUPPORT_EMAIL_ADDRESS = "edz@nonmonotonic.net (Edward C. Zimmermann)";
 const char *  _IB_REG_ADDR = "edz@nonmonotonic.net";
-const char *  _IB_HTDOCS_HOME = "http://www.nonmonotonic.net/re:search/";
+const char *  _IB_HTDOCS_HOME = "https://github.com/re-Isearch/ib/tree/main/"; // "http://www.nonmonotonic.net/re:search/";
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -5,6 +5,13 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #ifndef _IB_DEFS_HXX
 # define _IB_DEFS_HXX 1
 
+#include <limits>
+#include <stddef.h>
+#include <stdio.h>
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
+
 //#define VECTOR_INDEX
 
 #ifdef PURE_STANDALONE
@@ -186,47 +193,60 @@ inline bool Read(DOCTYPE_ID *Ptr, PFILE Fp)    { return Ptr->Read(Fp); }
 typedef UINT4   _ib_category_t; // Category Type
 typedef INT2    _ib_priority_t; // Priority
 
-
+/*
+ * INDEX_ID reserves the high byte for the virtual/physical index number.
+ * The remaining 24 bits (normal build) or 56 bits (LARGE_INDEX) identify
+ * the record inside that physical index.
+ */
 #if defined(LARGE_INDEX) && defined(O_BUILD_IB64)
-// IB64 using 64-bit addresses is prerequisite for LARGE_INDEX (64-bit ids)
-// 64-bit index id addressing is ONLY available on platforms where int is 64-bit or larger.
-// this excludes Microsoft Windows (which is still WIN32).
-#  if ( (UINT_MAX) >= 0xFFFFFFFUL)
-  typedef UINT8  _index_id_t; // 64 bit index ID encoding. 
-  const unsigned long MdtIndexCapacity = (1L << (64-4)) - 1; // See below
-
-  static const _index_id_t  _vert_mask  = 0xFF00000000000000ULL;  
-  static const _index_id_t  _index_mask = 0x00FFFFFFFFFFFFFFULL;
-
-#    else
-  typedef UINT4  _index_id_t;
-  const unsigned long MdtIndexCapacity = (1L << (32-4)) - 1; // See below
-  static const _index_id_t  _vert_mask = 0xFF000000;
-  static const _index_id_t  _index_mask = 0x00FFFFFF;
-#  endif
-#else /* 32-bit default addressing */
-
-// Normal 32-bit index ids
-typedef UINT4  _index_id_t; // 32 bit index ID encoding. This limits the total
-                            // number of records to around 12 million per index
-static const _index_id_t  _vert_mask  = 0xFF000000;
-static const _index_id_t  _index_mask = 0x00FFFFFF;
-const unsigned long MdtIndexCapacity = (1L << (32-4)) - 1; // See below
-
+typedef UINT8 _index_id_t;
+#else
+typedef UINT4 _index_id_t;
 #endif
 
+static const unsigned int VirtualIndexBits = 8;
+static const unsigned int MdtIndexBits =
+  (sizeof(_index_id_t) * 8U) - VirtualIndexBits;
 
-/*  
- static index_id_t _vert_mask = (index_id_t)0xFF << ( sizeof(index_id_t)*7); // want 8*sizeof() - 8 (byte)
- static index_id_t _index_mask = ~_vert_mask & (_index_id_t)-1);
+static const _index_id_t _index_mask =
+  static_cast<_index_id_t>(~static_cast<_index_id_t>(0)) >> VirtualIndexBits;
+static const _index_id_t _vert_mask =
+  static_cast<_index_id_t>(~_index_mask);
 
- // Maximum number of indexes
- const unsigned long MdtIndexCapacity = (1L << ((sizeof(index_id_t)*7)) - 1; // See above
- // True capacity is really, since we are seeking, MdtIndexCapacity / sizof(MDTREC)
+/* Maximum 1-based local record id.  Zero remains invalid/not-found. */
+static const _index_id_t MdtRecordIdCapacity = _index_mask;
+/* Retained for source compatibility; this is a record-id limit, not bytes. */
+static const _index_id_t MdtIndexCapacity = MdtRecordIdCapacity;
 
-*/  
+#if defined(LARGE_INDEX) && defined(O_BUILD_IB64)
+static_assert(sizeof(_index_id_t) == 8,
+              "LARGE_INDEX requires a 64-bit _index_id_t");
+#else
+static_assert(sizeof(_index_id_t) == 4,
+              "normal indexes require a 32-bit _index_id_t");
+#endif
 
-const unsigned int VolIndexCapacity = 0xFF; // See below
+/* Seek an array indexed by a local MDT record id without narrowing to long. */
+inline bool SeekIndexRecord(FILE *fp, _index_id_t index, size_t itemSize)
+{
+  if (fp == NULL || itemSize == 0 ||
+      static_cast<UINT8>(index) > MAX_UINT8 / static_cast<UINT8>(itemSize))
+    return false;
+
+  const UINT8 offset = static_cast<UINT8>(index) * itemSize;
+#ifdef _WIN32
+  if (offset > (MAX_UINT8 >> 1))
+    return false;
+  return _fseeki64(fp, static_cast<INT8>(offset), SEEK_SET) == 0;
+#else
+  const off_t nativeOffset = static_cast<off_t>(offset);
+  if (nativeOffset < 0 || static_cast<UINT8>(nativeOffset) != offset)
+    return false;
+  return fseeko(fp, nativeOffset, SEEK_SET) == 0;
+#endif
+}
+
+const unsigned int VolIndexCapacity = 0xFF;
 
 #define MAX_VIRTUAL_INDEXES 255
 
@@ -246,17 +266,22 @@ public:
 */
 
   bool Equals(const INDEX_ID& Val) const  { return Val.Index == Index; }
-  INT         Compare(const INDEX_ID& Val) const { return Index - Val.Index;  }
+  INT Compare(const INDEX_ID& Val) const {
+    return Index < Val.Index ? -1 : (Index > Val.Index ? 1 : 0);
+  }
 
   _index_id_t GetIndex() const { return Index; }
-  void        SetMdtIndex(const INT NewMdtIndex) {
-    Index = (NewMdtIndex | (Index & _vert_mask ));
+  void SetMdtIndex(const _index_id_t NewMdtIndex) {
+    Index = (NewMdtIndex & _index_mask) | (Index & _vert_mask);
   }
-  INT         GetMdtIndex() const { return (Index & _index_mask); };
-  void        SetVirtualIndex(const UCHR NewvIndex) {
-    Index = (Index & 0x00FFFFFF) | (((long)NewvIndex) << 24);
+  _index_id_t GetMdtIndex() const { return Index & _index_mask; }
+  void SetVirtualIndex(const UCHR NewvIndex) {
+    Index = (Index & _index_mask) |
+      (static_cast<_index_id_t>(NewvIndex) << MdtIndexBits);
   }
-  INT        GetVirtualIndex() const { return ((Index & _vert_mask) >> 24);}
+  INT GetVirtualIndex() const {
+    return static_cast<INT>((Index & _vert_mask) >> MdtIndexBits);
+  }
 
   void       Write(FILE *fp) const { ::Write(Index, fp); }
   void       Read(FILE *fp)        { ::Read(&Index, fp); }
@@ -277,20 +302,30 @@ inline bool operator!=(const INDEX_ID& s1, const INDEX_ID& s2)  { return !s1.Equ
 inline bool operator!=(const _index_id_t s1, const INDEX_ID& s2){ return !s2.Equals(s1);     }
 inline bool operator!=(const INDEX_ID& s1, _index_id_t s2)      { return !s1.Equals(s2);     }
 inline bool operator<(const INDEX_ID& s1, const INDEX_ID& s2)   { return s1.Compare(s2) < 0; }
-inline bool operator<(const _index_id_t s1, const INDEX_ID& s2) { return s2.Compare(s1) < 0; }
+inline bool operator<(const _index_id_t s1, const INDEX_ID& s2) { return s2.Compare(s1) > 0; }
 inline bool operator<(const INDEX_ID& s1, _index_id_t s2)       { return s1.Compare(s2) < 0; }
 inline bool operator<=(const INDEX_ID& s1, const INDEX_ID& s2)  { return s1.Compare(s2) <= 0;}
-inline bool operator<=(const _index_id_t s1, const INDEX_ID& s2){ return s2.Compare(s1) <= 0;}
+inline bool operator<=(const _index_id_t s1, const INDEX_ID& s2){ return s2.Compare(s1) >= 0;}
 inline bool operator<=(const INDEX_ID& s1, _index_id_t s2)      { return s1.Compare(s2) <= 0;}
 inline bool operator>(const INDEX_ID& s1, const INDEX_ID& s2)   { return s1.Compare(s2) > 0; }
-inline bool operator>(const _index_id_t s1, const INDEX_ID& s2) { return s2.Compare(s1) > 0; }
+inline bool operator>(const _index_id_t s1, const INDEX_ID& s2) { return s2.Compare(s1) < 0; }
 inline bool operator>(const INDEX_ID& s1, _index_id_t s2)       { return s1.Compare(s2) > 0; }
 inline bool operator>=(const INDEX_ID& s1, const INDEX_ID& s2)  { return s1.Compare(s2) >= 0;}
-inline bool operator>=(const _index_id_t s1, const INDEX_ID& s2){ return s2.Compare(s1) >= 0;}
+inline bool operator>=(const _index_id_t s1, const INDEX_ID& s2){ return s2.Compare(s1) <= 0;}
 inline bool operator>=(const INDEX_ID& s1, _index_id_t s2)      { return s1.Compare(s2) >= 0;}
 
-inline INT operator-(const INDEX_ID& s1, const INDEX_ID& s2) { return s1.GetIndex()-s2.GetIndex();  }
-inline INT operator+(const INDEX_ID& s1, const INDEX_ID& s2) { return s1.GetIndex()+s2.GetIndex();  }
+inline INT8 operator-(const INDEX_ID& s1, const INDEX_ID& s2) {
+  const _index_id_t left = s1.GetIndex();
+  const _index_id_t right = s2.GetIndex();
+  const _index_id_t magnitude = left >= right ? left - right : right - left;
+  const _index_id_t limit = static_cast<_index_id_t>(
+    std::numeric_limits<INT8>::max());
+  const INT8 difference = static_cast<INT8>(magnitude > limit ? limit : magnitude);
+  return left >= right ? difference : -difference;
+}
+inline _index_id_t operator+(const INDEX_ID& s1, const INDEX_ID& s2) {
+  return s1.GetIndex() + s2.GetIndex();
+}
 
 
 
@@ -309,16 +344,18 @@ public:
   operator _index_id_t () const { return Index; }
 
   bool Equals(const SORT_INDEX_ID& Val) const  { return Val.Index == Index; }
-  INT         Compare(const SORT_INDEX_ID& Val) const { return Index - Val.Index;  }
+  INT Compare(const SORT_INDEX_ID& Val) const {
+    return Index < Val.Index ? -1 : (Index > Val.Index ? 1 : 0);
+  }
 
   _index_id_t GetIndex() const { return Index; }
 
   void       Write(FILE *fp) const { ::Write(Index, fp); }
   void       Read(FILE *fp)        { ::Read(&Index, fp); }
 
-  void       Set(FILE *fp, const INDEX_ID& index_id) {
+  void Set(FILE *fp, const INDEX_ID& index_id) {
     Index = 0;
-    if (fp && fseek(fp, index_id.GetMdtIndex()*sizeof(Index) , SEEK_SET) != -1)
+    if (SeekIndexRecord(fp, index_id.GetMdtIndex(), sizeof(Index)))
       Read(fp);
   }
 
@@ -348,13 +385,13 @@ inline bool operator>=(const SORT_INDEX_ID& s1, const SORT_INDEX_ID& s2){ return
 class DOC_ID {
  public:
   DOC_ID() { Index = 0; }
-  DOC_ID(const INT index) { Index = index; }
+  DOC_ID(const _index_id_t index) { Index = index; }
   DOC_ID(const INDEX_ID Id) { Index = Id.GetMdtIndex(); }
   DOC_ID(const STRING& GlobalKey) {
     STRINGINDEX pos = (Key = GlobalKey).Search('@');
-    if (pos) { 
-      if ((Index = Key.GetInt()) <= 0)
-	Index = 1; 
+    if (pos) {
+      const long long value = Key.GetLongLong();
+      Index = value > 0 ? static_cast<_index_id_t>(value) : 1;
       Key.EraseBefore(pos+1);
     }
   }
@@ -371,10 +408,10 @@ class DOC_ID {
     return (Index == OtherDoc.Index) && Key.Equals(OtherDoc.Key);
   }
   INT Compare(const DOC_ID& OtherDoc) const {
-    INT diff = Key.Compare(OtherDoc.Key);
-    if (diff == 0)
-      return Index - OtherDoc.Index;
-    return diff;
+    const INT diff = Key.Compare(OtherDoc.Key);
+    if (diff != 0)
+      return diff;
+    return Index < OtherDoc.Index ? -1 : (Index > OtherDoc.Index ? 1 : 0);
   }
   STRING GlobalKey() const {
     return STRING(Index) + "@" + Key;
@@ -382,8 +419,8 @@ class DOC_ID {
   operator STRING () const { return GlobalKey(); }
   ~DOC_ID() { }
  private:
-  STRING Key;
-  INT    Index;
+  STRING      Key;
+  _index_id_t Index;
 };
 // Inline comparison overloads...
 inline bool operator==(const DOC_ID Id1, const DOC_ID Id2) {
