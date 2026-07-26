@@ -1,7 +1,7 @@
 The basic steps are:
 
 1a) clone the repository.
-   $ git clone https://github.com/re-Isearch/re-Isearch.git
+   $ git clone https://github.com/re-Isearch/ib.git
 
    Prerequisites you need:
    - libdl    This is used for dynamic loading. It should be part of your core OS
@@ -19,24 +19,18 @@ The basic steps are:
   See doctype/autodetect.hxx.
 
 1b) If supporting vector search (Schmate)
-    change dir to the Schmate basedir
+    $git clone https://github.com/re-Isearch/CoreQuarry.git
 
-    $cd Schmate
-    
+    change dir to the CoreQuarry basedir
+
     It ONLY supports cmake so:
 
     $mkdir build
     $cd build
     $make
 
-    In the build directory you will find the libschmate libs needed
-    for the vector search
-
-    Copy these into the lib directory
-
     NOTE: The Schmate library depends upon: bert.cpp and/or llama.cpp libraries as well
-    as the ggml tensor library. Since we are using for bert.cpp a modified fork these
-    are added into libschmate
+    as the ggml tensor library. 
 
 2a) On modern platforms:
    create under the base of the installaion a new directory: build
@@ -52,45 +46,7 @@ The basic steps are:
    $make
 
 
-2b) Go into the build/ directory
-   $ cd re-Isearch/build/
-
-   if you have g++/gcc-10 installed and are running Ubuntu x86 64-bit you could just type Make and it should just build. 
-
-But generally:
-3) Edit the Makefile to confirm that the correct version of GCC is specified as well as the desired paths and command line args.
-   The standard we used to build was g++/gcc-10. You may also use whatever gcc/g++ is installed (we don't use any of the newer language features much less C++20) but since we all have typically multiple g++/gcc versions (due to some software requirements) you set it here.
-
-   In the file you will see there are also provisions for other compilers such as the typical CC and cc.
-
-   It should work on any of the BSD variants, Solaris, AIX etc. with any of a number of processors from ARM to x86.
-
-   One sets here a number of compile options and flags for producing debug or production among other things.
-
-   See the Makefile up until
-   After the ############### End Differences ###################################### 
-   there are a few options that may need tweaking on different platforms.
-
-   $make -j4
-   (or any -j option depending upon hardware)
-
-4) To build the optional plugins
-   $ make plugins
-
-    WARNING: The default install directory for plugins in the Makefile is: 
-    /opt/nonmonotonic/ib/lib/plugins
-    this directory needs to be writable by the user doing the make plugins
-    if you want to have the plugins installed elsewhere please redefine the path
-    and consult the handbook about configuration details.
-
-    NOTES about ODT2: plugin
-    The ODT2 plugin is currently experimental. It will eventually replace the ODT doctype (wwhich uses Pandoc).
-    for it to work on needs to 
-    a) install the odf-search shell script in some directory findable by the ODT2 plugin.
-    b) modify the odf-search shell script so that it uses the odf-search.jar (e.g. fully specified path where it is installed)
-
-
-5) Test to see everything went well.
+3) Test to see everything went well.
    $ ../bin/Iindex
 
 it should produce a long list of command line options-- as well as options to get the embdeded help.
