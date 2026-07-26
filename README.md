@@ -27,7 +27,7 @@ Preset Per-Record Limits:
 
 Added an option: BUILD_LARGE_INDEX
 
-While the 32-bit Ids are sufficient to index the entire English Wikipedia (7 million articles) we were asked if we could not extend the capacity. BUILD_LARGE_INDEX unleashes 64-bit index IDs to effectively "unlimt" the number of records (on paper Seventy-two quadrillion). More than enough to index the entire Library of Congress's 175 million items-- albeit not in terribly good practice (instead use a subject or domain segmenation and use virtual indexes to afford a better querry routing). This is **not** the default since we can't imagine many use cases (other than logs to which this engine is sub-optimal) where more than 16 million records in a single index or 4 billion in a virtual index provides a real limit especially given our focus to run on bare metal consumer hardware).
+While the 32-bit Ids are sufficient to index the entire English Wikipedia (7 million articles) we were asked if we could not extend the capacity. BUILD_LARGE_INDEX unleashes 64-bit index IDs to effectively "unlimit" the number of records (on paper Seventy-two quadrillion). More than enough to index the entire Library of Congress's 175 million items-- albeit not in terribly good practice (instead use a subject or domain segmentation and use virtual indexes to afford a better querry routing). This is **not** the default since we can't imagine many use cases (other than logs to which this engine is sub-optimal) where more than 16 million records in a single index or 4 billion in a virtual index provides a real limit especially given our focus to run on bare metal consumer hardware).
 
 Jul 2026
 
