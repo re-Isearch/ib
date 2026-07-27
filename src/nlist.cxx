@@ -2,14 +2,12 @@
 Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
-/* $Id: nlist.cxx,v 1.3 2007/07/04 06:21:59 edz Exp edz $ */
+/* $Id: nlist.cxx $ */
 
 /*@@@
 File:		nlist.cxx
-Version:	1.00
-$Revision: 1.3 $
+Version:	2.00
 Description:	Class NUMERICLIST
-Author:		Jim Fullton, Jim.Fullton@cnidr.org
 @@@*/
 
 #include <stdlib.h>
@@ -315,7 +313,8 @@ SearchState NUMERICLIST::Find(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 
 #endif
 
 #if NEW_CODE
-  if (LoadTable(GP_BLOCK) >= 0)
+  // Numeric searches require the value-sorted block.
+  if (LoadTable(VAL_BLOCK) > 0)
     return MemFind(Key, Relation, Index);
 #endif
   return DiskFind(Fn, Key, Relation, Index);
@@ -325,10 +324,8 @@ SearchState NUMERICLIST::Find(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 
 SearchState NUMERICLIST::Find(NUMBER Key, ZRelation_t Relation, INT4 *Index)
 {
 #if NEW_CODE
-  INT nRecs = 0;
-  if (Count <= 0)
-    nRecs = LoadTable(GP_BLOCK);
-  if (nRecs >0)
+  // Numeric searches require the value-sorted block.
+  if (LoadTable(VAL_BLOCK) > 0)
     return MemFind(Key, Relation, Index);
 #endif
   return DiskFind(FileName, Key, Relation, Index);
@@ -346,14 +343,22 @@ SearchState NUMERICLIST::MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index) 
   Status search_status = MATCH_FAILED;
 
   INT4   index = -1;
+  *Index = -1;
+
+  if (Count == 0 || table == NULL)
+    return NO_MATCH;
 
   // Linear search for now
   switch (Relation) {
 
-  case ZRelEQ:  // find all table values which equal Key
-    //    search_status=Match(GE,Key,&first);
-    //    if (search_status == MATCH_GOOD)
-    //      search_status=Match(LE,Key,&last);
+  case ZRelEQ:  // find the first table value which equals Key
+    search_status = Match(GE, Key, &index);
+    if (search_status == MATCH_GOOD &&
+        (index < 0 || index >= (INT4)Count ||
+         table[index].GetNumericValue() != Key)) {
+      search_status = MATCH_FAILED;
+      index = -1;
+    }
     break;
 
   case ZRelLT:  // find all table values which are less than Key
@@ -383,13 +388,10 @@ SearchState NUMERICLIST::MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index) 
 
   if (search_status == MATCH_FAILED)
     return NO_MATCH;
-
   else if (index < 0) // no lower bound
     fStatus = TOO_LOW;
-
-  else if (index > Count) // no upper bound
+  else if (index >= (INT4)Count) // no upper bound
     fStatus = TOO_HIGH;
-
   else
     fStatus = MATCH;
 
@@ -400,86 +402,70 @@ SearchState NUMERICLIST::MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index) 
 
 SearchState NUMERICLIST::MemFindGp(GPTYPE Key, ZRelation_t Relation, INT4 *Index)
 {
-  SearchState Status = NO_MATCH;
-  INT4        x,found;
-  GPTYPE      val;
+  INT4 found = -1;
+  *Index = -1;
 
-  if (Count == 0)
-   {
-     *Index = 0;
-     return NO_MATCH;
-   }
+  if (Count == 0 || table == NULL)
+    return NO_MATCH;
 
-  found = -1;
-
-  // Linear search for now
+  // The GP block is sorted in ascending global-start order.
   switch (Relation) {
+  case ZRelEQ:
+    for (INT4 x = 0; x < (INT4)Count; ++x) {
+      const GPTYPE val = table[x].GetGlobalStart();
+      if (val == Key) {
+        found = x;
+        break;
+      }
+      if (val > Key)
+        break;
+    }
+    break;
 
-  case ZRelEQ:  // find first index for which table value equals Key
-    for(x=0; x<Count; x++) {
-      val = table[x].GetGlobalStart();
-      // Find the first matching lower bound, then stop looking for those
-      if ((found < 0) && (val == Key)) {
-        found=x;
+  case ZRelLT:
+    for (INT4 x = 0; x < (INT4)Count; ++x) {
+      if (table[x].GetGlobalStart() >= Key)
+        break;
+      found = x;
+    }
+    break;
+
+  case ZRelLE:
+    for (INT4 x = 0; x < (INT4)Count; ++x) {
+      if (table[x].GetGlobalStart() > Key)
+        break;
+      found = x;
+    }
+    break;
+
+  case ZRelGT:
+    for (INT4 x = 0; x < (INT4)Count; ++x) {
+      if (table[x].GetGlobalStart() > Key) {
+        found = x;
+        break;
       }
     }
     break;
 
-  case ZRelLT:  // find index of first table value which is less than Key
-    x=0;
-      val = table[x].GetGlobalStart();
-    while (val<Key && x<Count) {
-      found = x;
-      x++;
-      val = table[x].GetGlobalStart();
+  case ZRelGE:
+    for (INT4 x = 0; x < (INT4)Count; ++x) {
+      if (table[x].GetGlobalStart() >= Key) {
+        found = x;
+        break;
+      }
     }
     break;
 
-  case ZRelLE:  // find index of table value which is less than or equal to Key
-    x=0;
-      val = table[x].GetGlobalStart();
-    while (!(val>Key) && x<Count) {
-      found = x;
-      x++;
-      val = table[x].GetGlobalStart();
-    }
-    break;
+  case ZRelNE:
+    break; // A single index cannot represent both non-equal ranges.
 
-  case ZRelGT:  // find index of table value which is greater than Key
-    x=Count-1;
-    val = table[x].GetGlobalStart();
-    while (val>Key && x>0) {
-      found = x--;
-      val = table[x].GetGlobalStart();
-    }
+  default:
+    message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
     break;
-
-  case ZRelGE:  // find index of table values which is greater than or equal to Key
-    x=Count-1;
-    val = table[x].GetGlobalStart();
-    while (!(val<Key) && x>0) {
-      found = x--;
-      val = table[x].GetGlobalStart();
-    }
-    break;
-
-  case ZRelNE:  // not going there...
-    break;
-
-   default:
-     message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-     break;
   }
 
-  if (found < 0) // nothing matched
-    Status = NO_MATCH;
-  else if (found >= Count) // no upper bound
-    Status = NO_MATCH;
-  else
-    Status = MATCH;
-
   *Index = found;
-  return Status;
+  return (found >= 0 && found < (INT4)Count) ? MATCH : NO_MATCH;
 }
 
 // Read just the header record count of the value-sorted (VAL_BLOCK) table
@@ -589,7 +575,6 @@ SearchState NUMERICLIST::MemFindIndexes(NUMBER Key, ZRelation_t Relation, INT4 *
   INT4        first = -1;
   INT4        last  = -1;
 
-cerr << "Start a search" << endl;
   // Linear search for now
   switch (Relation) {
 
@@ -796,7 +781,7 @@ SearchState NUMERICLIST::Find(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 
   SetFileName(Fn);
 
 #if NEW_CODE
-  if (LoadTable(GP_BLOCK) >= 0)
+  if (LoadTable(GP_BLOCK) > 0)
     return MemFindGp(Key, Relation, Index);
 #endif
 
@@ -807,10 +792,7 @@ SearchState NUMERICLIST::Find(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 
 SearchState NUMERICLIST::Find(GPTYPE Key, ZRelation_t Relation, INT4 *Index)
 {
 #if NEW_CODE
-  INT nRecs = 0;   
-  if (Count <= 0)
-    nRecs = LoadTable(GP_BLOCK);
-  if (nRecs >0)
+  if (LoadTable(GP_BLOCK) > 0)
     return MemFindGp(Key, Relation, Index);
 #endif
   return  DiskFind(FileName, Key, Relation, Index);
@@ -990,6 +972,14 @@ size_t NUMERICLIST::LoadTable(NumBlock Offset)
   }
   if (table_type == Offset)
     return Count;
+
+  // Do not append a differently sorted block to the current table.
+  if (table_type != NONE) {
+    Count = 0;
+    Pointer = 0;
+    StartIndex = EndIndex = 0;
+    table_type = NONE;
+  }
 
   FILE  *fp; 
   size_t nRecs=0;
@@ -1385,7 +1375,7 @@ Status NUMERICLIST::LinearMatchLE(NUMBER Key,int bottom,int top,int* Index)
     return MATCH_GOOD;
   }
 
-  while ((table[i].GetNumericValue() <= Key) && (i<=top)) {
+  while ((i <= top) && (table[i].GetNumericValue() <= Key)) {
     *Index=i;
     i++;
   }
@@ -1409,11 +1399,11 @@ Status NUMERICLIST::LinearMatchDownLT(NUMBER Key,int bottom,int top,int* Index)
     return MATCH_GOOD;
   }
 
-  while ((Key<=table[i].GetNumericValue()) && (i>=bottom)) {
+  while ((i >= bottom) && (Key <= table[i].GetNumericValue())) {
     i--;
   }
 
-  if (i>=0) {
+  if (i >= bottom) {
     *Index=i;
     ret = MATCH_GOOD;
   }
@@ -1427,14 +1417,14 @@ Status NUMERICLIST::LinearMatchDownLT(NUMBER Key,int bottom,int top,int* Index)
 Status NUMERICLIST::LinearMatchGE(NUMBER Key,int bottom,int top,int* Index)
 {
   int i=top;
-  if (Key<table[bottom].GetNumericValue()) { // Nothing in table matches
-    return MATCH_FAILED;
-  } else if (Key>table[top].GetNumericValue()) { // Everything in table matches
-    *Index=top;
+  if (Key <= table[bottom].GetNumericValue()) { // Everything in this range matches
+    *Index=bottom;
     return MATCH_GOOD;
+  } else if (Key > table[top].GetNumericValue()) { // Nothing in this range matches
+    return MATCH_FAILED;
   }
 
-  while ((table[i].GetNumericValue()>=Key) && (i>=bottom)) {
+  while ((i >= bottom) && (table[i].GetNumericValue() >= Key)) {
     *Index=i;
     i--;
   }
@@ -1458,10 +1448,10 @@ Status NUMERICLIST::LinearMatchUpGT(NUMBER Key,int bottom,int top,int* Index)
     return MATCH_GOOD;
   }
 
-  while ((Key >= table[i].GetNumericValue()) && (i<=top)) {
+  while ((i <= top) && (Key >= table[i].GetNumericValue())) {
     i++;
   }
-  if (i>bottom) {
+  if (i <= top) {
     *Index=i;
     ret = MATCH_GOOD;
   }
@@ -1576,6 +1566,8 @@ Status NUMERICLIST::Match(SortType Relation, NUMBER Key, int* Index)
   Len=Count;
 
   *Index=-1; // Just in case, at least it's defined
+  if (Len <= 0 || table == NULL)
+    return MATCH_FAILED;
   
   switch (Relation) {
   case LE: // find biggest index for which array value is less than Key

@@ -3554,63 +3554,52 @@ bool IDB::GetFieldData(GPTYPE gp, DOUBLE* Buffer)
 
 bool IDB::GetFieldData(const FC& FieldFC, const STRING& FieldName, DOUBLE* Buffer)
 {
-  STRING      DfFileName;
+  STRING DfFileName;
 
-  DfdtGetFileName(FieldName,  FIELDTYPE::numerical, &DfFileName);
+  if (Buffer) *Buffer = 0;
+  DfdtGetFileName(FieldName, FIELDTYPE::numerical, &DfFileName);
+
   if (!FileExists(DfFileName))
     {
-      // Not a numerical field
-      if (Buffer) *Buffer = 0;
+      // This field has no numerical index.
       return false;
     }
 
-  // Start is the smallest index in the table
-  // for which GpStart is <= to the table value
   NUMERICLIST List;
-  INT4        Start=-1;
-  SearchState Status;
+  INT4        Index = -1;
 
-#if 1
-  if ((Status = List.Find(DfFileName, FieldFC.GetFieldStart(), ZRelLE, &Start)) == TOO_LOW)
-    return false;
+  /*
+   * Find the first indexed field position at or after the beginning
+   * of the selected record.
+   *
+   * Find() loads the GP-sorted block, so Index can be used directly.
+   */
+  const SearchState Status =
+    List.Find(DfFileName,
+              FieldFC.GetFieldStart(),
+              ZRelGE,
+              &Index);
+
   if (Status != MATCH)
-    Status = List.Find(DfFileName, FieldFC.GetFieldStart(), ZRelGE, &Start);
-#else
-  if ((Status = List.Find(DfFileName, FieldFC.GetFieldStart(), ZRelGE, &Start)) == TOO_LOW)
-    {
-      // This case is when the position is at the very start!
-      Status = List.Find(DfFileName, FieldFC.GetFieldStart(), ZRelLE, &Start);
-    }
-#endif
-  if (Status == MATCH)
-    {
-      const int count    = List.GetCount();
-      const int nrecs    = List.LoadTable(Start, Start, GP_BLOCK);
+    return false;
 
-#if 1
-      for (int i=0; i < nrecs; i++) {
-         if (FieldFC.Contains( List.GetGlobalStart(i+count)))
-	    {
-	      if (Buffer) *Buffer = List.GetNumericValue(i+count);
-	      return true;
-	    }
-	} // for 
-       message_log (LOG_PANIC, "Could not find %s data for '%s' in %s",
-                "numerical", FieldName.c_str(), (const char *)((STRING)FieldFC));
-    }
-#else
-      GPTYPE start = List.GetGlobalStart(0);
+  if (Index < 0 || Index >= List.GetCount())
+    return false;
 
-      if (FieldFC.Contains(start))
-	{
-	  if (Buffer) *Buffer = List.GetNumericValue(0); 
-	  return true;
-	}
-       message_log (LOG_PANIC, "Could not find %s data for '%s' %ld not in %s",
-		"numerical", FieldName.c_str(), (long)start, (const char *)((STRING)FieldFC));
-    }
-#endif
-  return false; 
+  const GPTYPE FieldStart = List.GetGlobalStart(Index);
+
+  /*
+   * Finding an entry after the requested start does not necessarily
+   * mean the field belongs to this record. It might be the same field
+   * in the next record.
+   */
+  if (!FieldFC.Contains(FieldStart))
+    return false;
+
+  if (Buffer)
+    *Buffer = List.GetNumericValue(Index);
+
+  return true;
 }
 
 
