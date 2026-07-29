@@ -256,7 +256,8 @@ bool FCACHE::ValidateInField(const GPTYPE HitGp)
     }
   else if (!Disk && BaseAddress)
     {
-      return ValidateInField(HitGp, (const GPTYPE *)BaseAddress, FieldTotal);
+      const size_t byteLength = FieldTotal * sizeof(FC);
+      return ValidateInField(HitGp, (const void *)BaseAddress, byteLength);
     }
   else if (Fp)
     {
@@ -434,11 +435,17 @@ bool FCACHE::ValidateInField (const GPTYPE HitGp, const STRING& fieldName) const
 }
 
 
-bool FCACHE::ValidateInField (const GPTYPE HitGp, const void *Buffer, const size_t Length) const
+bool FCACHE::ValidateInField (const GPTYPE HitGp, const void *Buffer, const size_t byteLength) const
 {
   bool result = false;
+
+  if (Buffer == NULL || byteLength == 0 || byteLength % sizeof(FC) != 0)
+    return result;
+
+
   const GPTYPE *B = (const GPTYPE *)Buffer;
-  const size_t Total = Length/sizeof(FC);
+  const size_t Total = byteLength/sizeof(FC);
+
 
   if (Total > 0 && B)
     {

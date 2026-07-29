@@ -35,7 +35,7 @@ public:
    // The workhorses..
    bool ValidateInField (const GPTYPE HitGp, const STRING& FieldName) const;
    bool ValidateInField (const GPTYPE HitGp, FILE *Fp,  const size_t Total = 0) const;
-   bool ValidateInField (const GPTYPE HitGp, const void *Buffer, const size_t Length) const;
+   bool ValidateInField (const GPTYPE HitGp, const void *Buffer, const size_t byteLength) const;
    bool ValidateInField (const GPTYPE HitGp, const GPTYPE *Buffer, const size_t Total) const;
 
    bool ValidateInField (const FC& HitFc, const STRING& FieldName) const;

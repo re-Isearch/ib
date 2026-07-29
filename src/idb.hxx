@@ -213,8 +213,8 @@ public:
 
   FCT    GetDescendentsFCT (const FC& HitFc, const STRING& NodeName);
   FCT    GetDescendentsFCT (const FC& HitFc, FILE *Fp);
-  size_t GetDescendentsContent (const FC HitFc, FILE *Fp, STRLIST *StrlistPtr);
-  size_t GetDescendentsContent (const FC HitFc, const STRING& NodeName, STRLIST *StrlistPtr);
+  size_t GetDescendentsContent (const FC& HitFc, FILE *Fp, STRLIST *StrlistPtr);
+  size_t GetDescendentsContent (const FC& HitFc, const STRING& NodeName, STRLIST *StrlistPtr);
 
   size_t GetAncestorContent (RESULT& Result, const STRING& NodeName, STRLIST *StrlistPtr);
 

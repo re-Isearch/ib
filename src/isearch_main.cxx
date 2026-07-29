@@ -1718,7 +1718,6 @@ again:
 	    }
 	  cout << "<QUERY>" << QueryString << "</QUERY>" << endl;
 	}
-      FCLIST HitTable;
       for (t = first; t <= last; t++)
 	{
 	  if (!prset->GetEntry (t, &result))
@@ -1997,6 +1996,7 @@ again:
 #if 1
 	      cout << pdb->XMLHitTable(result) << endl;
 #else
+	      FCLIST HitTable;
 	      result.GetHitTable(&HitTable);
 	      dumpXMLHitTable(&HitTable, pdb, result); 
 #endif

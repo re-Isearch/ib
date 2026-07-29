@@ -16,6 +16,10 @@ Author:		Edward C. Zimmermann
 #include "fc.hxx"
 #include "vlist.hxx"
 
+
+#include <cstddef>
+#include <iterator>
+
 class FCLIST : public VLIST {
 public:
   FCLIST();
@@ -61,6 +65,89 @@ public:
   size_t WriteFct(FILE *fp, GPTYPE GpOffset) const;
 
   ~FCLIST();
+  class const_iterator
+  {
+  public:
+    typedef std::bidirectional_iterator_tag iterator_category;
+    typedef FC                              value_type;
+    typedef std::ptrdiff_t                  difference_type;
+    typedef const FC*                       pointer;
+    typedef const FC&                       reference;
+
+    const_iterator() : node_(NULL) { }
+    reference operator*() const { return node_->Fc; }
+    pointer operator->() const { return &node_->Fc; }
+
+    const_iterator& operator++()
+    {
+       node_ = node_->Next();
+       return *this;
+    }
+    const_iterator operator++(int)
+    {
+      const_iterator previous(*this);
+      ++(*this);
+      return previous;
+    }
+
+    const_iterator& operator--()
+    {
+      node_ = node_->Prev();
+      return *this;
+    }
+
+    const_iterator operator--(int)
+    {
+      const_iterator previous(*this);
+      --(*this);
+      return previous;
+    }
+
+    friend bool operator==(
+        const const_iterator& lhs,
+        const const_iterator& rhs)
+    {
+      return lhs.node_ == rhs.node_;
+    }
+
+    friend bool operator!=(
+        const const_iterator& lhs,
+        const const_iterator& rhs)
+    {
+      return !(lhs == rhs);
+    }
+
+  private:
+    friend class FCLIST;
+
+    explicit const_iterator(const FCLIST *node)
+      : node_(node)
+    {
+    }
+
+    const FCLIST *node_;
+  }; // Iterator
+
+  const_iterator begin() const
+  {
+    return const_iterator(Next());
+  }
+
+  const_iterator end() const
+  {
+    // The list sentinel represents one-past-the-end.
+    return const_iterator(this);
+  }
+
+  const_iterator cbegin() const
+  {
+    return begin();
+  }
+
+  const_iterator cend() const
+  {
+    return end();
+  }
 private:
   FC Fc;
 };
@@ -124,6 +211,15 @@ extern long __IB_FCLIST_allocated_count;
 
 class FCT {
 public:
+  // Iterators
+  typedef FCLIST::const_iterator const_iterator;
+
+  const_iterator begin() const { return p_->table_->begin(); }
+  const_iterator end() const { return p_->table_->end(); }
+  const_iterator cbegin() const { return p_->table_->begin(); }
+  const_iterator cend() const { return p_->table_->end(); }
+  // End Iterators
+
   FCLISTptr* operator-> () { return p_; }
   FCLISTptr& operator* ()  { return *p_; }
 
@@ -299,6 +395,7 @@ public:
     p_->unsorted_ = 1;
     return p_->table_;
   }
+
   FCLISTptr *p_;
 #if 0
   FCLIST    *cursor;

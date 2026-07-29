@@ -25,6 +25,25 @@ Description:	Class IRSET - Internal Search Result Set
 #include <utility>
 
 
+/* Coverage is a Work-in-Progress */
+/*
+Energy: relevance mass supplied by query evidence.
+Cover: coordinate interval containing particular energy sources.
+Dispersion: how spatially spread that energy is.
+Energy density: positional relevance of the cover.
+Super-cover utility: policy-level value of returning a larger unit.
+
+
+Utility(U)=ContainedEnergy(U)−λDispersion(U)−ρExpansion(U)
+*/
+
+struct EVIDENCE_COVER {
+    FC extent;
+    DOUBLE Energy;
+    DOUBLE Dispersion;
+};
+
+
 // NOTE:
 //
 // What was CosineMetricNormalization shall in the future be called EuclideanNormalization

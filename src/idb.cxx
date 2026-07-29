@@ -1402,10 +1402,8 @@ STRING IDB::GetXMLHighlightRecordFormat(const RESULT& Result, const STRING& Page
 {
   STRING XML;
   int    pageno = -1;
-  GPTYPE gp;
   FC     PageFc;
   STRING Page (PageField);
-  off_t  Start;
   const STRING Pg (TagElement.IsEmpty() ? "Pg" : TagElement);
 
   if (Page.IsEmpty())
@@ -1427,23 +1425,21 @@ STRING IDB::GetXMLHighlightRecordFormat(const RESULT& Result, const STRING& Page
    }
 
   const FCT HitTable = Result.GetHitTable();
-  const FCLIST *ptr = (const FCLIST*)HitTable;
 
   XML << "<XML><!-- Adobe Technical Note #5172 -->\n<Body Units=Characters color=#FF00FF Mode=Active version=2>\n <Highlight>\n"; 
   size_t   count = 1;
-  for (const FCLIST *p = ptr->Next(); p != ptr ; p = p->Next())
+  for (const FC& hit : HitTable) 
     {
-      gp =  p->Value().GetFieldStart();
+      GPTYPE gp =  hit.GetFieldStart();
       if (!PageFc.Contains(gp)) pageno = -1;
-// cerr << "Pageno = " << pageno << endl;
-      if (pageno < 0) pageno = GetNodeOffsetCount (gp, Page, &PageFc);
-// cerr << "Pageno = " << pageno << endl;
+      if (pageno < 0)
+	pageno = GetNodeOffsetCount (gp, Page, &PageFc);
       if (pageno >= 0)
 	{
-	  FC x (p->Value());
-	  Start = (off_t)( x.GetFieldStart() - PageFc.GetFieldStart() );
+	  const off_t Start = static_cast<off_t>( hit.GetFieldStart() - PageFc.GetFieldStart());
 	  XML << "\t<Loc " << Pg << "=" << pageno-1
-		<< " pos=" << Start << " len=" << x.GetLength()  << " />\n";
+		<< " pos=" << Start << " len=" << hit.GetLength()
+		<< " />\n";
 	}
       else
 	{
@@ -1542,16 +1538,15 @@ int IDB::GetNodeOffsetCount (const GPTYPE HitGp, const STRING& NodeName, FC *Con
   return offset;
 }
 
-
-size_t IDB::GetDescendentsContent (const FC HitFc, const STRING& NodeName, STRLIST *StrlistPtr)
+// If StrlistPtr is NULL we return just the count
+size_t IDB::GetDescendentsContent (const FC& HitFc, const STRING& NodeName, STRLIST *StrlistPtr)
 {
   FCT           Hits = GetDescendentsFCT (HitFc, NodeName);
-  const FCLIST *list = Hits.GetPtrFCLIST();
   size_t        count = 0;
 
-  for (const FCLIST *ptr = list->Next(); ptr != list; ptr=ptr->Next())
+  for (const FC& fc : Hits)
     {
-      STRING Buffer ( GetPeerContent(ptr->Value()) );
+      STRING Buffer ( GetPeerContent(fc) );
       if (Buffer.GetLength())
 	{
 	  count++;
@@ -1561,18 +1556,15 @@ size_t IDB::GetDescendentsContent (const FC HitFc, const STRING& NodeName, STRLI
   return count;
 }
 
-size_t IDB::GetDescendentsContent (const FC HitFc, FILE *Fp, STRLIST *StrlistPtr)
+size_t IDB::GetDescendentsContent (const FC& HitFc, FILE *Fp, STRLIST *StrlistPtr)
 {
   // cerr << "Looking for child content for " << HitFc << endl;
   FCT           Hits = GetDescendentsFCT (HitFc, Fp);
-  const FCLIST *list = Hits.GetPtrFCLIST();
   size_t        count = 0;
 
-  // if (list == NULL || list->Next() == list) cerr << "Oops empty" << endl;
-
-  for (const FCLIST *ptr = list->Next(); ptr != list; ptr=ptr->Next())
+  for (const FC& hit : Hits)
     {
-      STRING Buffer ( GetPeerContent(ptr->Value()) );
+      STRING Buffer ( GetPeerContent(hit) );
       if (Buffer.GetLength())
         {
           count++;
@@ -1685,10 +1677,9 @@ size_t IDB::GetAncestorContent (RESULT& Result, const STRING& nodeName, STRLIST 
 
   FC             lastFc, Fc;
   FCT            HitTable = Result.GetHitTable();
-  const FCLIST  *listPtr = HitTable.GetPtrFCLIST();
-  for (const FCLIST *ptr = listPtr->Next(); ptr != listPtr; ptr=ptr->Next())
+  for (const FC& hit : HitTable)
     {
-      if ((Fc = GetAncestorFc(FC(ptr->Value()) += offset, NodeName)) != lastFc && !Fc.IsEmpty())
+      if ((Fc = GetAncestorFc(FC(hit) += offset, NodeName)) != lastFc && !Fc.IsEmpty())
 	{
 	  if (Fp)
 	    {
@@ -5845,7 +5836,6 @@ STRING IDB::XMLHitTable(const RESULT& Result)
 
   if (z)
     {
-      const FCLIST *hitList = (const FCLIST *)HitTable;
       FC            Fc;
       STRING        Tag;
       STRING        lastTag;
@@ -5854,12 +5844,10 @@ STRING IDB::XMLHitTable(const RESULT& Result)
 
       bool firstTime = true;
       XML << "<HITS UNITS=\"characters\" NUMBER=\"" << z << "\">" << endl;
-      for (const FCLIST* ptr = hitList->Next(); ptr != hitList; ptr = ptr->Next())
-        {
-	  Fc = ptr->Value();
-          GPTYPE Start = Fc.GetFieldStart();
-          GPTYPE End   = Fc.GetFieldEnd();
-	  FC     PeerFC = GetPeerFc(FC(Fc)+=offset,&Tag);
+      for (const FC& Fc : HitTable) {
+          const GPTYPE Start = Fc.GetFieldStart();
+          const GPTYPE End   = Fc.GetFieldEnd();
+	  const FC     PeerFC = GetPeerFc(FC(Fc)+=offset,&Tag);
 
 	      if (! (PeerFC == lastPeerFC))
 		{
@@ -5905,7 +5893,6 @@ STRING IDB::XMLHitTable(const RESULT& Result)
 }
 #endif
 
-#if 1
 STRING IDB::JsonHitTable(const RESULT& Result)
 {
 #if 1
@@ -5924,91 +5911,112 @@ STRING IDB::JsonHitTable(const RESULT& Result)
 
   if (z)
     {
-      const FCLIST* hitList = (const FCLIST*)HitTable;
-      FC Fc;
-      STRING Tag, lastTag;
-      FC lastPeerFC;
-      bool fulltext = false;
-      bool firstTime = true;
-      bool insideContainer = false;
+  FC lastPeerFC;
+  bool firstTime = true;
+  bool insideContainer = false;
 
-      JSON << "{\n";
-      JSON << "  \"units\": \"characters\",\n";
-      JSON << "  \"number\": " << z << ",\n";
-      JSON << "  \"containers\": [\n";
+  JSON << "{\n";
+  JSON << "  \"units\": \"characters\",\n";
+  JSON << "  \"number\": " << z << ",\n";
+  JSON << "  \"containers\": [\n";
 
-      for (const FCLIST* ptr = hitList->Next(); ptr != hitList; ptr = ptr->Next())
+  for (auto it = HitTable.begin(); it != HitTable.end(); ++it)
+  {
+    const FC& hit = *it;
+
+    const GPTYPE Start = hit.GetFieldStart();
+    const GPTYPE End   = hit.GetFieldEnd();
+
+    FC shiftedHit = hit;
+    shiftedHit += offset;
+
+    STRING Tag;
+    const FC PeerFC = GetPeerFc(shiftedHit, &Tag);
+
+    if (PeerFC != lastPeerFC)
+    {
+      if (!firstTime)
+      {
+        JSON << "\n      ]\n"
+                "    },\n";
+        insideContainer = false;
+      }
+      else
+      {
+        firstTime = false;
+      }
+
+      if (Tag.GetLength())
+      {
+        const FIELDTYPE ft = GetFieldType(Tag);
+        STRING value;
+
+        JSON << "    {\n";
+        JSON << "      \"name\": \"" << Tag << "\",\n";
+        JSON << "      \"type\": \"" << ft.c_str() << "\",\n";
+        JSON << "      \"fc\": { \"start\": "
+             << PeerFC.GetFieldStart()
+             << ", \"end\": "
+             << PeerFC.GetFieldEnd()
+             << " }";
+
+        if (!ft.IsText() && GetFieldData(PeerFC, Tag, &value))
         {
-          Fc = ptr->Value();
-          GPTYPE Start = Fc.GetFieldStart();
-          GPTYPE End   = Fc.GetFieldEnd();
-          FC PeerFC = GetPeerFc(FC(Fc) += offset, &Tag);
-
-          if (!(PeerFC == lastPeerFC))
-            {
-              if (!firstTime)
-                {
-                  JSON << "\n      ]\n    },\n"; // Close previous container's "locs" array and container object
-                  insideContainer = false;
-                }
-              else
-                {
-                  firstTime = false;
-                }
-
-              if (Tag.GetLength())
-                {
-                  FIELDTYPE ft = GetFieldType(Tag);
-                  STRING value;
-                  fulltext = false;
-
-                  JSON << "    {\n";
-                  JSON << "      \"name\": \"" << Tag << "\",\n";
-                  JSON << "      \"type\": \"" << ft.c_str() << "\",\n";
-                  JSON << "      \"fc\": { \"start\": " << PeerFC.GetFieldStart()
-                       << ", \"end\": " << PeerFC.GetFieldEnd() << " }";
-
-                  if (!ft.IsText() && GetFieldData(PeerFC, Tag, &value))
-                    {
-                      JSON << ",\n      \"value\": \"" << value << "\"";
-                    }
-                  JSON << ",\n      \"locs\": [\n";
-                }
-              else
-                {
-                  JSON << "    {\n";
-                  JSON << "      \"fulltext\": true,\n";
-                  JSON << "      \"locs\": [\n";
-                  fulltext = true;
-                }
-
-              lastPeerFC = PeerFC;
-              lastTag = Tag;
-              insideContainer = true;
-            }
-
-          // Output LOC inside current container
-          JSON << "        { \"pos\": " << Start << ", \"len\": " << (End - Start + 1) << " }";
-
-          // If next LOC is in the same container, add comma
-          if (ptr->Next() != hitList && !(GetPeerFc(FC(ptr->Next()->Value()) += offset, &Tag) != lastPeerFC))
-            {
-              JSON << ",\n";
-            }
-          else
-            {
-              // Last LOC of this container
-              JSON << "\n";
-            }
-        } // for
-
-      if (insideContainer)
-        {
-          JSON << "      ]\n    }\n"; // Close final container
+          JSON << ",\n"
+                  "      \"value\": \""
+               << value << "\"";
         }
 
-      JSON << "  ]\n";
-      JSON << "}\n"; // Close all
+        JSON << ",\n"
+                "      \"locs\": [\n";
+      }
+      else
+      {
+        JSON << "    {\n";
+        JSON << "      \"fulltext\": true,\n";
+        JSON << "      \"locs\": [\n";
+      }
+
+      lastPeerFC = PeerFC;
+      insideContainer = true;
+    }
+
+    JSON << "        { \"pos\": "
+         << Start
+         << ", \"len\": "
+         << hit.GetLength()
+         << " }";
+
+    auto next = it;
+    ++next;
+
+    bool nextIsSameContainer = false;
+
+    if (next != HitTable.end())
+    {
+      FC shiftedNext = *next;
+      shiftedNext += offset;
+
+      STRING nextTag;
+      const FC nextPeerFC = GetPeerFc(shiftedNext, &nextTag);
+
+      nextIsSameContainer = nextPeerFC == lastPeerFC;
+    }
+
+    if (nextIsSameContainer)
+      JSON << ",\n";
+    else
+      JSON << "\n";
+  }
+
+  if (insideContainer)
+  {
+    JSON << "      ]\n"
+            "    }\n";
+  }
+
+  JSON << "  ]\n";
+  JSON << "}\n";
     }
 
   return JSON;
@@ -6017,7 +6025,6 @@ STRING IDB::JsonHitTable(const RESULT& Result)
   return NulString;
 #endif
 }
-#endif
 
 
 PIRSET IDB::SearchSmart(QUERY *Query, const STRING& DefaultField)

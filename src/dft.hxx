@@ -23,7 +23,10 @@ public:
   const DF   *GetEntryPtr(const size_t Index) const;
 
   STRING     GetFieldName (const size_t Index) const;
-  const FCLIST *GetFcListPtr(const size_t Index) const;
+
+  const FCLIST *GetFieldCoordinatesPtr(size_t Index) const {
+    return GetFcListPtr(Index);
+  }
   void WriteFct(const size_t Index, FILE *Fp, const GPTYPE Offset) const {
     const FCLIST *Pfclist = GetFcListPtr(Index);
     if (Pfclist) Pfclist->WriteFct(Fp, Offset);
@@ -36,6 +39,7 @@ public:
 
   ~DFT();
 private:
+  const FCLIST *GetFcListPtr(const size_t Index) const;
   void Expand();
   void CleanUp();
   void Resize(const size_t Entries);

@@ -1451,16 +1451,16 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	      }
 	}
 
-      const  DF        *dfPtr     = dftPtr->GetEntryPtr(x);
-      const  FCLIST    *fcListPtr = dfPtr->GetFcListPtr ();
+      const  DF        *dfPtr  = dftPtr->GetEntryPtr(x);
+      const  FCLIST    *fieldsPtr = dfPtr->GetFieldCoordinatesPtr() ;
 //      BUFFER Buffer (127, sizeof(UCHR));
       int    items = 0;
 
       //static const char message[] = "Field '%s' is %s. Appended %d item(s) to '%s'";
 
-      for (const FCLIST *p = fcListPtr->Next(); p!=fcListPtr; p=p->Next())
+     if (fieldsPtr)
+      for (const FC& fc : *fieldsPtr) 
         {
-          const FC     fc   = p->Value();
           const GPTYPE gp   = fc.GetFieldStart() + GpOffset;
           const size_t flen = fc.GetLength();
 
@@ -2059,17 +2059,17 @@ src=\"%s\" version=\"0.1\">\n",
 
   if (Dfdtptr)
     {
-      const size_t fields = Dfdtptr->GetTotalEntries();
-      if (fields)
+      const size_t num_fields = Dfdtptr->GetTotalEntries();
+      if (num_fields)
         {
           DFD Dfd;
-          fprintf(fp, " <fields count=\"%d\">\n", (int)fields);
+          fprintf(fp, " <fields count=\"%d\">\n", (int)num_fields);
           STRLIST  sList;
           SCANLIST scanList;
           STRING   fieldName;
           FIELDTYPE fieldType;
           size_t   count;
-          for (size_t x=1; x<=fields; x++)
+          for (size_t x=1; x<=num_fields; x++)
             {
               Dfdtptr->GetEntry(x, &Dfd);
               fieldName = Dfd.GetFieldName();
@@ -3987,7 +3987,6 @@ PIRSET INDEX::Search (const QUERY& Query)
                   // Check that fieldname is valid..
                   if (! Parent->FieldExists(FieldName))
                     {
-cerr << "Field " << FieldName << " did not exist!" << endl;
                       Parent->SetErrorCode(114); // "Unsupported Use attribute"
                       // Field does not exist so don't bother searching
                       NewIrset = new IRSET (Parent);
@@ -6195,6 +6194,8 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   float           Cost = 1.0; // Cost of this caculation
   const UCHR     *FullTerm = ( const UCHR * ) QueryTerm.c_str ();
   STRING          FieldName(fieldName);
+
+// cerr << "XXXX TermSearch (\"" << QueryTerm << "\", " << fieldName << ")" << endl;
 
  if (DebugMode)
     message_log (LOG_DEBUG, "TermSearch(%s, %s, %d)", QueryTerm.c_str(), fieldName.c_str(), (int)Typ);

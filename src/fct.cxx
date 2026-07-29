@@ -288,14 +288,21 @@ void FCLIST::MergeEntries()
   size_t TotalEntries = 0;
   bool sorted = true;
 
-  for (FCLIST *p = Next(); p != this; p = p->Next())
+  FCLIST *p = Next();
+  if (p != this) {
+   // Count the first real node without comparing it to the sentinel.
+    TotalEntries = 1;
+    p = p->Next();
+   }
+  for (; p != this; p = p->Next())
    {
      // Look at not just order but also for dups(!).
-     if (p->Fc == p->Prev()->Fc)
+     if (p->Fc == p->Prev()->Fc) {
 	delete (FCLIST *)p->Prev()->Disattach(); // Added delete (Apr 2008)
-     else if (sorted && (p->Fc <= p->Prev()->Fc))
-       sorted = false;
-     TotalEntries++;
+     } else {
+	if (sorted && (p->Fc <= p->Prev()->Fc)) sorted = false;
+        ++TotalEntries;
+     }
    }
 
   // DO we have anything to sort?

@@ -38,7 +38,11 @@ public:
   operator    FCT() const             { return Fct;       }
 
   FCT         GetFct() const          { return Fct; }
-  const FCLIST* GetFcListPtr () const { return Fct; }
+
+  const FCLIST *GetFieldCoordinatesPtr() const { return Fct; }
+
+  // Obsolete
+  const FCLIST *GetFcListPtr () const { return Fct; }
 
   void        Write(PFILE fp) const;
   bool        Read(PFILE fp);

@@ -188,10 +188,9 @@ STRING RESULT::XMLHitTable() const
   if (!HitTable.IsEmpty())
     {
       size_t z = 0;
-      for (const FCLIST *ptr = HitTable, *itor = ptr->Next(); itor != ptr; itor = itor->Next())
+      for (const FC& fc : HitTable)
         {
-	  XML << "  <LOC POS=\"" << itor->Value().GetFieldStart()
-		<< "\" LEN=\"" << itor->Value().GetLength()
+	  XML << "  <LOC POS=\"" << fc.GetFieldStart() << "\" LEN=\"" << fc.GetLength()
 #if 1 
 		<< "\"/>\n";
 #else
@@ -222,14 +221,13 @@ STRING RESULT::JsonHitTable() const
       JSON << "  \"units\": \"characters\",\n";
       JSON << "  \"hits\": [\n";
 
-      const FCLIST *ptr = HitTable, *itor = ptr->Next();
-      for (; itor != ptr; itor = itor->Next())
+      for (const FC& fc : HitTable)
         {
           if (z > 0)
             JSON << ",\n"; // Add comma before every item except the first
           JSON << "    {\n";
-          JSON << "      \"pos\": " << itor->Value().GetFieldStart() << ",\n";
-          JSON << "      \"len\": " << itor->Value().GetLength() << "\n";
+          JSON << "      \"pos\": " << fc.GetFieldStart() << ",\n";
+          JSON << "      \"len\": " << fc.GetLength() << "\n";
           JSON << "    }";
           z++;
         }
@@ -253,10 +251,10 @@ STRING RESULT::GetXMLHighlightRecordFormat(int pageno, off_t offset) const
       pageno = Key.SearchReverse(':');
       if (pageno) pageno = atoi(((const char *)Key) + pageno);
       if (pageno > 1) pageno--;
-      for (const FCLIST *ptr = HitTable, *p = ptr->Next(); p != ptr ; p = p->Next())
+      for (const FC& fc : HitTable)
         {
-	  const off_t Start = p->Value().GetFieldStart() - offset;
-	  const off_t End   = p->Value().GetFieldEnd() - offset;
+	  const off_t Start = fc.GetFieldStart() - offset;
+	  const off_t End   = fc.GetFieldEnd() - offset;
 	  XML << "\t<Loc Pg=" << pageno << " pos=" << Start << " len=" << End-Start+1 << " />\n";
         }
     }
@@ -280,22 +278,44 @@ STRING RESULT::GetXMLHighlightRecordFormat(int pageno, off_t offset) const
 // We would need to first analyse the structure to assure that hits are in different
 // fields (for example not just in a "body"). At this time I'm not sure it would be
 // worth the effort much less if the results would really be "that much" better.
+
 FC RESULT::GetBestContextHit() const
 {
-  int metric = 200; 
-  const FCLIST *listPtr = HitTable.GetPtrFCLIST();
-  const FCLIST *Nth = listPtr->Next();
-  for (const FCLIST *p = Nth; p != listPtr; p = p->Next())
+  FCT::const_iterator current = HitTable.begin();
+  const FCT::const_iterator end = HitTable.end();
+
+  if (current == end)
+    return FC();
+
+  FC best = *current;
+  GPTYPE metric = 200;
+
+  FCT::const_iterator next = current;
+  ++next;
+
+  while (next != end)
+  {
+    const GPTYPE start = current->GetFieldStart();
+    const GPTYPE finish = next->GetFieldEnd();
+
+    if (finish > start)
     {
-      int distance = p->Next()->Value().GetFieldEnd()-p->Value().GetFieldStart();
-      if (distance > 0 && distance < metric)
-	{
-	  Nth = p;
-	  metric = distance;
-	}
+      const GPTYPE distance = finish - start;
+
+      if (distance < metric)
+      {
+        best = *current;
+        metric = distance;
+      }
     }
-  return Nth->Value();
+
+    ++current;
+    ++next;
+  }
+
+  return best;
 }
+
 
 bool RESULT::PresentBestContextHit(STRING *StringBuffer, STRING *Term,
   const STRING& BeforeTerm, const STRING& AfterTerm, DOCTYPE *DoctypePtr, STRING *TagPtr) const
@@ -817,9 +837,8 @@ void RESULT::GetHighlightedRecord(const STRING& BeforeTerm, const STRING& AfterT
   GPTYPE Start = End;
 
   // process terms backwards
-  for (const FCLIST *ptr = HitTable, *p = ptr->Prev(); p != ptr; p = p->Prev())
+  for (const FC& Fc : HitTable)
     {
-      const FC Fc ( p->Value() );
       // @@@ Highlight Bugfix workaround (edz@nonmonotonic.com)
       // see also fct.cxx
       if ( Fc.GetFieldEnd() < End && Fc.GetFieldStart() < Start)
@@ -854,9 +873,8 @@ void RESULT::GetHighlighted(const STRING& BeforeTerm, const STRING& AfterTerm, F
   GPTYPE End = size + 1;
   GPTYPE Start = End;
   // process terms backwards
-  for (const FCLIST *ptr = HitTable, *p = ptr->Prev(); p != ptr; p = p->Prev())
+  for (const FC &Fc : HitTable)
     {
-      const FC Fc ( p->Value() );
       const GPTYPE end = Fc.GetFieldEnd();
       const GPTYPE start = Fc.GetFieldStart();
       // @@@ Highlight Bugfix workaround (edz@nonmonotonic.com)

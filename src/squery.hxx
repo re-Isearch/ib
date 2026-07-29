@@ -14,6 +14,12 @@ Description:	Class SQUERY - Search Query
 #include "thesaurus.hxx"
 
 
+struct EVIDENCE_GOAL {
+    UINT evidenceGroups;
+    DOUBLE availableWeight;
+};
+
+
 enum QueryTypeMethods { QueryAutodetect = 0, QueryRPN, QueryInfix, QueryRelevantId};
 
 enum QueryPlanType {
