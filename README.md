@@ -1,5 +1,9 @@
 ## This is the respositiory for re-Isearch.
 
+### NOTE:
+
+IB (re-Isearch) no longer will compile with nearly "any" C++ compiler ever made but increasingly uses C++17+ constructs. The decision was motivated by the observation that platforms that don't have a modern C++ compiler are quite rarethese days and anyway highly unlikely to be used in 2026 for enterprize search. Given that Schmate (the vector extensions) exploits modern C++ and SIMD instructions it made no longer any sense to continue to be language constrained.  For those that need to run on archaic platforms the re-Isearch distribution still exists albeit now frozen.. 
+
 ### NEWS
 
 Jul 26 2026
