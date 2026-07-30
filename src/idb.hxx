@@ -618,9 +618,9 @@ public:
 
   size_t ParseWords2(const STRING& Buffer, WORDSLIST *ListPtr) const;
 
-  void ParseRecords(RECORD& FileRecord);
-  void ParseFields(RECORD *Record);
-  void SelectRegions(const RECORD& Record, FCT* RegionsPtr);
+  void ParseRecords(RECORD& FileRecord) override;
+  void ParseFields(RECORD *Record) override;
+  void SelectRegions(const RECORD& Record, FCT* RegionsPtr) const override;
   GPTYPE ParseWords(const DOCTYPE_ID& Doctype, UCHR* DataBuffer,
 	GPTYPE DataLength, GPTYPE DataOffset,
 	GPTYPE* GpBuffer, GPTYPE GpLength);
@@ -724,11 +724,9 @@ public:
   STRING      PersistantCacheName() const { return PersistantIrsetCache; }
 
   FPT       *GetMainFpt() { return &MainFpt ; }
-  void      RevalidateFileCache() {
-      MainFpt.Revalidate();
-  }
+  void      RevalidateFileCache() override { MainFpt.Revalidate(); }
 
-  bool setUseRelativePaths(bool val);
+  bool setUseRelativePaths(bool val) override;
   bool setAutoDeleteExpired(bool val);
 
   ~IDB();

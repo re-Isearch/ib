@@ -458,14 +458,25 @@ void DOCTYPE::ParseRecords (const RECORD& FileRecord)
   if (Db) Db->DocTypeAddRecord (FileRecord);
 }
 
+//
+// What part of the record to index ? Anything outside of a region
+// does not get in the lexical index-- but it may if an object still
+// get indexed but only for the object.
+//
 // Regions are defined as:
 // Fc.. where
 //    Start = Offset from Start of Record to start indexing
 //    End   = Offset from Start of Record to end indexing 
-void DOCTYPE::SelectRegions(const RECORD& Record, FCT* FctPtr)
+void DOCTYPE::SelectRegions(const RECORD& Record, FCT* FctPtr) const
 {
+  if (FctPtr == NULL)
+    return;
+
   // Select the entire document as one region.
-  *FctPtr = FC(0, Record.GetLength());
+  if (Record.GetLength() != 0)
+    *FctPtr = FC(0, Record.GetLength() -1);
+  else 
+    FctPtr->Clear();
 }
 
 bool DOCTYPE::IsStopWord(const UCHR* Word, STRINGINDEX MaxLen) const

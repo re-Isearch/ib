@@ -29,6 +29,9 @@ Description:	Class IRSET - Internal Search Result Set
 
 #define EPSILON 0.0001f
 
+#include <algorithm>
+#include <vector>
+
 #if 1
 # define SORT QSORT
 #elif 0
@@ -2430,12 +2433,6 @@ OPOBJ *atomicIRSET::AfterPeer (const OPOBJ& Irset)
   return After(Irset);
 }
 
-#if 1
-
-#include <algorithm>
-#include <vector>
-
-
 OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 {
   if (Parent && Parent != Irset.GetParent())
@@ -2562,9 +2559,9 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
       if (idx1 == idx2)
         {
-          const FCLIST *myHitPtr = (const FCLIST *) IresultPtr->GetHitTable();
+          const FCT myHits   = IresultPtr->GetHitTable();
 
-          const FCLIST *OtherHitPtr = (const FCLIST *) OtherIresultPtr->GetHitTable();
+          const FCT OtherHits = OtherIresultPtr->GetHitTable();
 
           newHitTable.Clear();
 
@@ -2581,7 +2578,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
               std::vector<PEER_HIT> LeftHits;
               std::vector<FC> RightHits;
 
-              if (myHitPtr) for (const auto& hit : *myHitPtr)
+              for (const auto& hit : myHits)
                 {
                   PEER_HIT entry;
 
@@ -2591,7 +2588,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                   LeftHits.push_back(entry);
                 }
 
-	      if (OtherHitPtr) for (const auto& val: *OtherHitPtr)
+	      for (const auto& val: *OtherHits)
                 {
                   RightHits.push_back( val );
                 }
@@ -2666,10 +2663,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                             low +
                             (high - low) / 2;
 
-                        if (
-                          RightHits[mid]
-                            .GetFieldStart() <
-                          peerFc.GetFieldStart())
+                        if (RightHits[mid].GetFieldStart() < peerFc.GetFieldStart())
                           {
                             low = mid + 1;
                           }
@@ -2686,15 +2680,12 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                    * Find the first right hit whose start
                    * is > the peer-container end.
                    */
-                  size_t rightEndIndex =
-                      RightHits.size();
+                  size_t rightEndIndex = RightHits.size();
 
                   {
-                    size_t low =
-                        rightBeginIndex;
+                    size_t low = rightBeginIndex;
 
-                    size_t high =
-                        RightHits.size();
+                    size_t high = RightHits.size();
 
                     while (low < high)
                       {
@@ -2702,10 +2693,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                             low +
                             (high - low) / 2;
 
-                        if (
-                          RightHits[mid]
-                            .GetFieldStart() <=
-                          peerFc.GetFieldEnd())
+                        if ( RightHits[mid].GetFieldStart() <= peerFc.GetFieldEnd())
                           {
                             low = mid + 1;
                           }
@@ -2725,20 +2713,17 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                    */
                   size_t rightCount = 0;
 
-                  for (size_t i =
-                         rightBeginIndex;
+                  for (size_t i = rightBeginIndex;
                        i < rightEndIndex;
                        ++i)
                     {
-                      if (peerFc.Contains(
-                            RightHits[i]))
+                      if (peerFc.Contains(RightHits[i]))
                         {
                           ++rightCount;
                         }
                     }
 
-                  const size_t leftCount =
-                      leftEnd - leftBegin;
+                  const size_t leftCount = leftEnd - leftBegin;
 
                   if (rightCount != 0)
                     {
@@ -2747,8 +2732,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                        * semantics: every left/right pair
                        * in the same PeerFC counts.
                        */
-                      matchCount +=
-                          leftCount * rightCount;
+                      matchCount += leftCount * rightCount;
 
                       /*
                        * Add participating left coordinates.
@@ -2790,11 +2774,11 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
               FC oldFc;
               FC oldMyFc;
 
-	      if (myHitPtr) for (const auto& MyFc : *myHitPtr)
+	      for (const auto& MyFc : *myHits)
                 {
                   const FC PeerFC = Parent->GetPeerFc(MyFc);
 
-		  if (OtherHitPtr) for (const auto& fc : *OtherHitPtr)
+		  for (const auto& fc : OtherHits)
                     {
                       if (compFunc(MyFc, fc) && PeerFC.Contains(fc))
                         {
@@ -2873,403 +2857,6 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
   return this;
 }
 
-#elif 0
-
-#include <chrono>
-
-OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
-{
-  if (Parent && Parent != Irset.GetParent())
-    {
-      Parent->SetErrorCode(0);
-      message_log(LOG_DEBUG,
-        "Peer between different physical indexes is not defined.");
-
-      MinScore = MAXFLOAT;
-      MaxScore = 0.0;
-      TotalEntries = 0;
-      HitTotal = 0;
-
-      return this;
-    }
-
-  atomicIRSET OtherIrset(Irset);
-
-  if (OtherIrset.GetSort() != ByIndex)
-    OtherIrset.SortByIndex();
-
-  const size_t OtherTotal = OtherIrset.GetTotalEntries();
-
-  if (OtherTotal == 0 || TotalEntries == 0)
-    {
-      MinScore = MAXFLOAT;
-      MaxScore = 0.0;
-      TotalEntries = 0;
-      HitTotal = 0;
-
-      return this;
-    }
-
-  SortByIndex();
-
-  _index_id_t idx1 = 0;
-  _index_id_t idx2 = 0;
-
-  size_t pos1 = 1;
-  size_t opos1 = 0;
-  size_t pos2 = 1;
-  size_t opos2 = 0;
-
-  const size_t newMaxEntries =
-      TotalEntries > OtherTotal ? OtherTotal : TotalEntries;
-
-  PIRESULT NewTable = new IRESULT[newMaxEntries];
-
-  size_t current = 0;
-
-  DOUBLE newMinScore = MAXFLOAT;
-  DOUBLE newMaxScore = 0.0;
-
-  IRESULT *OtherTable =
-      ((const atomicIRSET *)&OtherIrset)->Table;
-
-  IRESULT *IresultPtr = NULL;
-  IRESULT *OtherIresultPtr = NULL;
-
-  FCT newHitTable;
-
-  /*
-   * Instrumentation totals for the complete Peer operation.
-   */
-  size_t totalCommonRecords = 0;
-  size_t totalOuterHits = 0;
-  size_t totalInnerIterations = 0;
-  size_t totalMatches = 0;
-
-  long long totalComparisonUsec = 0;
-  long long totalMergeUsec = 0;
-  long long totalClearUsec = 0;
-
-  const std::chrono::steady_clock::time_point peerStart =
-      std::chrono::steady_clock::now();
-
-  while (pos1 <= TotalEntries && pos2 <= OtherTotal)
-    {
-      if (pos1 != opos1)
-        {
-          opos1 = pos1;
-          IresultPtr = Table + pos1 - 1;
-          idx1 = IresultPtr->GetIndex();
-        }
-
-      if (pos2 != opos2)
-        {
-          opos2 = pos2;
-          OtherIresultPtr = OtherTable + pos2 - 1;
-          idx2 = OtherIresultPtr->GetIndex();
-        }
-
-      if (idx2 == idx1)
-        {
-          ++totalCommonRecords;
-
-          const FCLIST *MyHitPtr =
-              (const FCLIST *)IresultPtr->GetHitTable();
-
-          const FCLIST *OtherHitPtr =
-              (const FCLIST *)OtherIresultPtr->GetHitTable();
-
-          size_t recordOuterHits = 0;
-          size_t recordInnerIterations = 0;
-          size_t matchCount = 0;
-
-          /*
-           * Time Clear() separately. This is useful after changing VLIST
-           * destruction from recursive to iterative.
-           */
-          {
-            const std::chrono::steady_clock::time_point clearStart =
-                std::chrono::steady_clock::now();
-
-            newHitTable.Clear();
-
-            const std::chrono::steady_clock::time_point clearEnd =
-                std::chrono::steady_clock::now();
-
-            totalClearUsec +=
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    clearEnd - clearStart).count();
-          }
-
-          FC oldFc;
-          FC oldMyFc;
-
-          const std::chrono::steady_clock::time_point comparisonStart =
-              std::chrono::steady_clock::now();
-
-	  if (MyHitPtr) for (const FC& MyFc : *MyHitPtr)
-            {
-              ++recordOuterHits;
-
-              const FC PeerFC = Parent->GetPeerFc(MyFc);
-
-	      if (OtherHitPtr) for (const FC& fc: *OtherHitPtr)
-                {
-                  ++recordInnerIterations;
-
-                  if ((compFunc == NULL || compFunc(MyFc, fc)) &&
-                      PeerFC.Contains(fc))
-                    {
-                      ++matchCount;
-
-                      /*
-                       * Preserve the original hit-table insertion logic.
-                       */
-                      if (oldFc != fc)
-                        {
-                          oldFc = fc;
-
-                          if (oldFc != oldMyFc)
-                            newHitTable.AddEntry(fc);
-                        }
-
-                      if (oldMyFc != MyFc)
-                        {
-                          oldMyFc = MyFc;
-
-                          if (oldMyFc != fc)
-                            newHitTable.AddEntry(MyFc);
-                        }
-                    }
-                }
-            }
-
-          const std::chrono::steady_clock::time_point comparisonEnd =
-              std::chrono::steady_clock::now();
-
-          const long long comparisonUsec =
-              std::chrono::duration_cast<std::chrono::microseconds>(
-                  comparisonEnd - comparisonStart).count();
-
-          totalComparisonUsec += comparisonUsec;
-          totalOuterHits += recordOuterHits;
-          totalInnerIterations += recordInnerIterations;
-          totalMatches += matchCount;
-
-          if (matchCount)
-            {
-              NewTable[current] = *IresultPtr;
-
-              const std::chrono::steady_clock::time_point mergeStart =
-                  std::chrono::steady_clock::now();
-
-              newHitTable.MergeEntries();
-
-              const std::chrono::steady_clock::time_point mergeEnd =
-                  std::chrono::steady_clock::now();
-
-              const long long mergeUsec =
-                  std::chrono::duration_cast<std::chrono::microseconds>(
-                      mergeEnd - mergeStart).count();
-
-              totalMergeUsec += mergeUsec;
-
-              NewTable[current].SetHitTable(newHitTable);
-              NewTable[current].SetHitCount(matchCount);
-              NewTable[current].SetAuxCount(2);
-
-              const DOUBLE score = NewTable[current++].GetScore();
-
-              if (score < newMinScore)
-                newMinScore = score;
-
-              if (score > newMaxScore)
-                newMaxScore = score;
-            }
-
-          /*
-           * Per-record diagnostics. Limit this if it becomes too noisy.
-           */
-          if (recordInnerIterations > 1000000 ||
-              comparisonUsec > 100000)
-            {
-              message_log(
-                LOG_INFO,
-                "PEER index=%lu outer=%lu inner=%lu matches=%lu "
-                "compare=%lld us",
-                (unsigned long)idx1,
-                (unsigned long)recordOuterHits,
-                (unsigned long)recordInnerIterations,
-                (unsigned long)matchCount,
-                comparisonUsec);
-            }
-        }
-
-      if (idx1 <= idx2)
-        ++pos1;
-
-      if (idx2 <= idx1)
-        ++pos2;
-    }
-
-  const std::chrono::steady_clock::time_point peerEnd =
-      std::chrono::steady_clock::now();
-
-  const long long totalPeerUsec =
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          peerEnd - peerStart).count();
-
-  message_log(
-    LOG_INFO,
-    "PEER totals: common-records=%lu outer=%lu inner=%lu "
-    "matches=%lu compare=%lld us merge=%lld us clear=%lld us "
-    "total=%lld us",
-    (unsigned long)totalCommonRecords,
-    (unsigned long)totalOuterHits,
-    (unsigned long)totalInnerIterations,
-    (unsigned long)totalMatches,
-    totalComparisonUsec,
-    totalMergeUsec,
-    totalClearUsec,
-    totalPeerUsec);
-
-  if (Table)
-    delete [] Table;
-
-  Table = NewTable;
-  MaxEntries = newMaxEntries;
-  TotalEntries = current;
-  Sort = ByIndex;
-  MinScore = newMinScore;
-  MaxScore = newMaxScore;
-  HitTotal = 0;
-
-  return this;
-}
-
-#elif 0
-
-OPOBJ *atomicIRSET::Peer (const OPOBJ& Irset, peer_t compFunc)
-{
-#if 1
-  if (Parent && Parent != Irset.GetParent())
-    {
-      Parent->SetErrorCode(0); // No error
-      message_log (LOG_DEBUG, "Peer between different physical indexes is not defined.");
-      // Nothing
-      MinScore=MAXFLOAT;
-      MaxScore=0.0;
-      TotalEntries = 0;
-      return this;
-    }
-#endif
-
-  atomicIRSET OtherIrset (Irset);
-
-  if (OtherIrset.GetSort() != ByIndex)
-    OtherIrset.SortByIndex();
-  const size_t    OtherTotal = OtherIrset.GetTotalEntries();
-
-  if (OtherTotal == 0 || TotalEntries == 0) {
-    // Nothing
-    MinScore = MAXFLOAT;
-    MaxScore = 0.0;
-    TotalEntries = 0;
-    HitTotal     = 0;
-    return this;		// Can't do proximity with nothing..
-  }
-  // Merge both result sets into one sorted...
-  SortByIndex();
-
-  _index_id_t     idx1=0, idx2=0;
-  size_t          pos1 = 1, opos1 = 0;
-  size_t          pos2 = 1, opos2 = 0;
-  size_t          newMaxEntries = TotalEntries > OtherTotal ? OtherTotal : TotalEntries;
-/// @@@@ 
-  PIRESULT        NewTable = new IRESULT[newMaxEntries];
-  size_t          current = 0;
-
-  DOUBLE          newMinScore = MAXFLOAT;
-  DOUBLE          newMaxScore = 0.0;
-
-  IRESULT        *OtherTable = ((const atomicIRSET *) &OtherIrset)->Table;
-  IRESULT        *IresultPtr = NULL;
-  IRESULT        *OtherIresultPtr = NULL;
-  FCT             newHitTable;
-
-  while (pos1 <= TotalEntries && pos2 <= OtherTotal) {
-    if (pos1 != opos1) {
-      opos1 = pos1;
-      IresultPtr = Table + pos1 - 1;
-      idx1 = IresultPtr->GetIndex();
-    }
-    if (pos2 != opos2) {
-      opos2 = pos2;
-      OtherIresultPtr = OtherTable + pos2 - 1;
-      idx2 = OtherIresultPtr->GetIndex();
-    }
-    if (idx2 == idx1) {
-      const FCLIST   *MyHitPtr = (const FCLIST *) IresultPtr->GetHitTable();
-      const FCLIST   *OtherHitPtr = (const FCLIST *) OtherIresultPtr->GetHitTable();
-
-//      const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
-
-      size_t          matchCount = 0;
-
-      newHitTable.Clear();
-      FC               oldFc;
-      FC               oldMyFc;
-
-      for (const FCLIST * kp = MyHitPtr->Next(); kp != MyHitPtr; kp = kp->Next()) {
-	const FC        MyFc(kp->Value());
-
-	FC PeerFC   = Parent->GetPeerFc (MyFc);
-
-	for (const FCLIST * p = OtherHitPtr->Next(); p != OtherHitPtr; p = p->Next()) {
-	  const FC fc (p->Value());
-	  if ( (compFunc == NULL || compFunc(MyFc, fc)) && PeerFC.Contains( fc ) ) {
-	    matchCount++;
-	    if (oldFc   != fc) {
-	      if ((oldFc = fc) != oldMyFc) newHitTable.AddEntry( fc );
-	    }
-	    if (oldMyFc != MyFc) {
-	      if ((oldMyFc = MyFc) != fc) newHitTable.AddEntry( MyFc );
-	    }
-	  }
-	}			// for
-      }				// for
-      if (matchCount)
-	{
-	  NewTable[current] = *IresultPtr;
-
-          // Note: the table might have be sorted...
-	  newHitTable.MergeEntries(); // Need to do this
-
-	  NewTable[current].SetHitTable (newHitTable);
-	  NewTable[current].SetHitCount (matchCount);
-          NewTable[current].SetAuxCount (2);
-          const DOUBLE score = NewTable[current++].GetScore();
-          if (score < newMinScore) newMinScore = score;
-          if (score > newMaxScore) newMaxScore = score;
-	}
-    }
-    if (idx1 <= idx2)
-      pos1++;
-    if (idx2 <= idx1)
-      pos2++;
-  }
-
-  if (Table) delete [] Table;
-  Table        = NewTable;
-  MaxEntries   = newMaxEntries;
-  TotalEntries = current;
-  Sort         = ByIndex;
-  MinScore     = newMinScore;
-  MaxScore     = newMaxScore;
-  HitTotal     = 0;
-  return this;
-}
-#endif
 
 // In the intersection (AND) but not a peer
 //
@@ -3318,6 +2905,43 @@ OPOBJ *atomicIRSET::XPeer (const OPOBJ& Irset)
       OtherIresultPtr = OtherTable + pos2 - 1;
       idx2 = OtherIresultPtr->GetIndex();
     }
+
+#if 1 // Phase out FCLIST to be only internal to FCT !
+
+    if (idx2 == idx1) {
+      const FCT myHits = IresultPtr->GetHitTable();
+      const FCT otherHits = OtherIresultPtr->GetHitTable();
+
+      size_t matchCount = 0;
+
+      newHitTable.Clear();
+
+      FC oldFc;
+      FC oldMyFc;
+
+      for (const FC& myFc : myHits) {
+        const FC peerFc = Parent->GetPeerFc(myFc);
+
+        for (const FC& otherFc : otherHits) {
+           if (!peerFc.Contains(otherFc)) {
+             ++matchCount;
+
+             if (oldFc != otherFc) {
+               oldFc = otherFc;
+               newHitTable.AddEntry(otherFc);
+             }
+
+             if (oldMyFc != myFc) {
+               oldMyFc = myFc;
+
+               if (myFc != otherFc)
+                 newHitTable.AddEntry(myFc);
+             }
+           }
+         }
+       }
+     }
+#else
     if (idx2 == idx1) {
       const FCLIST   *MyHitPtr = (const FCLIST *) IresultPtr->GetHitTable();
       const FCLIST   *OtherHitPtr = (const FCLIST *) OtherIresultPtr->GetHitTable();
@@ -3358,6 +2982,7 @@ OPOBJ *atomicIRSET::XPeer (const OPOBJ& Irset)
           if (score > newMaxScore) newMaxScore = score;
 	}
     }
+#endif
     if (idx1 <= idx2)
       pos1++;
     if (idx2 <= idx1)
@@ -3558,10 +3183,16 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
 	  if (count > 1) {
 	    for (size_t i=0; i < TotalEntries; i++)
 	      {
+#if 1 /* new interface */
+		FCT hitTable = Table[i].GetHitTable();
+		hitTable.MergeEntries();
+		Table[i].SetHitTable(hitTable);
+#else
 		FCLIST list;
 		Table[i].GetHitTable(&list);
 		list.MergeEntries();
 		Table[i].SetHitTable(list);
+#endif
 	      }
 	  }
 
@@ -3623,8 +3254,8 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
       idx2 = OtherIresultPtr->GetIndex();
     }
     if (idx2 == idx1) {
-      const FCLIST   *MyHitPtr = (const FCLIST *) IresultPtr->GetHitTable();
-      const FCLIST   *OtherHitPtr = (const FCLIST *) OtherIresultPtr->GetHitTable();
+      const FCT   MyHits    = IresultPtr->GetHitTable();
+      const FCT   OtherHits = OtherIresultPtr->GetHitTable();
 //      const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
 
       size_t          matchCount = 0;
@@ -3634,8 +3265,8 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
       FC              oldMyFc;
       FC              oldFc;
 
-      if (MyHitPtr) for (const FC& MyFc : *MyHitPtr) {
-	if (OtherHitPtr) for (const FC& otherFc : *OtherHitPtr) {
+      for (const FC& MyFc : *MyHits) {
+	for (const FC& otherFc : OtherHits) {
 	  FC Fc (otherFc);
 
 	  // If we have a compFunc and don't fit then we don't need to look more
@@ -3805,10 +3436,16 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
 	  if (count > 1) // Merge
 	    for (size_t i=0; i < TotalEntries; i++)
               {
+#if 1 /* new interface */
+		FCT hitTable = Table[i].GetHitTable();
+		hitTable.MergeEntries();
+		Table[i].SetHitTable(hitTable);
+#else
                 FCLIST list;
                 Table[i].GetHitTable(&list);
                 list.MergeEntries();
                 Table[i].SetHitTable(list);
+#endif
               }
         }
       if (count == 0)
@@ -3839,11 +3476,11 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
       for (size_t x=1; x <= TotalEntries; x++)
 	{
 	  GetEntry(x, &iresult);
-	  const FCLIST *MyHitPtr    = (const FCLIST *)iresult.GetHitTable ();
+	  const FCT MyHits    = iresult.GetHitTable ();
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
-	  if (MyHitPtr) for (const FC& myFC : *MyHitPtr) 
+	  for (const FC& myFC : MyHits) 
 	    {
 	      if (Parent->GetFieldCache()->ValidateInField(  myFC, FieldName ))
 		{
@@ -3950,15 +3587,14 @@ OPOBJ *atomicIRSET::XWithin(const STRING& FieldName)
 	{
 	  hits = 0;
 	  GetEntry(x, &iresult);
-	  const FCLIST *MyHitPtr    = (const FCLIST *)iresult.GetHitTable ();
-	  if (MyHitPtr)
-	    for (const FC& myFC : *MyHitPtr) {
+	  const FCT MyHits    = iresult.GetHitTable ();
+	  for (const FC& myFC : MyHits) {
 	      if (Parent->GetFieldCache()->ValidateInField(myFC, FieldName))
 		{
 		  hits++;
 		  break;
 		}
-	    } // for
+	  } // for
 	  if (hits == 0)
 	    {
 	      // Have something
@@ -4058,13 +3694,13 @@ OPOBJ *atomicIRSET::Inclusive(const STRING& FieldName)
       for (size_t x=1; x <= TotalEntries; x++)
 	{
 	  GetEntry(x, &iresult);
-	  const FCLIST *MyHitPtr    = (const FCLIST *)iresult.GetHitTable ();
+	  const FCT MyHits    = iresult.GetHitTable ();
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
-	  for (const FCLIST * kp = MyHitPtr->Next(); kp != MyHitPtr; kp = kp->Next())
+	  for (const FC myFC : MyHits)
 	    {
-	      if (Parent->GetFieldCache()->ValidateInField(  myFC = kp->Value(), FieldName ))
+	      if (Parent->GetFieldCache()->ValidateInField(myFC, FieldName))
 		{
 		  iresult.AddToHitTable(myFC);
 		  hits++;
@@ -4456,19 +4092,17 @@ OPOBJ *atomicIRSET::CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T
       } else
 	Distance = (INT) Metric;
 
-      const FCLIST   *MyHitPtr = (const FCLIST *) IresultPtr->GetHitTable();
-      const FCLIST   *OtherHitPtr = (const FCLIST *) OtherIresultPtr->GetHitTable();
+      const FCT   MyHits    = IresultPtr->GetHitTable();
+      const FCT   OtherHits = OtherIresultPtr->GetHitTable();
       const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
 
       size_t          matchCount = 0;
 
       newHitTable.Clear();
-      for (const FCLIST * kp = MyHitPtr->Next(); kp != MyHitPtr; kp = kp->Next()) {
-	const FC        MyFc(kp->Value());
-	for (const FCLIST * p = OtherHitPtr->Next(); p != OtherHitPtr; p = p->Next()) {
+      for (const FC& MyFc : MyHits) {
+	for (const FC& OtherFc : OtherHits) {
 	  bool     IsMatch = false;
-	  const FC        OtherFc(p->Value());
-	  const INT       diff = MyFc.GetFieldStart() - OtherFc.GetFieldStart();
+	  const signed int diff = MyFc.GetFieldStart() - OtherFc.GetFieldStart();
 	  if (Distance >= 0) {
 	    // Near
 	    if (diff < 0) {
@@ -4592,21 +4226,20 @@ OPOBJ *atomicIRSET::_CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_
 			Metric*(mdtrec.GetLocalRecordStart()-mdtrec.GetLocalRecordEnd()));
 		  if (Distance == 0 || Distance == 1) Distance = 2;
 		} else Distance = (INT)Metric;
-	      const FCLIST *MyHitPtr    = (const FCLIST *)MyIresult.GetHitTable ();
-	      const FCLIST *OtherHitPtr = (const FCLIST *)OtherIresult.GetHitTable();
+
+	      const FCT MyHits    = MyIresult.GetHitTable ();
+	      const FCT OtherHits = OtherIresult.GetHitTable();
 	      const bool IsSorted = MyIresult.HitTableIsSorted() && OtherIresult.HitTableIsSorted();
 
 	      size_t matchCount = 0;
 #if STORE_PROX
 	      newHitTable.Clear();
 #endif
-	      for (const FCLIST *kp = MyHitPtr->Next(); kp != MyHitPtr; kp = kp->Next())
+	      for (const FC& MyFc : MyHits)
 		{
-		  const FC MyFc ( kp->Value() );
-		  for (const FCLIST *p = OtherHitPtr->Next(); p != OtherHitPtr; p = p->Next())
+		  for (const FC& OtherFc : OtherHits)
 		    {
 		      bool IsMatch = false;
-		      const FC OtherFc ( p->Value() );
 		      const INT diff = MyFc.GetFieldStart () - OtherFc.GetFieldStart ();
 		      if (Distance >= 0)
 			{
@@ -4887,16 +4520,14 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
 	  if (Table[i].GetAuxCount() <= 1)
 	    continue; // Not interested
 
-	  for (const FCLIST *ptr  =  Table[i].GetHitTable().GetPtrFCLIST(),
-		*p = ptr->Next(); p != ptr; p=p->Next())
+	  const FCT Hits = Table[i].GetHitTable();
+	  for (const FC& hit : Hits)
 	    {
 	      int distance;
 
-	      if (Fc == FC(0,0))
-		oldFc = ptr->Value();
-	      else
-		oldFc = Fc;
-	      Fc = p->Value();
+	      if (Fc == FC(0,0)) oldFc = hit;
+	      else               oldFc = Fc;
+	      Fc = hit; 
 	      if ((distance = Fc.GetFieldStart() - oldFc.GetFieldEnd()) < 0)
 		distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
 	      if (distance < min_dist)

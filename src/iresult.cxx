@@ -280,13 +280,6 @@ void IRESULT::SetHitTable(const FCLIST& NewHitTable)
 }
 */
 
-const FCT IRESULT::GetHitTable(FCLIST *Table) const
-{
-  if (Table)
-    *Table = HitTable.GetFCLIST();
-  return HitTable;
-}
-
 SRCH_DATE IRESULT::GetDate()
 {
   if (Date.IsNotSet())

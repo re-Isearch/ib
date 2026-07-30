@@ -103,15 +103,6 @@ STRING RESULT::GetGlobalKey(char Ch) const
   return Key;
 }
 
-const FCT RESULT::GetHitTable(FCLIST *HitTableBuffer) const
-{
-  if (HitTableBuffer)
-    {
-      *HitTableBuffer = HitTable.GetFCLIST();
-    }
-  return HitTable;
-}
-
 #if 0
 off_t RESULT::GetRecordSize() const
 {

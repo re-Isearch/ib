@@ -427,7 +427,7 @@ private:
   bool     useRelativePaths;
 //virtual PMDT GetMainMdt() { return 0; };
 //virtual PDFDT GetMainDfdt() { return 0; };
-  virtual  void SelectRegions(const RECORD&, FCT *) { };
+  virtual  void SelectRegions(const RECORD&, FCT *) const { };
   virtual  GPTYPE ParseWords(const DOCTYPE_ID&, UCHR*, GPTYPE, GPTYPE,
 		GPTYPE*, GPTYPE) { return 0; }; 
   virtual  size_t  ParseWords2(const STRING&, WORDSLIST *) const { return 0; }

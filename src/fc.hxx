@@ -26,7 +26,13 @@ public:
   // A FC should never end before it starts!
   size_t Span() const      { return FieldEnd >= FieldStart ? FieldEnd-FieldStart : 0; }
   size_t GetLength() const { return Span()+1; }
+
+  // Consequently, a real one-byte range at offset zero is not representable.
   bool   IsEmpty() const   { return FieldStart == FieldEnd && FieldStart == 0; }
+
+  // Special kind of FC that goes from [0,length-1]
+  bool IsWholeRange(GPTYPE length) const { return length != 0 && GetFieldStart() == 0
+	&& GetFieldEnd() == length - 1; }
 
   operator STRING() const;
 

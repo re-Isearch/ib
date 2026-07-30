@@ -17,6 +17,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 
 #define NEW_HEADLINE_CACHE_CODE 0 /* BROKEN!! */
 
+
 /*@@@
 File:        idb.cxx
 Description: Class IDB
@@ -293,7 +294,6 @@ bool IDB::setAutoDeleteExpired(bool val)
     }
   return true;
 }
-
 
 
 bool IDB::setUseRelativePaths(bool val)
@@ -4677,39 +4677,58 @@ void IDB::ParseRecords(RECORD& FileRecord)
     }
 }
 
+
 void IDB::ParseFields (RECORD *Record)
 {
   if (Record)
     {
       DOCTYPE *DocTypePtr = GetDocTypePtr ( Record->GetDocumentType () );
       if (DocTypePtr)
-	{
-	  Record->SetBadRecord(false);
-	  DocTypePtr->ParseFields (Record);
+        {    
+          Record->SetBadRecord(false);
+          DocTypePtr->ParseFields (Record);
 #if 0
-	  if (__afterParseFieldsCallBack)
-	    __afterParseFieldsCallBack(Record);
+          if (__afterParseFieldsCallBack)
+            __afterParseFieldsCallBack(Record);
 #endif
-	}
+        }
       else message_log (LOG_PANIC, "Can't get Document Class pointer for %s",
-		Record->GetDocumentType().ClassName(true).c_str());
+                Record->GetDocumentType().ClassName(true).c_str());
     }
 }
 
-void IDB::SelectRegions(const RECORD& Record, FCT* RegionsPtr)
+
+// Selects bytes admitted to the shared lexical term index.
+// Terms outside these regions are unavailable to both unqualified
+// lexical searches and field-qualified lexical searches.
+//
+// Typed/object and vector indexes are unaffected because they read
+// field values separately from the original source.
+
+void IDB::SelectRegions(const RECORD& record, FCT* regions) const
 {
-  DOCTYPE *DocTypePtr = GetDocTypePtr( Record.GetDocumentType());
-  if (DocTypePtr)
-    {
-      if (RegionsPtr) RegionsPtr->Clear();
-      DocTypePtr->SelectRegions(Record, RegionsPtr);
-    }
-  else if (RegionsPtr)
-    {
-      // Select the entire document as one region.
-      *RegionsPtr = FC(0, Record.GetLength());
-    }
+  if (regions == nullptr) {
+    return;
+  }
+
+  DOCTYPE* doctype = GetDocTypePtr(record.GetDocumentType());
+  if (doctype != nullptr)
+  {
+    doctype->SelectRegions(record, regions);
+    return;
+  }
+
+  const GPTYPE length = record.GetLength();
+  // Select the entire document as one region.
+  if (length != 0)
+    *regions = FC(0, length - 1);
+  else 
+    regions->Clear();
 }
+
+
+
+
 
 // Returns number of words
 // Note: We want to include ' in words (always)

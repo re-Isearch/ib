@@ -4,6 +4,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 
 #define PHONETIC_SKIP_INITIALS 1
 
+
 /*-@@@
 File:   	index.cxx
 Description:	Class INDEX
@@ -2324,7 +2325,6 @@ memory_allocation: // This is where we try to get memory
 
       OldGlobalStart = Parent->GetMainMdt()->GetNextGlobal();
 
-      FCT Regions;
       DOCTYPE_ID Doctype;
       STRING Key;
 
@@ -2390,7 +2390,6 @@ memory_allocation: // This is where we try to get memory
 
               Doctype = record.GetDocumentType(); // Parsefield can change the doctype!
 
-              Parent->SelectRegions (record, &Regions);
               if (DataFileName != OldDataFileName)
                 {
 
@@ -2445,21 +2444,6 @@ memory_allocation: // This is where we try to get memory
                 }
               else
                 {
-#if 0
-                  for (const FCLIST *r = Regions, *itor = r->Next(); itor != r; itor = itor->Next())
-                    {
-                      Fc = itor->Value();
-                      if (Fc.GetLength()) // This is WRONG should be !fc.IsEmpty();
-                        {
-                          const GPTYPE DataFileSize = Fc.GetFieldEnd();
-                          if (DataFileSize == 0)
-                            continue;
-                          const GPTYPE start = record.GetRecordStart() + Fc.GetFieldStart();
-                          const GPTYPE end   = start + DataFileSize;
-                        }
-                    }
-#endif
-
                   const GPTYPE DataFileSize = ((RecordEnd == 0) ?
                                                MyMemoryMap.Size() - 1 /* added EDZ Sun Nov 16 --> */ - RecordStart:
                                                RecordEnd - RecordStart ) + 1;
@@ -2502,9 +2486,48 @@ memory_allocation: // This is where we try to get memory
 			  Error++; // Tag as error?
 			}
                     }
+
+		    // Here is where we can handle Regions (enabled 2026 July)
+#if 1
+		    PUCHR const destination = MemoryData + MemoryDataLength;
+		    const PUCHR source = (const PUCHR)MyMemoryMap.Ptr() + RecordStart;
+		    FCT Regions;
+		    Parent->SelectRegions(record, &Regions);
+		    PUCHR p = destination;
+		    if (Regions.GetTotalEntries() == 1 && Regions.begin()->IsWholeRange(bytes))
+		      {
+			// Normal/default case: index the entire record.
+			memcpy(destination, source, (size_t)bytes);
+		      }
+		    else
+		      {
+			// Everything is initially lexically invisible.
+			memset(destination, '\0', (size_t)bytes); // Can be either '\0' or ' ' 
+			for (const FC& region : Regions)
+			  {
+			    const GPTYPE regionStart = region.GetFieldStart();
+			    const GPTYPE regionEnd   = region.GetFieldEnd();
+			    // Region coordinates are inclusive and relative to the record.
+			    if (regionStart > regionEnd || regionEnd >= bytes)
+			      {
+				message_log(LOG_WARN,
+				  "Ignoring invalid indexing region [%llu,%llu] "
+				  "for record length %llu",
+				  (unsigned long long)regionStart, (unsigned long long)regionEnd,
+				  (unsigned long long)bytes);
+				continue;
+			      }
+			    const size_t offset = (size_t)regionStart;
+			    const size_t length = (size_t)(regionEnd - regionStart + 1);
+			    memcpy(destination + offset, source + offset, length);
+			}
+		    }
+#else
+
 //cerr << "MAP from " << RecordStart << endl;
                   PUCHR p = (PUCHR)memcpy(MemoryData + MemoryDataLength,
                                           MyMemoryMap.Ptr() + RecordStart, bytes);
+#endif
                   if (DebugMode) message_log (LOG_DEBUG, "Copied %u bytes from '%s' (%lu)", bytes,
                                          DataFileName.c_str(), (unsigned long)RecordStart );
                   memset(p+bytes, ' ', StringCompLength); // Pad an EXTRA StringCompLength
@@ -5890,7 +5913,16 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
       // n[1] contains the string length
       // &n[2] contains the lower case term..
 #ifdef __GNUG__
+
+# if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wvla-cxx-extension"
+# endif
       unsigned char n[compLength + sizeof(GPTYPE)];
+# if defined(__clang__)
+#  pragma clang diagnostic pop
+# endif
+
 #else
       unsigned char  *n = (unsigned char *)alloca(compLength + sizeof(GPTYPE)); // was +3
       if (n == NULL)
@@ -6455,7 +6487,14 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     // Need to allocate a bit more due to offset backwards
     const size_t    Buffer_Len = HEADROOM(maxTermLength * sizeof ( UCHR ) + StringCompLength, 1024);
 #ifdef __GNUG__
+# if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wvla-cxx-extension"
+# endif
     UCHR            Buffer[Buffer_Len];
+# if defined(__clang__)
+#  pragma clang diagnostic pop
+# endif
 #else
     PUCHR           Buffer = ( UCHR * ) alloca (Buffer_Len);
 #endif

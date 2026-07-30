@@ -115,7 +115,7 @@ public:
   void   SetHitTable(const FCT& NewHitTable)    { (HitTable = NewHitTable).SortByFc(); }
 //void   SetHitTable(const FCLIST& NewHitTable) { HitTable = NewHitTable; }
 
-  const FCT GetHitTable(FCLIST *HitTableBuffer = NULL) const;
+  FCT GetHitTable() const                       { return HitTable; }
 
   // Dump a XML hit table
   STRING XMLHitTable() const;

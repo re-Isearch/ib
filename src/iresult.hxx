@@ -132,9 +132,9 @@ public:
   void SetHitTable(const FCLIST& newHitTable)   { HitTable = newHitTable;           }
   void SetHitTable(const IRESULT& ResultRecord) { HitTable = ResultRecord.HitTable; }
   void SetHitTable(const FCT& newHitTable)      { HitTable = newHitTable;           }
-  bool HitTableIsSorted() const          { return HitTable.IsSorted();       }
+  bool HitTableIsSorted() const                 { return HitTable.IsSorted();       }
 
-  const FCT GetHitTable(FCLIST *Table = NULL) const;
+  FCT GetHitTable() const                       {  return HitTable; } 
 
   void AddToHitTable(const IRESULT& ResultRecord) { HitTable.AddEntry( ResultRecord.HitTable ); }
   void AddToHitTable(const FCT& OtherHitTable)    { HitTable.AddEntry( OtherHitTable );         }
