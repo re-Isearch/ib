@@ -102,7 +102,6 @@ public:
   void SetDate(const SRCH_DATE& newDate) { Date = newDate;};
   SRCH_DATE GetDate();
 
-#if 0
   void ReserveHitTable(size_t count)
   {
     HitTable.Reserve(count);
@@ -113,6 +112,8 @@ public:
     return HitTable.Capacity();
   }
 
+
+#if 0
   HITTABLE::SINK GetHitSink(size_t reserveHint = 0)
   {
     if (reserveHint != 0)

@@ -368,6 +368,11 @@ public:
     return node()->Read(fp);
   }
   int Refcount_() const { return p_ ?  p_->count_  : -1; }
+
+  // NO-OP
+  virtual void Reserve(size_t count) {;}
+  virtual size_t Capacity() const { return (size_t)-1; }; 
+
   ~FCT() { unlock(); }
  private:
   void    lock() { p_->count_++; }

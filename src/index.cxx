@@ -6216,6 +6216,35 @@ class HITLIST {
       }
 
     size_t      TotalElements;
+
+    // Sort. This costs someting BUT saves by optimization (payoff latter)
+    void SortByGp() {
+      struct HIT {
+	GPTYPE Gp;
+	short  Len;
+      };
+      if (TotalElements < 2) return;
+      std::vector<HIT> hits;
+      hits.reserve(TotalElements);
+
+      for (size_t i = 0; i < TotalElements; ++i)
+        hits.push_back({GpTable[i], LenTable[i]});
+
+      std::sort(
+          hits.begin(),
+          hits.end(),
+          [](const HIT& a, const HIT& b)
+          {
+            return a.Gp < b.Gp;
+          });
+
+      for (size_t i = 0; i < TotalElements; ++i)
+        {
+          GpTable[i]  = hits[i].Gp;
+          LenTable[i] = hits[i].Len;
+        }
+    }
+
   private:
     GPTYPE     *GpTable;
     short      *LenTable;
@@ -7026,27 +7055,45 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 #endif
 
 
-  // Batch successive hits into a single record !
   size_t prev_w = 0;
-  for ( size_t k = 0; k < TotalHits; k++ )
+  static constexpr size_t CPU_CHECK_INTERVAL = 64U * 1024U;
+  size_t hitsUntilCpuCheck = CPU_CHECK_INTERVAL;
+  size_t unresolvedHits    = 0; // We keep these just for diagnostics
+
+//  HitList.SortByGp(); // Not needed since already sorted!
+
+  // Batch adding hits!
+  for ( size_t k = 0; k < TotalHits;)
     {
       const GPTYPE    gp = HitList[k];
-      const size_t    w = MainMdt->LookupByGp ( gp );
-      size_t          running_hits = 0;
+
+      FC              recordRange;
+      const size_t    w = MainMdt->LookupByGp ( gp, &recordRange );
 
       // Did we find the gp?
-      if (w == 0)
-        continue; // Not found!
+      if (w == 0) { // NOT FOUND
+  	++unresolvedHits;
+	++k;
+	// This in a static index should not occur and could indicate corruptiom.
+	// It can, however, be normal when an indexing process is running and the MDT
+	// has yet to be updated: our design support search during indexing.
+        continue; 
+      }
 
-      if (k % 501 == 500 && MaxCPU_ticks >0 && MaxCPU_ticks <  (clock() - startClock))
-	{
+      if (--hitsUntilCpuCheck == 0) {
+	hitsUntilCpuCheck = CPU_CHECK_INTERVAL;
+	if (MaxCPU_ticks > 0 && clock() - startClock > MaxCPU_ticks) {
 	  CPU_ResourcesExhausted();
+	  // cpuExhausted = true;
 	  break;
 	}
+      }
 
-      // Count the sucessive hits in a single record
-      if (w == prev_w) { running_hits++; } else { prev_w = w; running_hits = 0; }
 
+     // Find End .. We do this BEFORE date range check to save lookups 
+      size_t next = k + 1;
+      while (next < TotalHits && HitList[next] <= recordRange.GetFieldEnd())
+        ++next;
 
       // Check Date Range
       if ( DateRange.Defined () )
@@ -7065,14 +7112,17 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
                 }
               old_w = w;
             }
-          if ( isDeleted )
+          if ( isDeleted ) {
+	    k = next;
             continue;		// Don't bother since its marked deleted
+	  }
 
           if ( rec_date.Ok () )
             {
               // Check date range
               if ( !DateRange.Contains ( rec_date ) )
                 {
+		  k = next; 
                   continue;		// Out of range range
 
                 }
@@ -7083,11 +7133,16 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         }
       // Yes..
       iresult.SetMdtIndex ( w );
+
       if ( myStoreHitCoordinates )
         {
-          const GPTYPE start = gp - Offset;
-          const short  length= HitList(k);
-          iresult.SetHitTable ( FC(start, start + length) );
+	  // iresult.ReserveHitTable(next - k);
+	  for (size_t n = k; n < next; ++n) {
+            iresult.AddToHitTable(HitList.Fc(n, Offset));
+	    // const GPTYPE start = gp - Offset;
+	    // const short  length= HitList(k);
+            // iresult.AddToHitTable ( FC(start, start + length) );
+	  }
         }
 #if AWWW
       pirset->FastAddEntry ( iresult );
@@ -7096,6 +7151,8 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 #endif
       if ( ClippingThreshold > 0 && pirset->GetTotalEntries () > ClippingThreshold )
         break;
+      iresult.ClearHitTable();
+      k = next;
     }				/* for() */
 
   // Cleanup
