@@ -39,7 +39,7 @@ public:
   virtual void BeforeIndexing();
   virtual void AddFieldDefs();
   virtual void ParseRecords(const RECORD& FileRecord);
-  virtual void SelectRegions(const RECORD& Record, FCT* FctPtr);
+  virtual void SelectRegions(const RECORD& Record, FCT* FctPtr) const;
 
   virtual bool IsStopWord(const UCHR* Word, STRINGINDEX MaxLen) const;
 

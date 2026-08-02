@@ -175,15 +175,9 @@ option(USE_JEMALLOC    "Use jemalloc allocator"              ON)
 option(USE_OPENMP      "Use OpenMP"                           ON)
 option(USE_BERKELEY_DB "Use Berkeley DB"                      ON)
 
-option(IB_ENABLE_FAST_MATH
-    "Enable -ffast-math in optimized GNU/Clang builds"
-    ON
-)
+option(IB_ENABLE_FAST_MATH "Enable -ffast-math in optimized GNU/Clang builds" ON)
 
-option(IB_CREATE_USER_PLUGIN_DIR
-    "Create $HOME/.ib/lib/plugins while configuring"
-    OFF
-)
+option(IB_CREATE_USER_PLUGIN_DIR "Create $HOME/.ib/lib/plugins while configuring" OFF)
 
 if(APPLE)
     set(_IB_DEFAULT_HOMEBREW_HINTS ON)
@@ -756,6 +750,7 @@ add_library(ibSearch
     ${SRC_DIR}/df.cxx           ${SRC_DIR}/dfd.cxx
     ${SRC_DIR}/dfdt.cxx         ${SRC_DIR}/dft.cxx
     ${SRC_DIR}/fc.cxx           ${SRC_DIR}/fct.cxx
+    ${SRC_DIR}/fchits.cxx
     ${SRC_DIR}/nodetree.cxx     ${SRC_DIR}/idbobj.cxx
     ${SRC_DIR}/idb.cxx          ${SRC_DIR}/metadata.cxx
     ${SRC_DIR}/scan.cxx         ${SRC_DIR}/vidb.cxx

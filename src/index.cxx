@@ -115,6 +115,8 @@ extern int _ib_defaultMaxQueryCPU_ticks;
 #include "mergeunit.hxx" /* NEW INDEX STRATEGY */
 #include "stoplist.hxx"
 
+#include "error.hxx"
+
 #ifdef _WIN32
 # define EIDRM  82              /* Identifier removed */
 #endif
@@ -3960,10 +3962,12 @@ PIRSET INDEX::Search (const QUERY& Query)
             }
 	  if ((clock() - startClock) > MaxQueryCPU_ticks)
 	    {
-	      message_log (LOG_INFO, "Search time limit (%u ms) exceeded: Unpredictable partial results available",
-                        (int)((MaxQueryCPU_ticks*1000.0)/CLOCKS_PER_SEC) );
+	      const int error = 32; //NOTE: ERROR 32 (unpredictable) and not 33 (valid)
+	      message_log (LOG_INFO, "Search time limit (%u ms) exceeded (Op stack interupted): %s",
+		(int)((MaxQueryCPU_ticks*1000.0)/CLOCKS_PER_SEC), Z3950_ERROR::ErrorMessage(error));
 	      // "Resources exhausted - unpredictable partial results available";
-	      Parent->SetErrorCode(32);
+	      Parent->SetErrorCode(error);
+	      StopEvaluation = true;
 	      break;
 	    }
 	  delete OpPtr; // ADDED: 2008 March 
@@ -5272,10 +5276,10 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
 
 void INDEX::CPU_ResourcesExhausted()
 {
-  message_log (LOG_INFO, "Term search limit (%u ms) exceeded: Valid subset of results available",
-                       (int)((MaxCPU_ticks*1000.0)/CLOCKS_PER_SEC) );
-  // Resources exhausted - valid subset of results available
-  Parent->SetErrorCode(33); // 
+  int error = 33;   // Resources exhausted - valid subset of results available
+  message_log (LOG_INFO, "Term search limit (%u ms) exceeded: %s",
+	(int)((MaxCPU_ticks*1000.0)/CLOCKS_PER_SEC), Z3950_ERROR::ErrorMessage(error) );
+  Parent->SetErrorCode(error);
 
 }
 
@@ -7021,6 +7025,8 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   PIRSET          pirset = new IRSET ( Parent,  TotalHits + 1);
 #endif
 
+
+  // Batch successive hits into a single record !
   size_t prev_w = 0;
   for ( size_t k = 0; k < TotalHits; k++ )
     {

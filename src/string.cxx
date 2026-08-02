@@ -2,6 +2,7 @@
 Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
+
 #pragma ident  "@(#)string.cxx  1.93 04/17/01 00:38:17 BSN"
 /* ########################################################################
 
@@ -3388,8 +3389,13 @@ bool STRING::MatchWild(const CHR *CString) const
   bool     match = false;
   char           *argv[256]; // At most 256 patterns (hardwired)
 #ifdef __GNUC__
+
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wvla-cxx-extension"
   const size_t    max_pat = Len()+1;
   char            pat[max_pat]; 
+# pragma clang diagnostic pop
+
 #else
   const size_t    max_pat = BUFSIZ;
   char            pat[BUFSIZ];  // Pattern at most 1024 bytes (hardwired)

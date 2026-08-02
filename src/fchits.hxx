@@ -1,9 +1,18 @@
 #pragma once
 
+/* Copyright (c) 2026 Project CoreQuarry and its contributors: See CONTRIBUTORS.
+It is made available and licensed under the Apache 2.0 license: see LICENSE */
+
+
 #include <algorithm>
 #include <cassert>
 #include <memory>
 #include <vector>
+
+#include "ib_defs.hxx"
+#include "fct.hxx"
+
+class FCLIST;
 
 struct FcLess
 {
@@ -23,8 +32,8 @@ struct FcLess
 class FCHITS
 {
 public:
-  using container_type  = std::vector<FC>;
-  using const_iterator  = container_type::const_iterator;
+  using container_type = std::vector<FC>;
+  using const_iterator = container_type::const_iterator;
 
   FCHITS() = default;
 
@@ -33,9 +42,23 @@ public:
   {
   }
 
+  explicit FCHITS(const FCLIST& list);
+
+  FCHITS& operator=(const FCLIST& list);
+
+  void Assign(const FCLIST& list);
+  void Assign(const FCT& table);
+
+  void CopyTo(FCLIST* list) const;
+
   void Reserve(size_t count)
   {
     Buffer.reserve(count);
+  }
+
+ size_t Capacity() const
+  {
+   return Buffer.capacity();
   }
 
   void Clear()
@@ -59,6 +82,9 @@ public:
     Buffer.push_back(hit);
   }
 
+  void Append(const FCHITS& other) ;
+  void Append(const FCT& other);
+
   bool IsNormalized() const
   {
     return Normalized;
@@ -69,6 +95,10 @@ public:
     if (Normalized)
       return;
 
+    // We use std::sort rather than a custom radix sort  because even
+    // with 65k hits (an absurdly high umber of hits):
+    // 65,536 × log2(65,536) ≈ 1,048,576 comparisons
+    // which is comparatively small on modern hardware
     std::sort(Buffer.begin(), Buffer.end(), FcLess());
 
     Buffer.erase(
@@ -139,19 +169,51 @@ public:
   const_iterator begin() const { return Buffer.begin(); }
   const_iterator end() const   { return Buffer.end(); }
 
-  void Write(PFILE fp) const;
+  void Write(FILE* fp) const;
 
 private:
+  void RecalculateState();
+
   container_type Buffer;
 
   // True means both sorted and duplicate-free.
   bool Normalized = true;
 };
 
+
 class HITTABLE
 {
 public:
   using const_iterator = FCHITS::const_iterator;
+
+  // Append-only adapter for external hit producers.
+  class SINK
+  {
+  public:
+    explicit SINK(HITTABLE& table)
+      : Table(table)
+    {
+    }
+
+    void AddEntry(const FC& hit)
+    {
+      Table.AddEntryFast(hit);
+    }
+
+    void operator()(const FC& hit)
+    {
+      Table.AddEntryFast(hit);
+    }
+
+    SINK& operator<<(const FC& hit)
+    {
+      Table.AddEntryFast(hit);
+      return *this;
+    }
+
+  private:
+    HITTABLE& Table;
+  };
 
   HITTABLE()
     : p_(std::make_shared<FCHITS>())
@@ -163,11 +225,54 @@ public:
   {
   }
 
+  explicit HITTABLE(const FCLIST& list)
+    : p_(std::make_shared<FCHITS>(list))
+  {
+  }
+
   HITTABLE(const HITTABLE&) = default;
   HITTABLE(HITTABLE&&) = default;
 
   HITTABLE& operator=(const HITTABLE&) = default;
   HITTABLE& operator=(HITTABLE&&) = default;
+
+  HITTABLE& operator=(const FCLIST& list)
+  {
+    p_ = std::make_shared<FCHITS>(list);
+    return *this;
+  }
+
+  // Bridge FCT
+  HITTABLE& operator=(const FCT& table)
+  {
+    auto replacement = std::make_shared<FCHITS>();
+    replacement->Assign(table.GetFCLIST());
+    p_ = std::move(replacement);
+    return *this;
+  }
+  void Assign(const FCT& table);
+
+  void CopyTo(FCLIST* list) const
+  {
+    Readable().CopyTo(list);
+  }
+
+  size_t Capacity() const
+  {
+    return Readable().Capacity();
+  }
+
+  void Reserve(size_t count)
+  {
+    // Do not detach when the existing shared storage already has room.
+    if (count > Readable().Capacity())
+      Writable().Reserve(count);
+  }
+
+  SINK GetSink()
+  {
+    return SINK(*this);
+  }
 
   size_t GetTotalEntries() const
   {
@@ -199,11 +304,6 @@ public:
     return Readable().end();
   }
 
-  void Reserve(size_t count)
-  {
-    Writable().Reserve(count);
-  }
-
   void Clear()
   {
     if (!p_ || p_.use_count() != 1)
@@ -221,6 +321,36 @@ public:
   void AddEntryFast(const FC& hit)
   {
     Writable().AddEntryFast(hit);
+  }
+
+  // For backwards compatability
+  void AddEntry(const FC& hit)
+  {
+    AddEntryFast(hit);
+  }
+  void AddEntry(const FCT& other)
+  {
+    Writable().Append(other);
+  }
+
+  void AddEntry(const HITTABLE& other)
+  {
+    if (other.IsEmpty())
+      return;
+
+    // Protect self-append because vector growth invalidates its iterators.
+    if (this == &other)
+      {
+        const FCHITS snapshot(Readable());
+        Writable().Append(snapshot);
+        return;
+      }
+
+    /*
+     * If two distinct handles share the same backing store, Writable()
+     * detaches this object first, leaving 'other' on the original store.
+     */
+    Writable().Append(other.Readable());
   }
 
   void Normalize()
@@ -247,12 +377,13 @@ public:
       }
   }
 
-  void Write(PFILE fp) const
+  void Write(FILE* fp) const
   {
     Readable().Write(fp);
   }
 
 private:
+
   const FCHITS& Readable() const
   {
     if (p_)

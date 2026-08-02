@@ -49,7 +49,8 @@ const char *Z3950_ERROR::ErrorMessage() const
 
 extern "C" const char * (* __Private_IB_ErrorMessage)(int);
 
-const char *Z3950_ERROR::ErrorMessage(int ErrorCode) const
+// Static Method
+const char *Z3950_ERROR::ErrorMessage(int ErrorCode)
 {
   switch (ErrorCode) {
     case 0:   return "No Error";

@@ -1548,3 +1548,164 @@ void HTMLMETA::Present (const RESULT& ResultRecord, const STRING& ElementSet,
   } else
     COLONDOC::Present(ResultRecord, ElementSet, RecordSyntax, StringBuffer);
 }
+
+
+
+static bool FindHttpBodyOffset(FILE* fp, GPTYPE recordStart, GPTYPE recordLength, GPTYPE* bodyOffset)
+{
+  if (fp == NULL || bodyOffset == NULL || recordLength == 0)
+    return false;
+
+  if (fseeko(fp, static_cast<off_t>(recordStart), SEEK_SET) != 0)
+    return false;
+
+  UCHR buffer[4096];
+
+  GPTYPE scanned = 0;
+  UINT4 window = 0;
+  unsigned windowBytes = 0;
+
+  while (scanned < recordLength)
+    {
+      const GPTYPE remaining = recordLength - scanned;
+      const size_t wanted =
+          remaining < sizeof(buffer)
+              ? static_cast<size_t>(remaining)
+              : sizeof(buffer);
+
+      const size_t got = fread(buffer, 1, wanted, fp);
+
+      if (got == 0)
+        break;
+
+      for (size_t i = 0; i < got; ++i)
+        {
+          window = (window << 8) | buffer[i];
+
+          if (windowBytes < 4)
+            ++windowBytes;
+
+          ++scanned;
+
+          // HTTP/MIME header terminator: CRLF CRLF
+          if (windowBytes >= 4 && window == 0x0D0A0D0A)
+            {
+              *bodyOffset = scanned;
+              return true;
+            }
+
+          // Tolerate LF-normalized input.
+          if (windowBytes >= 2 && (window & 0xFFFF) == 0x0A0A)
+            {
+              *bodyOffset = scanned;
+              return true;
+            }
+        }
+    }
+
+  return false;
+}
+
+
+// Returns a record-relative offset to the first body byte.
+// Returns 0 when the record does not contain a valid HTTP-style header.
+GPTYPE HTMLMETA::FindBodyOffset(FILE* fp,
+                               GPTYPE recordStart,
+                               GPTYPE recordLength) const
+{
+  if (fp == NULL || recordLength == 0)
+    return 0;
+
+  const off_t parseStart = static_cast<off_t>(recordStart);
+  const off_t parseEnd =
+      parseStart + static_cast<off_t>(recordLength);
+
+  if (fseeko(fp, parseStart, SEEK_SET) != 0)
+    return 0;
+
+  int ch = fgetc(fp);
+
+  if (ch != 'H')
+    return 0;
+
+  STRING line;
+
+  if (!line.FGet(fp))
+    return 0;
+
+  // We consumed the H, so expect TTP/.
+  if (line.GetLength() < 4 ||
+      memcmp(line.c_str(), "TTP/", 4) != 0)
+    return 0;
+
+  while (ftello(fp) < parseEnd && line.FGet(fp))
+    {
+      const CHR* const text = line.c_str();
+
+      // Blank line separates metadata from body.
+      if (*text == '\0' || *text == '\r' || *text == '\n')
+        {
+          const off_t bodyPosition = ftello(fp);
+
+          if (bodyPosition < parseStart ||
+              bodyPosition > parseEnd)
+            return 0;
+
+          return static_cast<GPTYPE>(bodyPosition - parseStart);
+        }
+
+      // Every HTTP metadata line must resemble key:value.
+      const CHR* const colon = strchr(text, ':');
+
+      if (colon == NULL || colon == text)
+        return 0;
+    }
+
+  // No terminating blank line, truncated record, or malformed header.
+  return 0;
+}
+
+void HTMLMETA::SelectRegions(const RECORD& Record, FCT* FctPtr) const
+{
+  if (FctPtr == NULL)
+    return;
+
+  const GPTYPE length = Record.GetLength();
+
+  if (length == 0)
+    {
+      FctPtr->Clear();
+      return;
+    }
+
+  FILE* const fp =
+      fopen(Record.GetFullFileName(), "rb");
+
+  if (fp == NULL)
+    {
+      DOCTYPE::SelectRegions(Record, FctPtr);
+      return;
+    }
+
+  const GPTYPE bodyOffset = FindBodyOffset(fp, Record.GetRecordStart(), length);
+
+  fclose(fp);
+
+  if (bodyOffset == 0)
+    {
+      // Ordinary HTML or a mangled HTTP wrapper:
+      // do not accidentally suppress any content.
+      DOCTYPE::SelectRegions(Record, FctPtr);
+      return;
+    }
+
+  FctPtr->Clear();
+
+  if (bodyOffset < length)
+    {
+      FctPtr->AddEntry( FC(bodyOffset, length - 1));
+    }
+
+  // bodyOffset == length:
+  // valid metadata header, but no lexical body.
+}

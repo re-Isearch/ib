@@ -18,7 +18,7 @@ public:
   int         SetErrorCode(int Error);
   int         GetErrorCode() const;
   const char *ErrorMessage() const;
-  const char *ErrorMessage(int ErrorCode) const;
+  static const char *ErrorMessage(int ErrorCode);
 private:
   int errorCode;
 };

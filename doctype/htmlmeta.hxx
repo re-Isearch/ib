@@ -56,9 +56,12 @@ public:
 
   STRING& DescriptiveName(const STRING& FieldName, PSTRING Value) const;
 
+  void SelectRegions(const RECORD& Record, FCT* FctPtr) const;
+
   ~HTMLMETA();
 
 private:
+  GPTYPE FindBodyOffset(FILE* fp, GPTYPE recordStart, GPTYPE recordLength) const;
   size_t CatMetaInfoIntoFile(FILE *outFp, const STRING& Fn, off_t Start =0, off_t End = 0) const;
   int    TagMatch(char* tag, const char* tagType, size_t len) const;
   int    TagMatch(char* tag, const char* tagType) const;

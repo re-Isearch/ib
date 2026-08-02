@@ -102,6 +102,27 @@ public:
   void SetDate(const SRCH_DATE& newDate) { Date = newDate;};
   SRCH_DATE GetDate();
 
+#if 0
+  void ReserveHitTable(size_t count)
+  {
+    HitTable.Reserve(count);
+  }
+
+  size_t GetHitTableCapacity() const
+  {
+    return HitTable.Capacity();
+  }
+
+  HITTABLE::SINK GetHitSink(size_t reserveHint = 0)
+  {
+    if (reserveHint != 0)
+      HitTable.Reserve(reserveHint);
+
+    return HitTable.GetSink();
+  }
+
+#endif
+
   void SetHitCount(const UINT NewHitCount) { HitCount = NewHitCount;     }
   UINT IncHitCount()                       { return ++HitCount;          }
   UINT IncHitCount(const UINT AddCount)    { return HitCount += AddCount;}
@@ -167,7 +188,11 @@ private:
   GEOSCORE      gScore;
 #endif
   SRCH_DATE     Date;
+#if 0
+  HITTABLE      HitTable;
+#else
   FCT           HitTable;
+#endif
   const MDT    *Mdt;
 };
 

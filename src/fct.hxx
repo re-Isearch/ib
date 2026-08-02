@@ -14,7 +14,7 @@ Author:		Edward C. Zimmermann
 
 #include "defs.hxx"
 #include "fc.hxx"
-#include "vlist.hxx"
+#include "fct.hxx"
 
 
 #include <cstddef>

@@ -48,6 +48,7 @@ typedef enum OBJ_IDS  {
   objINODE,     // 34
   objQUERY,     // 35
   objDOCTYPE,   // 36 // Added 2021
+  objHITS,      // 37
 
   // .inx magic
   objINDEXm = 0x49, // MSB Index
