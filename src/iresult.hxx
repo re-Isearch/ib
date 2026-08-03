@@ -166,6 +166,8 @@ public:
   HITTABLE  GetHitTable() const                         {  return HitTable; }
   void     AddToHitTable(const HITTABLE& otherHitTable) { HitTable.AddEntry(otherHitTable); }
   void     MergeHitTableEntries()                       { HitTable.MergeEntries();          }
+  void     SetHitTable(const HITTABLE& newHitTable)     { HitTable = newHitTable;           }
+
 #else
   FCT  GetHitTable() const                         {  return HitTable; } 
   void AddToHitTable(const FCT& OtherHitTable)    { HitTable.AddEntry( OtherHitTable );         }

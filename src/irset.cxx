@@ -29,6 +29,14 @@ Description:	Class IRSET - Internal Search Result Set
 
 #define EPSILON 0.0001f
 
+#include <type_traits>
+#include <utility>
+
+using hit_table_type =
+    typename std::decay<
+        decltype(std::declval<const IRESULT&>().GetHitTable())
+    >::type;
+
 #include <algorithm>
 #include <vector>
 
@@ -2499,7 +2507,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
   IRESULT *IresultPtr = NULL;
   IRESULT *OtherIresultPtr = NULL;
 
-  FCT newHitTable;
+  hit_table_type newHitTable;
 
   struct PEER_HIT
   {
@@ -2531,6 +2539,9 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
         Left.GetFieldEnd() ==
           Right.GetFieldEnd();
     };
+
+  std::vector<PEER_HIT> LeftHits;
+  std::vector<FC>       RightHits;
 
   while (pos1 <= TotalEntries &&
          pos2 <= OtherTotal)
@@ -2567,6 +2578,10 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
           size_t matchCount = 0;
 
+	  LeftHits.clear();
+	  RightHits.clear();
+ 	  LeftHits.reserve(myHits.Size());
+	  RightHits.reserve(OtherHits.Size());
           /*
            * Fast path for ordinary unordered PEER.
            *
@@ -2575,8 +2590,8 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
            */
           if (compFunc == NULL)
             {
-              std::vector<PEER_HIT> LeftHits;
-              std::vector<FC> RightHits;
+              // std::vector<PEER_HIT> LeftHits;
+              // std::vector<FC> RightHits;
 
               for (const auto& hit : myHits)
                 {
@@ -2816,18 +2831,13 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
               newHitTable.MergeEntries();
 
-              NewTable[current]
-                .SetHitTable(newHitTable);
+              NewTable[current].SetHitTable(newHitTable);
 
-              NewTable[current]
-                .SetHitCount(matchCount);
+              NewTable[current].SetHitCount(matchCount);
 
-              NewTable[current]
-                .SetAuxCount(2);
+              NewTable[current].SetAuxCount(2);
 
-              const DOUBLE score =
-                  NewTable[current++]
-                    .GetScore();
+              const DOUBLE score = NewTable[current++].GetScore();
 
               if (score < newMinScore)
                 newMinScore = score;
