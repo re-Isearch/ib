@@ -1424,7 +1424,7 @@ STRING IDB::GetXMLHighlightRecordFormat(const RESULT& Result, const STRING& Page
      return XML;
    }
 
-  const FCT HitTable = Result.GetHitTable();
+  const auto HitTable = Result.GetHitTable();
 
   XML << "<XML><!-- Adobe Technical Note #5172 -->\n<Body Units=Characters color=#FF00FF Mode=Active version=2>\n <Highlight>\n"; 
   size_t   count = 1;
@@ -1676,7 +1676,7 @@ size_t IDB::GetAncestorContent (RESULT& Result, const STRING& nodeName, STRLIST 
 // cerr << "Offset = " << offset << endl;
 
   FC             lastFc, Fc;
-  FCT            HitTable = Result.GetHitTable();
+  auto           HitTable = Result.GetHitTable();
   for (const FC& hit : HitTable)
     {
       if ((Fc = GetAncestorFc(FC(hit) += offset, NodeName)) != lastFc && !Fc.IsEmpty())
@@ -5850,7 +5850,7 @@ STRING IDB::XMLHitTable(const RESULT& Result)
     } 
   int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
 
-  FCT HitTable ( Result.GetHitTable() );
+  auto HitTable ( Result.GetHitTable() );
   size_t z = HitTable.GetTotalEntries();
 
   if (z)
@@ -5925,7 +5925,7 @@ STRING IDB::JsonHitTable(const RESULT& Result)
     }
 
   int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
-  FCT HitTable(Result.GetHitTable());
+  auto HitTable = Result.GetHitTable();
   size_t z = HitTable.GetTotalEntries();
 
   if (z)

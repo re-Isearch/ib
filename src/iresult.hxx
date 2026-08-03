@@ -16,9 +16,15 @@ Description:	Class IRESULT - Internal Search Result
 
 #include <cmath>
 
+//extern "C" { double  pow(double, double); };
+
 #define USE_GEOSCORE 1
 
-//extern "C" { double  pow(double, double); };
+
+#if _USE_HITTABLE
+# include "fchits.hxx"
+#endif
+
 
 class GEOSCORE {
 #define K_TARGET 0.5
@@ -113,7 +119,7 @@ public:
   }
 
 
-#if 0
+#if _USE_HITTABLE
   HITTABLE::SINK GetHitSink(size_t reserveHint = 0)
   {
     if (reserveHint != 0)
@@ -121,7 +127,6 @@ public:
 
     return HitTable.GetSink();
   }
-
 #endif
 
   void SetHitCount(const UINT NewHitCount) { HitCount = NewHitCount;     }
@@ -156,10 +161,17 @@ public:
   void SetHitTable(const FCT& newHitTable)      { HitTable = newHitTable;           }
   bool HitTableIsSorted() const                 { return HitTable.IsSorted();       }
 
-  FCT GetHitTable() const                       {  return HitTable; } 
+
+#if _USE_HITTABLE
+  HITTABLE  GetHitTable() const                         {  return HitTable; }
+  void     AddToHitTable(const HITTABLE& otherHitTable) { HitTable.AddEntry(otherHitTable); }
+  void     MergeHitTableEntries()                       { HitTable.MergeEntries();          }
+#else
+  FCT  GetHitTable() const                         {  return HitTable; } 
+  void AddToHitTable(const FCT& OtherHitTable)    { HitTable.AddEntry( OtherHitTable );         }
+#endif
 
   void AddToHitTable(const IRESULT& ResultRecord) { HitTable.AddEntry( ResultRecord.HitTable ); }
-  void AddToHitTable(const FCT& OtherHitTable)    { HitTable.AddEntry( OtherHitTable );         }
   void AddToHitTable(const FC& Fc)                { HitTable.AddEntry(Fc);                      }
 
   void SetAuxCount(const UINT newAuxCount) { AuxCount = newAuxCount;     }
@@ -189,7 +201,7 @@ private:
   GEOSCORE      gScore;
 #endif
   SRCH_DATE     Date;
-#if 0
+#if _USE_HITTABLE 
   HITTABLE      HitTable;
 #else
   FCT           HitTable;

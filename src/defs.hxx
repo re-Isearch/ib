@@ -12,6 +12,8 @@ Description:	General definitions
 # include "platform.h"
 #endif
 
+#define _USE_HITTABLE 1 /* 0 means use FCT which uses LinkedLists */
+
 #ifdef PURE_STANDALONE
 # ifndef STANDALONE
 #   define STANDALONE 1

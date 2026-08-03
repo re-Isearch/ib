@@ -881,7 +881,7 @@ PRSET atomicIRSET::Fill(size_t Start, size_t End, PRSET set) const
 	result.SetIndex (Table[x].GetIndex() );
   	result.SetAuxCount(Table[x].GetAuxCount());
 	// Get the Hit table
-	FCT Fctable = Table[x].GetHitTable();
+	auto Fctable = Table[x].GetHitTable();
 	//Fct.ConvertHits(mdtrec);
 	result.SetHitTable (Fctable -= (mdtrec.GetGlobalFileStart() + 
                 mdtrec.GetLocalRecordStart())); // See index.cxx
@@ -2559,9 +2559,9 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
       if (idx1 == idx2)
         {
-          const FCT myHits   = IresultPtr->GetHitTable();
+          const auto myHits   = IresultPtr->GetHitTable();
 
-          const FCT OtherHits = OtherIresultPtr->GetHitTable();
+          const auto OtherHits = OtherIresultPtr->GetHitTable();
 
           newHitTable.Clear();
 
@@ -2588,7 +2588,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                   LeftHits.push_back(entry);
                 }
 
-	      for (const auto& val: *OtherHits)
+	      for (const auto& val: OtherHits)
                 {
                   RightHits.push_back( val );
                 }
@@ -2774,7 +2774,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
               FC oldFc;
               FC oldMyFc;
 
-	      for (const auto& MyFc : *myHits)
+	      for (const auto& MyFc : myHits)
                 {
                   const FC PeerFC = Parent->GetPeerFc(MyFc);
 
@@ -2909,8 +2909,8 @@ OPOBJ *atomicIRSET::XPeer (const OPOBJ& Irset)
 #if 1 // Phase out FCLIST to be only internal to FCT !
 
     if (idx2 == idx1) {
-      const FCT myHits = IresultPtr->GetHitTable();
-      const FCT otherHits = OtherIresultPtr->GetHitTable();
+      const auto myHits = IresultPtr->GetHitTable();
+      const auto otherHits = OtherIresultPtr->GetHitTable();
 
       size_t matchCount = 0;
 
@@ -3183,7 +3183,9 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
 	  if (count > 1) {
 	    for (size_t i=0; i < TotalEntries; i++)
 	      {
-#if 1 /* new interface */
+#if _USE_HITTABLE /* new interface */
+		Table[i].MergeHitTableEntries();
+#elif 1
 		FCT hitTable = Table[i].GetHitTable();
 		hitTable.MergeEntries();
 		Table[i].SetHitTable(hitTable);
@@ -3254,8 +3256,8 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
       idx2 = OtherIresultPtr->GetIndex();
     }
     if (idx2 == idx1) {
-      const FCT   MyHits    = IresultPtr->GetHitTable();
-      const FCT   OtherHits = OtherIresultPtr->GetHitTable();
+      const auto   MyHits    = IresultPtr->GetHitTable();
+      const auto   OtherHits = OtherIresultPtr->GetHitTable();
 //      const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
 
       size_t          matchCount = 0;
@@ -3265,7 +3267,7 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
       FC              oldMyFc;
       FC              oldFc;
 
-      for (const FC& MyFc : *MyHits) {
+      for (const FC& MyFc : MyHits) {
 	for (const FC& otherFc : OtherHits) {
 	  FC Fc (otherFc);
 
@@ -3436,8 +3438,11 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
 	  if (count > 1) // Merge
 	    for (size_t i=0; i < TotalEntries; i++)
               {
-#if 1 /* new interface */
-		FCT hitTable = Table[i].GetHitTable();
+
+#if _USE_HITTABLE  /* new interface */
+		Table[i].MergeHitTableEntries();
+#elif 1
+		auto hitTable = Table[i].GetHitTable();
 		hitTable.MergeEntries();
 		Table[i].SetHitTable(hitTable);
 #else
@@ -3476,7 +3481,7 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
       for (size_t x=1; x <= TotalEntries; x++)
 	{
 	  GetEntry(x, &iresult);
-	  const FCT MyHits    = iresult.GetHitTable ();
+	  const auto MyHits    = iresult.GetHitTable ();
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
@@ -3587,7 +3592,7 @@ OPOBJ *atomicIRSET::XWithin(const STRING& FieldName)
 	{
 	  hits = 0;
 	  GetEntry(x, &iresult);
-	  const FCT MyHits    = iresult.GetHitTable ();
+	  const auto MyHits    = iresult.GetHitTable ();
 	  for (const FC& myFC : MyHits) {
 	      if (Parent->GetFieldCache()->ValidateInField(myFC, FieldName))
 		{
@@ -3694,7 +3699,7 @@ OPOBJ *atomicIRSET::Inclusive(const STRING& FieldName)
       for (size_t x=1; x <= TotalEntries; x++)
 	{
 	  GetEntry(x, &iresult);
-	  const FCT MyHits    = iresult.GetHitTable ();
+	  const auto MyHits    = iresult.GetHitTable ();
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
@@ -4092,8 +4097,8 @@ OPOBJ *atomicIRSET::CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T
       } else
 	Distance = (INT) Metric;
 
-      const FCT   MyHits    = IresultPtr->GetHitTable();
-      const FCT   OtherHits = OtherIresultPtr->GetHitTable();
+      const auto   MyHits    = IresultPtr->GetHitTable();
+      const auto   OtherHits = OtherIresultPtr->GetHitTable();
       const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
 
       size_t          matchCount = 0;
@@ -4227,8 +4232,8 @@ OPOBJ *atomicIRSET::_CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_
 		  if (Distance == 0 || Distance == 1) Distance = 2;
 		} else Distance = (INT)Metric;
 
-	      const FCT MyHits    = MyIresult.GetHitTable ();
-	      const FCT OtherHits = OtherIresult.GetHitTable();
+	      const auto MyHits    = MyIresult.GetHitTable ();
+	      const auto OtherHits = OtherIresult.GetHitTable();
 	      const bool IsSorted = MyIresult.HitTableIsSorted() && OtherIresult.HitTableIsSorted();
 
 	      size_t matchCount = 0;
@@ -4520,7 +4525,7 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
 	  if (Table[i].GetAuxCount() <= 1)
 	    continue; // Not interested
 
-	  const FCT Hits = Table[i].GetHitTable();
+	  const auto Hits = Table[i].GetHitTable();
 	  for (const FC& hit : Hits)
 	    {
 	      int distance;

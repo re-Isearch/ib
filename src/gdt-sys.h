@@ -98,18 +98,6 @@ typedef UINT8* PUINT8;
  
 #define MAX_UINT8  UINT8(-1)
 
-#ifdef __cplusplus
-#ifdef _NO_BOOL_TYPE
-typedef bool GDT_BOOLEAN;
-#else
-typedef bool GDT_BOOLEAN;
-#endif
-#else /* C does not have bool */
-typedef int  GDT_BOOLEAN;
-#endif
-
-const GDT_BOOLEAN GDT_FALSE = (1==0); 
-const GDT_BOOLEAN GDT_TRUE = (1==1);
 
 #ifndef HOST_MACHINE_64
 # error "HOST MACHINE NOT DEFINED??"
@@ -148,6 +136,38 @@ const GDT_BOOLEAN GDT_TRUE = (1==1);
 #ifdef __cplusplus
 }
 #endif
+
+
+#ifdef __cplusplus
+#include <limits>
+
+#ifndef UINT4_MAX
+# define UINT4_MAX (std::numeric_limits<UINT4>::max())
+#endif
+#ifndef UINT8_MAX
+# define UINT8_MAX (std::numeric_limits<UINT8>::max())
+#endif
+
+#else
+
+#define UINT4_MAX (UINT4)(-1)
+#define UINT8_max MAX_UINT8
+
+#endif
+
+#ifdef __cplusplus
+#ifdef _NO_BOOL_TYPE
+typedef bool GDT_BOOLEAN;
+#else
+typedef bool GDT_BOOLEAN;
+#endif
+#else /* C does not have bool */
+typedef int  GDT_BOOLEAN;
+#endif
+
+const GDT_BOOLEAN GDT_FALSE = (1==0);
+const GDT_BOOLEAN GDT_TRUE = (1==1);
+
 
 #endif /* GDT_SYS_H */
 

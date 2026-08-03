@@ -107,6 +107,15 @@ Tool:
 #endif
 #endif
 
+static unsigned long MaxResidentKiB(const struct rusage& usage)
+{
+#if defined(__APPLE__)
+  return static_cast<unsigned long>(usage.ru_maxrss / 1024);
+#else
+  return static_cast<unsigned long>(usage.ru_maxrss);
+#endif
+}
+
 class IDBC:public IDB
 {
   public:
@@ -1623,7 +1632,7 @@ rusage:
 		cpu_time > elapsed ? 100.0 :
 		100.0*cpu_time/elapsed ) << "%" << endl;
 	if (rusage.ru_maxrss)
-	  cerr << "Max resident size:      " << (rusage.ru_maxrss) << "k" << endl;
+	  cerr << "Max resident size:      " << MaxResidentKiB(rusage) << "k" << endl;
 	if (rusage.ru_ixrss)
 	  cerr << "Shared text memory:     " << (rusage.ru_ixrss)/ticks << "k" << endl;
 	if (rusage.ru_idrss)

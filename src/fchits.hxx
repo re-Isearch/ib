@@ -38,13 +38,42 @@ public:
   FCHITS() = default;
 
   explicit FCHITS(const FC& fc)
-    : Buffer(1, fc)
+    : Buffer(1, fc), Unique(true), Sorted(true)
   {
   }
+
 
   explicit FCHITS(const FCLIST& list);
 
   FCHITS& operator=(const FCLIST& list);
+  FCHITS& operator=(const FC& fc);
+
+  FCHITS& operator-=(GPTYPE offset)
+  {
+    if (offset == 0)
+      return *this;
+    for (FC& fc : Buffer)
+      fc -= offset;
+    /*
+     * Subtracting the same constant from every coordinate preserves:
+     *   - order
+     *   - equality
+     *   - normalization
+     */
+    return *this;
+  }
+
+  void SortByFc()
+  {
+    if (Sorted)
+      return;
+
+    std::sort(Buffer.begin(), Buffer.end(), FcLess());
+    Sorted = true;
+
+    // Sorting does not guarantee uniqueness.
+    Unique = std::adjacent_find(Buffer.begin(), Buffer.end()) == Buffer.end();
+  }
 
   void Assign(const FCLIST& list);
   void Assign(const FCT& table);
@@ -65,19 +94,29 @@ public:
   {
     // Retain capacity when this storage is uniquely owned.
     Buffer.clear();
-    Normalized = true;
+    Unique = true;
+    Sorted = true;
   }
 
   void AddEntryFast(const FC& hit)
   {
     if (!Buffer.empty())
-      {
-        if (Buffer.back() == hit)
-          return;
+    {
+      const FC& previous = Buffer.back();
 
-        if (FcLess()(hit, Buffer.back()))
-          Normalized = false;
+      if (previous == hit)
+        return;
+
+      if (FcLess()(hit, previous))
+      {
+        Sorted = false;
+        Unique = false; // uniqueness can no longer be proven cheaply
       }
+      else if (!Sorted)
+      {
+        Unique = false;
+      }
+    }
 
     Buffer.push_back(hit);
   }
@@ -85,34 +124,80 @@ public:
   void Append(const FCHITS& other) ;
   void Append(const FCT& other);
 
-  bool IsNormalized() const
+
+  // GetEntry(1) / SetEntry(1, fc)   legacy 1-based
+  // hits[0] / hits.At(0)            modern 0-based
+
+  // Coventional C/C++ style 0-based
+  const FC& operator[](size_t index) const { return Buffer[index];    }
+  const FC& At(size_t index) const         { return Buffer.at(index); }
+
+  // These are 1-based!
+  bool GetEntry(const size_t Index, FC* FcRecord) const
   {
-    return Normalized;
+    if (FcRecord == NULL || Index == 0 || Index > Buffer.size())
+      return false;
+
+    *FcRecord = Buffer[Index - 1];
+    return true;
   }
+  const FC& GetEntry(const size_t Index) const
+  {
+    if (Index != 0 && Index <= Buffer.size())
+      return Buffer[Index - 1];
+
+    // Legacy invalid-entry sentinel.
+    static const FC EmptyFc;
+    return EmptyFc;
+  }
+
+  bool SetEntry(size_t Index, const FC& fc)
+  {
+    if (Index == 0 || Index > Buffer.size())
+      return false;
+
+    Buffer[Index - 1] = fc;
+
+    // Replacement may alter ordering or introduce duplicates.
+    Sorted = false;
+    Unique = false;
+
+    return true;
+  }
+
+
+  bool IsSorted() const     { return Sorted; }
+  bool IsNormalized() const { return Sorted && Unique; }
 
   void Normalize()
   {
-    if (Normalized)
-      return;
+    if (!Sorted)
+     {
+        // We use std::sort rather than a custom radix sort  because even
+        // with 65k hits (an absurdly high umber of hits):
+        // 65,536 × log2(65,536) ≈ 1,048,576 comparisons
+        // which is comparatively small on modern hardware
+        std::sort(Buffer.begin(), Buffer.end(), FcLess());
+        Sorted = true;
+    }
 
-    // We use std::sort rather than a custom radix sort  because even
-    // with 65k hits (an absurdly high umber of hits):
-    // 65,536 × log2(65,536) ≈ 1,048,576 comparisons
-    // which is comparatively small on modern hardware
-    std::sort(Buffer.begin(), Buffer.end(), FcLess());
+  if (!Unique)
+    {
+      Buffer.erase(
+          std::unique(Buffer.begin(), Buffer.end()),
+          Buffer.end());
 
-    Buffer.erase(
-        std::unique(Buffer.begin(), Buffer.end()),
-        Buffer.end());
-
-    Normalized = true;
+      Unique = true;
+    }
   }
+
+  void MergeEntries() { Normalize(); }
 
   // Both collections must already be normalized.
   void MergeSortedUnique(const FCHITS& other)
   {
-    assert(Normalized);
-    assert(other.Normalized);
+    assert(IsNormalized());
+    assert(other.IsNormalized());
 
     container_type merged;
     merged.reserve(Buffer.size() + other.Buffer.size());
@@ -148,7 +233,8 @@ public:
       }
 
     Buffer.swap(merged);
-    Normalized = true;
+    Sorted = true;
+    Unique = true;
   }
 
   size_t GetTotalEntries() const
@@ -170,14 +256,15 @@ public:
   const_iterator end() const   { return Buffer.end(); }
 
   void Write(FILE* fp) const;
+  bool Read( FILE* fp);
 
 private:
   void RecalculateState();
 
   container_type Buffer;
 
-  // True means both sorted and duplicate-free.
-  bool Normalized = true;
+  bool Unique = true;
+  bool Sorted = true; 
 };
 
 
@@ -241,6 +328,12 @@ public:
     p_ = std::make_shared<FCHITS>(list);
     return *this;
   }
+  HITTABLE& operator=(const FC& fc)
+  {
+    FCHITS& hits = Writable();
+    hits = fc;
+    return *this;
+  }
 
   // Bridge FCT
   HITTABLE& operator=(const FCT& table)
@@ -250,6 +343,33 @@ public:
     p_ = std::move(replacement);
     return *this;
   }
+
+  HITTABLE& operator-=(GPTYPE offset)
+  {
+    if (offset != 0 && !IsEmpty())
+      Writable() -= offset;
+
+    return *this;
+  }
+
+  bool GetEntry(const size_t Index, FC* FcRecord) const
+  {
+    return Readable().GetEntry(Index, FcRecord);
+  }
+
+
+  const FC& GetEntry(const size_t Index) const
+  {
+    return Readable().GetEntry(Index);
+  }
+
+  HITTABLE& SortByFc()
+  {
+    if (!Readable().IsSorted())
+      Writable().SortByFc();
+    return *this;
+  }
+
   void Assign(const FCT& table);
 
   void CopyTo(FCLIST* list) const
@@ -359,6 +479,9 @@ public:
       Writable().Normalize();
   }
 
+  void MergeEntries() { Normalize(); }
+
+
   void MergeSortedUnique(const HITTABLE& other)
   {
     Normalize();
@@ -380,6 +503,23 @@ public:
   void Write(FILE* fp) const
   {
     Readable().Write(fp);
+  }
+
+  bool Read(FILE* fp)
+  {
+    auto replacement = std::make_shared<FCHITS>();
+
+    if (!replacement->Read(fp))
+      return false;
+
+    p_ = std::move(replacement);
+    return true;
+  }
+
+
+  bool IsSorted() const
+  {
+    return Readable().IsNormalized();
   }
 
 private:

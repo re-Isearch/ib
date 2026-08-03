@@ -8,10 +8,20 @@ Description:	Class RESULT - Search Result
 #ifndef RESULT_HXX
 #define RESULT_HXX
 
+
+#include "defs.hxx"
 #include "date.hxx"
 #include "lang-codes.hxx"
-#include "fct.hxx"
 #include "pathname.hxx"
+
+
+#if _USE_HITTABLE
+# include "fchits.hxx"
+#else
+#include "fct.hxx"
+#endif
+
+
 
 class DOCTYPE;
 class MDTREC;
@@ -106,16 +116,24 @@ public:
   void       SetDateExpires(const SRCH_DATE& NewDate) { DateExpires = NewDate; }
   SRCH_DATE  GetDateExpires() const                   { return DateExpires;  }
 
-  void   SetAuxCount(UINT newCount) { AuxCount = newCount; }
-  UINT   GetAuxCount() const        { return AuxCount;     }
+  void       SetAuxCount(UINT newCount)               { AuxCount = newCount; }
+  UINT       GetAuxCount() const                      { return AuxCount;     }
 
-  size_t GetHitTotal() const { return HitTable.GetTotalEntries(); }
-  int    GetRefcount_() const { return HitTable.Refcount_(); }
-
+  size_t     GetHitTotal() const        { return HitTable.GetTotalEntries(); }
+#if _USE_HITTABLE
+  void   SetHitTable(const HITTABLE& NewHitTable)    { (HitTable = NewHitTable).SortByFc(); }
+#else
+  int        GetRefcount_() const       { return HitTable.Refcount_(); }
   void   SetHitTable(const FCT& NewHitTable)    { (HitTable = NewHitTable).SortByFc(); }
 //void   SetHitTable(const FCLIST& NewHitTable) { HitTable = NewHitTable; }
+#endif
 
-  FCT GetHitTable() const                       { return HitTable; }
+
+#if _USE_HITTABLE
+  HITTABLE GetHitTable() const                       { return HitTable; }
+#else
+  FCT      GetHitTable() const                       { return HitTable; }
+#endif
 
   // Dump a XML hit table
   STRING XMLHitTable() const;
@@ -192,7 +210,11 @@ private:
   DOUBLE         Score;
   UINT           AuxCount;
   _ib_category_t Category;
+#if _USE_HITTABLE
+  HITTABLE       HitTable;
+#else
   FCT            HitTable;
+#endif
 };
 
 extern const RESULT& NulResult;

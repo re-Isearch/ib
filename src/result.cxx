@@ -272,8 +272,8 @@ STRING RESULT::GetXMLHighlightRecordFormat(int pageno, off_t offset) const
 
 FC RESULT::GetBestContextHit() const
 {
-  FCT::const_iterator current = HitTable.begin();
-  const FCT::const_iterator end = HitTable.end();
+  auto current = HitTable.begin();
+  const auto  end = HitTable.end();
 
   if (current == end)
     return FC();
@@ -281,7 +281,7 @@ FC RESULT::GetBestContextHit() const
   FC best = *current;
   GPTYPE metric = 200;
 
-  FCT::const_iterator next = current;
+  auto next = current;
   ++next;
 
   while (next != end)

@@ -33,6 +33,60 @@ void FCHITS::Write(FILE* fp) const
     hit.Write(fp);
 }
 
+bool FCHITS::Read(FILE* fp)
+{
+  if (fp == NULL)
+    return false;
+
+  const obj_t obj = getObjID(fp);
+  if (obj != objHITS)
+    {
+      PushBackObjID(obj, fp);
+      return false;
+    }
+
+  UINT4 newTotal = 0;
+
+  ::Read(&newTotal, fp) ;
+  // if (newTotal == 0) return false;
+
+  container_type replacement;
+  replacement.reserve(static_cast<size_t>(newTotal));
+
+  bool sorted = true;
+  bool unique = true;
+  const FcLess less;
+
+  for (UINT4 i = 0; i < newTotal; ++i)
+    {
+      FC fc;
+
+      if (!fc.Read(fp))
+        return false;
+
+      if (!replacement.empty())
+        {
+          const FC& previous = replacement.back();
+
+          if (unique && previous == fc)
+	    unique = false;
+	  if (sorted && less(fc, previous)) {
+	    sorted = false;
+	    unique = false;
+	  }
+        }
+
+      // Preserve the serialized data exactly, including duplicates.
+      replacement.push_back(fc);
+    }
+
+  Buffer.swap(replacement);
+  Sorted = sorted;
+  Unique = unique;
+
+  return true;
+}
+
 
 FCHITS::FCHITS(const FCLIST& list)
 {
@@ -52,7 +106,8 @@ void FCHITS::Assign(const FCLIST& list)
   container_type replacement;
   replacement.reserve(list.GetTotalEntries());
 
-  bool normalized = true;
+  bool sorted = true;
+  bool unique = true;
   const FcLess less;
 
   for (const FC& fc : list)
@@ -61,8 +116,12 @@ void FCHITS::Assign(const FCLIST& list)
         {
           const FC& previous = replacement.back();
 
-          if (previous == fc || less(fc, previous))
-            normalized = false;
+          if (unique && previous == fc)
+	    unique = false;
+	  if (sorted && less(fc, previous)) {
+            sorted = false;
+	    unique = false; // Can't tell
+	  }
         }
 
       // Preserve the FCLIST exactly. AddEntryFast() intentionally
@@ -71,7 +130,8 @@ void FCHITS::Assign(const FCLIST& list)
     }
 
   Buffer.swap(replacement);
-  Normalized = normalized;
+  Sorted = sorted;
+  Unique = unique;
 }
 
 
@@ -117,7 +177,8 @@ void FCHITS::Append(const FCT& other)
 
 void FCHITS::RecalculateState()
 {
-  Normalized = true;
+  Sorted = true;
+  Unique = true;
 
   if (Buffer.size() < 2)
     return;
@@ -131,7 +192,8 @@ void FCHITS::RecalculateState()
 
       if (previous == current || less(current, previous))
         {
-          Normalized = false;
+	  Sorted = false;
+	  Unique = false;
           return;
         }
     }
@@ -150,3 +212,12 @@ void FCHITS::Assign(const FCT& table)
     RecalculateState(); 
   }   
 
+
+FCHITS& FCHITS::operator=(const FC& fc)
+{
+  Buffer.clear();       // Retain existing capacity
+  Buffer.push_back(fc);
+  Sorted = true;
+  Unique = true;
+  return *this;
+}
