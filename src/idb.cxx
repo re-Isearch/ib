@@ -1819,6 +1819,23 @@ FC IDB::GetNextFC (const GPTYPE& HitGp, const STRING& fieldname, size_t offset)
 
 #if 1
 
+
+class PEER_RESOLVER
+{
+public:
+  explicit PEER_RESOLVER(IDB& db);
+  ~PEER_RESOLVER();
+
+  FC Resolve(const FC& hit);
+
+private:
+  IDB& Db;
+  size_t LastPeerField;
+
+  std::vector<FILE*> Files;
+};
+
+
 FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
 {
   const size_t TotalEntries = MainDfdt->GetTotalEntries();
@@ -1826,6 +1843,8 @@ FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
   STRING PeerFieldName;
   size_t PeerCount = 0;
   bool   haveCount = false;
+
+cerr << "FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr) " << endl;
 
   if (lastPeerField < 1 || lastPeerField > TotalEntries)
     if ((lastPeerField = TotalEntries / 3) < 1) lastPeerField = 1;

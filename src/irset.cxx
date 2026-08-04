@@ -1299,7 +1299,7 @@ OPOBJ *atomicIRSET::Not (const STRING& FieldName)
                     continue; // Don't bother with deleted records
                 }
              // Now look for the hits
-              FCT fct ( Parent->GetFieldFCT (mdtrec, FieldName) );
+              FCT fct ( Parent->GetFieldFCT (mdtrec, FieldName) ); // Fields use FCT.. They are NOT hits.. 
 
               if (! fct.IsEmpty() )
                 {
@@ -2902,7 +2902,7 @@ OPOBJ *atomicIRSET::XPeer (const OPOBJ& Irset)
   IRESULT        *OtherTable = ((const atomicIRSET *) &OtherIrset)->Table;
   IRESULT        *IresultPtr = NULL;
   IRESULT        *OtherIresultPtr = NULL;
-  FCT             newHitTable;
+  hit_table_type  newHitTable;
 
   while (pos1 <= TotalEntries && pos2 <= OtherTotal) {
     if (pos1 != opos1) {
@@ -2916,7 +2916,7 @@ OPOBJ *atomicIRSET::XPeer (const OPOBJ& Irset)
       idx2 = OtherIresultPtr->GetIndex();
     }
 
-#if 1 // Phase out FCLIST to be only internal to FCT !
+#if 1 // Phase out FCLIST 
 
     if (idx2 == idx1) {
       const auto myHits = IresultPtr->GetHitTable();
@@ -3130,7 +3130,7 @@ OPOBJ *atomicIRSET::Sibling ( )
 //
 // NOTE: Idea: Support FieldName globing?
 //
-
+// AND:field
 OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t compFunc)
 {
   if (Irset.IsEmpty() || IsEmpty())
@@ -3252,7 +3252,7 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
   IRESULT        *OtherTable = ((const atomicIRSET *) &OtherIrset)->Table;
   IRESULT        *IresultPtr = NULL;
   IRESULT        *OtherIresultPtr = NULL;
-  FCT             newHitTable;
+  hit_table_type  newHitTable;
 
   while (pos1 <= TotalEntries && pos2 <= OtherTotal) {
     if (pos1 != opos1) {
@@ -4081,7 +4081,7 @@ OPOBJ *atomicIRSET::CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T
   IRESULT        *OtherTable = ((const atomicIRSET *) &OtherIrset)->Table;
   IRESULT        *IresultPtr = NULL;
   IRESULT        *OtherIresultPtr = NULL;
-  FCT             newHitTable;
+  hit_table_type  newHitTable;
   MDTREC          mdtrec;
   INT             Distance;
 
@@ -4203,7 +4203,7 @@ OPOBJ *atomicIRSET::_CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_
   MDTREC mdtrec;
   INT Distance;
 #if STORE_PROX
-  FCT newHitTable;
+  hit_table_type newHitTable;
 #endif
   if (TotalEntries == 0 || OtherSetTotalEntries == 0)
     {

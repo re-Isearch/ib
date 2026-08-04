@@ -400,6 +400,7 @@ static void HelpUsage(const char *progname)
         "                   //   AND:field := Elements in the same node instance of field" << endl <<
 	"                   //   BEFORE:field := like AND:field but before" << endl <<
 	"                   //   AFTER:field := like AND:field but after" << endl << 
+	"                   //   NEIGHBOR := A character prox variant (x%)" << endl <<
         "                   //   FOLLOWS, PRECEDES := Within some ordered elements of one another" << endl <<
 	"                   //   FAR   := Elements a \"good distance\" away from each other" << endl <<
 	"                   //   NEAR  := Elements \"near\" one another." << endl <<
