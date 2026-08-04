@@ -12,6 +12,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include "mmap.hxx"
 #include "idbobj.hxx"
 
+
 class FCACHE {
 public:
    FCACHE(const PIDBOBJ parent);
@@ -65,7 +66,7 @@ private:
 #endif
    FILE       *Fp;		// Stream
    bool Disk;     	// Use disk or memory?
-   FC          Range;    	// Start and End points
+//   FC          Range;    	// Start and End points
    size_t      FieldTotal;	// How many Fields?
    STRING      FieldName;	// The name of the loaded field
    PIDBOBJ     Parent;  	// Parent class

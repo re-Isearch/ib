@@ -9,6 +9,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include "fcache.hxx"
 
 
+
 static inline GPTYPE GP(const GPTYPE *ptr, int y = 0)
 {
 # ifdef O_BUILD_IB64

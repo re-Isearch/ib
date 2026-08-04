@@ -11,6 +11,34 @@ Description:	Class DFD - Data Field Definition
 #pragma ident  "@(#)dfd.cxx"
 
 
+using DFD_FC_LAYOUT_STAMP = uint64_t;
+
+static constexpr uint64_t FIELD_TOTAL_MASK = (UINT64_C(1) << 56) - 1;
+static constexpr unsigned LAYOUT_SHIFT = 56;
+
+
+static constexpr DFD_FC_LAYOUT_STAMP
+MakeFcLayoutStamp(DFD_FC_LAYOUT layout, uint64_t fieldTotal)
+{
+  return
+      (static_cast<uint64_t>(layout) << LAYOUT_SHIFT) |
+      (fieldTotal & FIELD_TOTAL_MASK);
+}
+
+static constexpr DFD_FC_LAYOUT
+GetFcLayout(DFD_FC_LAYOUT_STAMP stamp)
+{
+  return static_cast<DFD_FC_LAYOUT>(stamp >> LAYOUT_SHIFT);
+}
+
+static constexpr uint64_t
+GetLayoutFieldTotal(DFD_FC_LAYOUT_STAMP stamp)
+{
+  return stamp & FIELD_TOTAL_MASK;
+}
+
+
+
 DFD::DFD()
 {
   FileNumber = 0;
@@ -95,3 +123,23 @@ bool  DFD::checkFieldName(const STRING& Fieldname) const
 DFD::~DFD()
 {
 }
+
+
+/*
+
+bool disjoint = true;
+
+for (size_t i = 1; i < count; ++i)
+{
+  const FC previous = GetRecordFc(i - 1);
+  const FC current  = GetRecordFc(i);
+
+  if (current.GetFieldStart() <=
+      previous.GetFieldEnd())
+  {
+    disjoint = false;
+    break;
+  }
+}
+
+*/

@@ -222,6 +222,8 @@ public:
 
   FC GetPeerFc (const GPTYPE& HitGp, STRING *NodeNamePtr = NULL);
   FC GetPeerFc (const FC& HitFc,     STRING *NodeNamePtr = NULL);
+  // A variant to look in a specific field
+  FC GetPeerFc (const FC& HitFc,     const STRING& Fieldname);
 
   TREENODE GetPeerNode (const GPTYPE& HitGp) {
      STRING name;

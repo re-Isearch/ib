@@ -1817,9 +1817,8 @@ FC IDB::GetNextFC (const GPTYPE& HitGp, const STRING& fieldname, size_t offset)
 // or path (such as XQuery) of where the HitGp is located..
 //
 
-#if 1
 
-
+// NOT USED YET: Part of a future optimization
 class PEER_RESOLVER
 {
 public:
@@ -1843,8 +1842,6 @@ FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
   STRING PeerFieldName;
   size_t PeerCount = 0;
   bool   haveCount = false;
-
-cerr << "FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr) " << endl;
 
   if (lastPeerField < 1 || lastPeerField > TotalEntries)
     if ((lastPeerField = TotalEntries / 3) < 1) lastPeerField = 1;
@@ -1916,188 +1913,9 @@ cerr << "FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr) " << endl;
 }
 
 
-
-#elif 0
-
-FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
-{
-  const size_t TotalEntries = MainDfdt->GetTotalEntries();
-  FC     PeerFC;
-  STRING PeerFieldName;
-  size_t PeerCount = 0;
-  bool   haveCount = false;
-
-  if (lastPeerField < 1 || lastPeerField > TotalEntries)
-    if ((lastPeerField = TotalEntries / 3) < 1) lastPeerField = 1;
-
-  const size_t start = lastPeerField - 1;
-  const size_t end   = TotalEntries + lastPeerField - 1;
-
-  for (size_t i = start; i < end; i++)
-    {
-      DFD dfd;
-      size_t x = (i % TotalEntries) + 1;
-      MainDfdt->GetEntry(x, &dfd);
-
-      STRING Fn, fieldname(dfd.GetFieldName());
-      DfdtGetFileName(fieldname, &Fn);
-
-      size_t fieldNameCount = fieldname.Count();
-      if (fieldNameCount > 0 && PeerCount == 0)
-        haveCount = true;
-      else if (haveCount && fieldNameCount == 0)
-        continue;
-      else if (PeerCount && !fieldname.Contains(PeerFieldName))
-        continue;
-
-      PFILE Fp = ffopen(Fn, "rb");
-      if (!Fp)
-        continue;
-
-      // Record count for this field file.
-      const off_t fsize = ffsize(Fn, "rb"); // avoid fstat per call
-      const size_t nRecords = fsize / sizeof(FC);
-      if (nRecords == 0)
-        continue;
-
-      // --- Binary search for rightmost record with GetFieldStart() < HitGp ---
-      size_t lo = 0, hi = nRecords; // [lo, hi)
-      FC mid_fc;
-
-      while (lo < hi)
-        {
-          const size_t mid = lo + (hi - lo) / 2;
-          fseek(Fp, (off_t)mid * sizeof(FC), SEEK_SET);
-          mid_fc.Read(Fp);
-
-          if (mid_fc.GetFieldStart() < HitGp)
-            lo = mid + 1;
-          else
-            hi = mid;
-        }
-      // lo is now the first record whose start >= HitGp; step back one
-      // to land where the original backward scan used to stop.
-      size_t idx = (lo > 0) ? lo - 1 : 0;
-
-      // --- Forward scan from idx, same containment logic as before ---
-      fseek(Fp, (off_t)idx * sizeof(FC), SEEK_SET);
-      FC Fc2;
-      if (Fc2.Read(Fp))
-        PeerFC = Fc2;
-
-      while (Fc2.Read(Fp))
-        {
-          if (Fc2.GetFieldEnd() > HitGp)
-            break;
-          if (Fc2.GetFieldStart() >= PeerFC.GetFieldStart())
-            {
-              PeerFC = Fc2;
-              PeerCount = (PeerFieldName = fieldname).Count();
-              lastPeerField = x;
-            }
-        }
-       ffclose(Fp);
-    }
-
-  if (NodeNamePtr)
-    *NodeNamePtr = PeerFieldName;
-  return PeerFC;
-}
-
-
-
-
-#else
-
-FC IDB::GetPeerFc (const GPTYPE& HitGp, STRING *NodeNamePtr)
-{
-  const size_t TotalEntries = MainDfdt->GetTotalEntries ();
-  FC           PeerFC;
-  STRING       PeerFieldName;
-  size_t       looks = 0;
-  size_t       PeerCount = 0;
-  size_t       fieldNameCount = 0;
-  bool  haveCount = false;
-
-  // We cache lastPeerField to speed up a bit
-  if (lastPeerField <1 || lastPeerField > TotalEntries)
-    if ((lastPeerField = TotalEntries/3) < 1) lastPeerField = 1;
-
-//   lastPeerField = 1; // Just for debugging!!!! Remove this later...
-
-  const size_t start = lastPeerField-1;
-  const size_t end   = TotalEntries+lastPeerField-1;
-
-  for (size_t i = start; i < end; i++)
-    {
-      DFD    dfd;
-      size_t x;
-
-      x =  (i % TotalEntries)+1;
- 
-
-      MainDfdt->GetEntry (x, &dfd);
-
-      STRING Fn, fieldname ( dfd.GetFieldName () );
-      DfdtGetFileName (fieldname, &Fn);
-
-      if ((fieldNameCount = fieldname.Count()) > 0 && PeerCount == 0)
-        haveCount = true;
-      else if (haveCount && fieldNameCount == 0)
-        continue;
-      else if (PeerCount && !fieldname.Contains(PeerFieldName))
-        continue;
-
-      PFILE Fp = ffopen (Fn, "rb");
-      if (Fp)
-	{
-	  looks++;
-	  if (GetFieldCache()->ValidateInField (HitGp, Fp))
-	    {
-	      off_t Pos = ftell(Fp);
-	      FC Fc2;
-	      // work backwards to find first pair
-	      while (--Pos >= 0)
-		{
-		  if (-1 != fseek (Fp, Pos * sizeof (FC), SEEK_SET))
-		    {
-		      Fc2.Read (Fp);
-		      if (Fc2.GetFieldStart() < HitGp)
-			break;
-		    }
-		}
-	      if (Pos >= 0)
-		Fc2.Read (Fp);
-	      PeerFC = Fc2;
-	      while (Fc2.Read(Fp))
-		{
-		  if (Fc2.GetFieldEnd() > HitGp)
-		    break;
-		  if (Fc2.GetFieldStart() >=  PeerFC.GetFieldStart() )
-		    {
-		      PeerFC = Fc2;
-		      PeerCount = (PeerFieldName = fieldname).Count();
-		      lastPeerField = x;
-		    }
-		}
-	    }
-	  ffclose(Fn);
-	}
-    }				// for()
-  if (NodeNamePtr)
-    *NodeNamePtr = PeerFieldName;
-  return PeerFC;
-}
-#endif
-
-
 // This code does the heavy lifting to figure out what is the name
 // or path (such as XQuery) of where the range of bytes defined by HitFc is located..
 //
-
-#if 1
-
-
 
 // Mirrors OnDiskFcZoneSearch's exact semantics: returns p+1 on a
 // containing zone found, 0 if not found. Caller must subtract 1
@@ -2124,6 +1942,8 @@ static off_t InMemoryFcZoneSearch(FCACHE *Cache, const FC& HitFc, size_t nRecord
 
   return 0; // NOT FOUND
 }
+
+
 
 FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
 {
@@ -2216,106 +2036,61 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
 }
 
 
-
-#else
-
-FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
+FC IDB::GetPeerFc(const FC& HitFc, const STRING& FieldName)
 {
-  const size_t TotalEntries = MainDfdt->GetTotalEntries ();
-  FC           PeerFC = HitFc;
-  bool  firstTime = true;
-  STRING       PeerFieldName;
-  size_t       looks = 0;
-  size_t       PeerCount = 0;
-  size_t       fieldNameCount = 0;
-  bool  haveCount = false;
+  FCACHE *PFCache = GetPeerFieldCache();
 
-  if (lastPeerField <1 || lastPeerField > TotalEntries)
-    if ((lastPeerField = TotalEntries/3) < 1) lastPeerField = 1;
+  if (PFCache == nullptr)
+    return HitFc;
 
-  const size_t start = lastPeerField-1;
-  const size_t end   = TotalEntries+lastPeerField-1;
+  const size_t nRecords = PFCache->LoadFieldCache(FieldName, false);
 
-  for (size_t i = start; i < end; i++)
+  if (nRecords == 0)
+    return HitFc;
+
+  const size_t PosFound = InMemoryFcZoneSearch(PFCache, HitFc, nRecords);
+
+  if (PosFound == 0) return HitFc;
+
+  size_t Pos = PosFound - 1; // Convert 1-based result to record index.
+  FC Fc2;
+
+  /*
+   * Move to the beginning of the contiguous run of FCs
+   * containing HitFc.
+   */
+  while (Pos > 0)
     {
-      DFD    dfd;
-      size_t x;
+      Fc2 = PFCache->GetRecordFc(Pos - 1);
 
-      x =  (i % TotalEntries)+1;
-      MainDfdt->GetEntry ( x, &dfd);
+      if (!Fc2.Contains(HitFc))
+        break;
 
-/*
-      if (!dfd.GetFieldType().IsText())
-	continue;
-*/
+      --Pos;
+    }
 
-      STRING Fn, fieldname ( dfd.GetFieldName () );
-      DfdtGetFileName (fieldname, &Fn);
+  FC PeerFC;
+  bool found = false;
 
-      if ((fieldNameCount = fieldname.Count()) > 0 && PeerCount == 0)
-	haveCount = true;
-      else if (haveCount && fieldNameCount == 0)
-	continue;
-      else if (PeerCount && !fieldname.Contains(PeerFieldName))
-	continue;
+  for (size_t j = Pos; j < nRecords; ++j)
+    {
+      Fc2 = PFCache->GetRecordFc(j);
 
-      PFILE Fp = ffopen (Fn, "rb");
-      if (Fp)
-	{
-	  looks++;
-	  off_t Pos = OnDiskFcZoneSearch(HitFc, Fp);
-	  if (Pos)
-	    {
-	      FC Fc2;
-	      // work backwards to find first pair
-	      while (--Pos >= 0)
-		{
-		  if (-1 != fseek (Fp, Pos * sizeof (FC), SEEK_SET))
-		    {
-		      Fc2.Read (Fp);
-		      if (!Fc2.Contains(HitFc))
-			{
-			  break;
-			}
-		    }
-		}
-	      if (Pos >= 0)
-		{
-		  Fc2.Read (Fp);
-		}
+      if (!Fc2.Contains(HitFc))
+        break;
 
-	      if (firstTime || (PeerFC.Contains(Fc2) && Fc2.Contains(HitFc)))
-		{
-		  firstTime = false;
-		  if ((PeerFC != Fc2) || (fieldname.GetLength() > PeerFieldName.GetLength()) )
-		     {
-		       lastPeerField = x;
-		       PeerCount = (PeerFieldName = fieldname).Count();
-		     }
-		  PeerFC = Fc2;
-		}
-
-	      while (Fc2.Read(Fp))
-		{
-		  if (!Fc2.Contains(HitFc))
-		    break;
-		  if (PeerFC.Contains(Fc2))
-		    {
-		      PeerFC = Fc2;
-		      PeerCount = (PeerFieldName = fieldname).Count();
-		      lastPeerField = x;
-		    }
-		}
-	    }
-	  ffclose(Fp);
-	}
-    }				// for()
-//cerr << "(2)Looks = " << looks << "/" << TotalEntries << "  " << PeerFieldName << " x=" << lastPeerField << endl;
-  if (NodeNamePtr)
-    *NodeNamePtr = PeerFieldName;
-  return PeerFC;
+      /*
+       * First containing FC becomes the candidate.
+       * Subsequently retain a smaller nested container.
+       */
+      if (!found || PeerFC.Contains(Fc2))
+        {
+          PeerFC = Fc2;
+          found = true;
+        }
+    }
+  return found ? PeerFC : HitFc;
 }
-#endif
 
 
 #if 0

@@ -304,7 +304,7 @@ public:
   ~atomicIRSET();
 private:
   typedef  bool (*peer_t) (const FC&, const FC&);
-  OPOBJ   *Peer (const OPOBJ& OtherIrset, peer_t Func);
+  OPOBJ   *Peer (const OPOBJ& OtherIrset, peer_t Func, const STRING& Fieldname = NulString);
   OPOBJ   *Within(const OPOBJ& OtherIrset, const STRING& Fieldname,  peer_t Func);
   bool FieldExists(const STRING& FieldName);
 //  void     Clear();

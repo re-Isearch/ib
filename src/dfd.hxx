@@ -10,6 +10,19 @@ Description:	Class DFD - Data Field Definition
 
 #include "attrlist.hxx"
 
+
+// Describes how coordinates within one physical field index are arranged.
+//
+// Example:
+//   <ROOT><A>one<A>two<A>three</A></A></A></ROOT>
+//
+// The unqualified A field contains nested coordinate ranges.
+// The fully qualified ROOT/A/A/A field contains disjoint ranges.
+//
+// Used to select optimized field/proximity algorithms.
+enum class DFD_FC_LAYOUT : uint8_t { Unknown     = 0, Disjoint    = 1, Nested      = 2, Overlapping = 3 };
+
+
 class DFD {
 public:
   DFD();
@@ -75,21 +88,29 @@ public:
   }
 #endif
 
-  void        SetFileNumber(const INT newFileNumber) {
+  void                SetFileNumber(const INT newFileNumber) {
     FileNumber = newFileNumber;
   }
-  INT         GetFileNumber() const { return FileNumber; }
+  INT                 GetFileNumber() const { return FileNumber; }
 
-  void        SetAttributes(const ATTRLIST& newAttributes) {
+  void                SetAttributes(const ATTRLIST& newAttributes) {
     Attributes = newAttributes;
   }
-  void            GetAttributes(ATTRLIST *Ptr) const { *Ptr = Attributes; }
-  const ATTRLIST *GetAttributesPtr() const { return &Attributes; }
+  void                GetAttributes(ATTRLIST *Ptr) const { *Ptr = Attributes; }
+  const ATTRLIST     *GetAttributesPtr() const { return &Attributes; }
+
+  void                SetFcLayout(DFD_FC_LAYOUT value) { FcLayout = value; }
+  DFD_FC_LAYOUT       GetFcLayout () const             { return FcLayout;  }
 
 ~DFD();
 private:
+  // Persistent (created during indexing)
   uint16_t    FileNumber;
   ATTRLIST    Attributes;
+
+  // Runtime-derived state; not part of the variable-length DFD dump.
+  DFD_FC_LAYOUT FcLayout = DFD_FC_LAYOUT::Unknown;
+
 };
 
 typedef DFD* PDFD;

@@ -193,8 +193,12 @@ public:
   }
   virtual FC GetPeerFc (const FC& HitFc,     STRING *NodeNamePtr = NULL) {
     if (NodeNamePtr) *NodeNamePtr = "???";
-    return FC(0,0);
+    return HitFc;
   }
+ virtual FC GetPeerFc (const FC& HitFc, const STRING& Fieldname) {
+    return HitFc;
+  }
+
 #if 0
   virtual int GetNodeList (const GPTYPE& HitGp, TREENODELIST *NodeList) {
     return GetNodeList(FC(HitGp,HitGp), NodeList);

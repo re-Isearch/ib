@@ -759,7 +759,6 @@ void atomicIRSET::AddEntry (const IRESULT& ResultRecord, const bool AddHitCounts
   // SANITY CHECK: Enough memory?
   if (TotalEntries < MaxEntries) {
     Table[TotalEntries++] = ResultRecord;
-cerr << "@@@@@ HERE I AM: AddRecord()  SCORE = " << Table[TotalEntries-1].GetScore() << endl;
   }
 }
 
@@ -2441,7 +2440,11 @@ OPOBJ *atomicIRSET::AfterPeer (const OPOBJ& Irset)
   return After(Irset);
 }
 
-OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
+
+// This is where the heavy lifting of PEER class functions are
+// Handles the magic for both AND:field and PEER as well as ordered versions thereof
+// (the compFunc handles the order)
+OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fieldname)
 {
   if (Parent && Parent != Irset.GetParent())
     {
@@ -2458,6 +2461,16 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
       return this;
     }
+
+  // When we have no fields we call the GetPeerFc that finds the field 
+  // When we have a field we call the GetPeerFc that knows the field..
+  const bool allFields = Fieldname.IsEmpty() || Fieldname == "*";
+  const auto ResolveContainer = [&](const FC& hit) -> FC
+    {
+      return allFields
+        ? Parent->GetPeerFc(hit)
+        : Parent->GetPeerFc(hit, Fieldname);
+    };
 
   atomicIRSET OtherIrset(Irset);
 
@@ -2598,7 +2611,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
                   PEER_HIT entry;
 
                   entry.Hit = hit;
-                  entry.Container = Parent->GetPeerFc(hit);
+                  entry.Container = ResolveContainer(hit); // was Parent->GetPeerFc(hit);
 
                   LeftHits.push_back(entry);
                 }
@@ -2791,7 +2804,7 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc)
 
 	      for (const auto& MyFc : myHits)
                 {
-                  const FC PeerFC = Parent->GetPeerFc(MyFc);
+                  const FC PeerFC = ResolveContainer(MyFc); // was Parent->GetPeerFc(MyFc);
 
 		  for (const auto& fc : OtherHits)
                     {
@@ -3131,6 +3144,7 @@ OPOBJ *atomicIRSET::Sibling ( )
 // NOTE: Idea: Support FieldName globing?
 //
 // AND:field
+
 OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t compFunc)
 {
   if (Irset.IsEmpty() || IsEmpty())
@@ -3222,6 +3236,10 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
       return this;
     }
 
+#if 1
+  // We now let the common Peer method do the work
+  return Peer(Irset, compFunc, FieldName) ;
+#else
   atomicIRSET OtherIrset (Irset);
 
   if (OtherIrset.GetSort() != ByIndex)
@@ -3332,6 +3350,7 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
   MaxScore     = newMaxScore;
   HitTotal     = 0;
   return this;
+#endif
 }
 
 OPOBJ *atomicIRSET::Within(const DATERANGE& Daterange)
