@@ -414,7 +414,7 @@ static void HelpUsage(const char *progname)
         "                   //   WITHIN[:daterange] := Only records with record dates within the range" << endl <<
         "                   //   WITHKEY:pattern    := Only records whose key match pattern" << endl <<
         "                   //   SIBLING            := only hits in the same container" << endl <<
-	"                   //   INSIDE[:field]     := Hits are limited to those in the specified field" << endl <<
+//	"                   //   INSIDE[:field]     := Hits are limited to those in the specified field" << endl <<
 	"                   //   XWITHIN[:field]    := Absolutely NOT in the specified field" << endl << endl << 
         "                   //   FILE:pattern       := Records whose local file path match pattern" << endl <<
 #if 0

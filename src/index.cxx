@@ -3948,7 +3948,8 @@ PIRSET INDEX::Search (const QUERY& Query)
 		      SwapOp(Op1,Op2);
                       Stack << (Op1->XPeer (*Op2));
                       break;
-
+		    case OperatorAncestor:
+		      // Fall into .. Not yet supported
                     default:
                       message_log (LOG_ERROR, "RPN Stack contains bogus ops.");
                       // Bad case

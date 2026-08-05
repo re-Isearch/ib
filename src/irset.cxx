@@ -3119,9 +3119,12 @@ OPOBJ *atomicIRSET::WithinDoctype(const STRING& KeySpec)
 
 OPOBJ *atomicIRSET::Inside(const STRING& FieldName)
 {
+#if 1
+  return Within(FieldName);
+#else
   if (Parent) Parent->SetErrorCode(110); // "Operator unsupported";
   return this;
-
+#endif
 }
 
 OPOBJ *atomicIRSET::Sibling ( )

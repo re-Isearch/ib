@@ -30,10 +30,17 @@ NAMESPACE ostream& operator<<(NAMESPACE ostream& os, const Z3950_ERROR& Error)
 }
 
 
+static bool IsAdvisoryError(int error)
+{
+  return error == 133 || error == 134;
+}
+
+
 int Z3950_ERROR::SetErrorCode(int Error)
 {
   int old_err = errorCode;
-  errorCode = Error;
+  if (errorCode == 0 || !(IsAdvisoryError(Error)))
+    errorCode = Error;
   return errorCode != old_err;
 }
 
@@ -121,6 +128,7 @@ const char *Z3950_ERROR::ErrorMessage(int ErrorCode)
     case 131: return "Unsupported proximity relation";
     case 132: return "Unsupported proximity unit code";
     case 133: return "Unsupported sort code";
+    case 134: return "Result set clipped at configured threshold - valid subset available";
     default:
 	if (__Private_IB_ErrorMessage) return __Private_IB_ErrorMessage(ErrorCode);
 	return "Unknown Error";

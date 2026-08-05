@@ -51,6 +51,9 @@ typedef enum {
   OperatorWithKey,
   OperatorSortBy,
   OperatorBoostScore,
+// Special Unary operator (that mimic a term search)
+  OperatorKey,
+  OperatorFile,
 // Binary Operators 
   OperatorOr, OperatorAnd, OperatorAndNot, OperatorXor, OperatorXnor,
   OperatorNotAnd, OperatorNor, OperatorNand,
@@ -73,12 +76,10 @@ typedef enum {
   OperatorBeforePeer,
   OperatorAfterPeer,
   OperatorXPeer,
-// Special Unary operator (that mimic a term search)
-  OperatorKey,
-  OperatorFile,
+  OperatorAncestor,
 } t_Operator;
 
-inline bool IsBinaryOperator(t_Operator Op) { return Op >= OperatorOr; }
+inline bool IsBinaryOperator(t_Operator Op) { return Op >= OperatorOr ; }
 inline bool IsUnaryOperator(t_Operator Op)   { return Op > OperatorNoop && Op < OperatorOr;  }
 
 class OPOBJ {

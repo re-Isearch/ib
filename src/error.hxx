@@ -15,6 +15,10 @@ public:
 
   friend ostream& operator <<(ostream& os, const Z3950_ERROR& Error);
 
+  Z3950_ERROR& operator = (int Error) { SetErrorCode(Error); return *this; }
+  const char *c_str() const { return ErrorMessage(); }
+  operator int() const { return errorCode; }
+
   int         SetErrorCode(int Error);
   int         GetErrorCode() const;
   const char *ErrorMessage() const;

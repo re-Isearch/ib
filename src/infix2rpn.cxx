@@ -25,6 +25,7 @@ enum operators {
    ,BoolXPEER
    ,BoolPEERa
    ,BoolPEERb
+   ,BoolAncestor
    ,BoolXXXX
    ,BoolFRAC = BoolXXXX + 100
    ,BoolPROXIMITY = 32767 + BoolFRAC + 100 
@@ -110,7 +111,8 @@ bool INFIX2RPN::Parse (const STRING& StrInput, STRING *StrOutput)
 	    }
 	  TheStack.Pop (&TmpVal);	//get rid of left paren
 	  if ( TheStack.Examine (&TmpVal) && (
-		TmpVal == "!" || TmpVal == "NOT" || TmpVal.Last() == '/'
+		TmpVal == "!" || TmpVal == "NOT" || 
+		TmpVal == "SIBLING" || TmpVal.Last() == '/'
 		|| TmpVal.CaseCompare("within:", 7) == 0 || TmpVal.CaseCompare("xwithin:", 8) == 0
 		|| TmpVal.CaseCompare("inside:", 7) == 0
 		|| TmpVal.Compare(    "REDUCE:", 7) == 0
@@ -281,6 +283,7 @@ static const struct {
  { "XPEER",   BoolXPEER},
  { "PEERa",   BoolPEERa},
  { "PEERb",   BoolPEERb},
+ { "ANCESTOR", BoolAncestor},
 
 // Expand this table as more operators are added
  { "or",      BoolOR   },

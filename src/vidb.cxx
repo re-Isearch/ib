@@ -2568,8 +2568,6 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
       bool res;
       STRING      field (DefaultField);
 
-cerr << "field = " << field << endl;
-
 // clock_t t1 = clock();
 
       // Search as Peer
@@ -2577,7 +2575,7 @@ cerr << "field = " << field << endl;
 	res = squery.SetOperatorPeer();
       } else {
 	res = squery.SetOperatorAndWithin(field);
-cerr << "QUERY: " << squery << endl;
+//cerr << "QUERY: " << squery << endl;
       }
 
       if (res)

@@ -307,6 +307,9 @@ t_Operator SQUERY::GetOperator (const STRING& Operator, FLOAT *Metric, STRING *S
       { SOperatorNor,   OperatorNor },
       { SOperatorXnor,  OperatorXnor }, // A B XNOR := A B XOR NOT
       { "XNOR",    OperatorXnor },
+      { "XAND",    OperatorXnor }, // Seems some people even if it makes no sense!
+      { "NXOR",    OperatorXnor}, // Another one (MathWorks) read NOT XOR 
+      { "ANCESTOR", OperatorAncestor},
 // Special Cases for the Infix Processor
       { "!&&",     OperatorNand }, // Added
       { "!||",     OperatorNor  }, // Added
@@ -556,7 +559,7 @@ if (arg_pos)
 	if (Operator.Compare("SIBLING",  7) == 0)
 	  {
 	    if (StringArgs) *StringArgs = Operator.c_str() + 8;
-	    return OperatorInside;
+	    return OperatorSibling;
 	  }
         if (Operator.Compare("XWITHIN",  7) == 0)
           {
@@ -584,6 +587,12 @@ if (arg_pos)
 	break;
 
       case 9:
+	if (Operator.Compare("ANCESTOR", 8) == 0)
+          {
+            if (Metric)
+              *Metric = atof ( Operator.c_str() + 9 );
+            return OperatorAncestor;
+          }
         if (Operator.Compare("HITCOUNT", 8) == 0)
           {
             const char   *ptr = Operator.c_str() + 9;
@@ -2166,6 +2175,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                   case OperatorXPeer:
                   case OperatorBeforePeer:
                   case OperatorAfterPeer:
+		  case OperatorAncestor:
                   case OperatorReduce:
 		  case OperatorFocus:
 		  case OperatorHitCount:
@@ -2188,6 +2198,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                           case OperatorBeforePeer:what = SOperatorBeforePeer; break;
                           case OperatorAfterPeer: what = SOperatorAfterPeer; break;
                           case OperatorXPeer:     what =  SOperatorXPeer;  break;
+			  case OperatorAncestor:  what = "ANCESTOR"; break;
                           case OperatorReduce:    what = "REDUCE"; break;
 			  case OperatorFocus:     what = "FOCUS"; break;
 			  case OperatorHitCount:  what = "HITCOUNT"; break;
@@ -2219,6 +2230,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                         case OperatorXPeer:     S = SOperatorXPeer;     break;
                         case OperatorBeforePeer:S = SOperatorBeforePeer; break;
                         case OperatorAfterPeer: S = SOperatorAfterPeer; break;
+			case OperatorAncestor:  S = "ANCESTOR";         break;
 			case OperatorSibling:   S = "SIBLING";          break;
                         case OperatorReduce:    S = "REDUCE:0";         break; // SPECIAL CASE
 			case OperatorFocus:     S = "FOCUS:0";          break; // SPECIAL CASE
@@ -2604,6 +2616,230 @@ bool Read(QUERY *QueryPtr, PFILE Fp)
   return QueryPtr->Read (Fp);
 }
 
+#if 1
+
+
+// Pre-flight: returns 0 when OK, error number otherwise
+int QUERY::Run()
+{
+  // Flip OPSTACK upside-down so that we pop in RPN order.
+  OPSTACK Stack, TempStack;
+  IRSET   Foo;
+
+  Squery.GetOpstack(&Stack);
+  Stack.Reverse();
+
+  POPOBJ OpPtr = NULL;
+  POPOBJ Op1   = NULL;
+  POPOBJ Op2   = NULL;
+
+  int error = 0;
+
+  while (!error && (Stack >> OpPtr))
+    {
+      if (OpPtr->GetOpType() == TypeOperator)
+        {
+          const t_Operator op_t = OpPtr->GetOperatorType();
+
+          switch (op_t)
+            {
+            /*
+             * These operators mimic a term search: they produce
+             * a result set without consuming one from TempStack.
+             */
+            case OperatorKey:
+            case OperatorFile:
+              TempStack << Foo;
+              break;
+
+            /*
+             * A genuine no-op consumes and produces nothing.
+             */
+            case OperatorNoop:
+              break;
+
+            case OperatorERR:
+              error = 110; // Operator unsupported
+              break;
+
+            /*
+             * Unary operators consume one result set and produce one.
+             */
+            case OperatorNOT:
+
+            case OperatorWithin:
+            case OperatorXWithin:
+            case OperatorInside:
+            case OperatorInclusive:
+            case OperatorSibling:
+            case OperatorNotWithin:
+
+            case OperatorFocus:
+            case OperatorReduce:
+            case OperatorHitCount:
+            case OperatorTrim:
+            case OperatorBoostScore:
+
+            case OperatorWithinFile:
+            case OperatorWithinFileExtension:
+            case OperatorWithinDoctype:
+            case OperatorWithKey:
+            case OperatorSortBy:
+              {
+                const FLOAT metric = OpPtr->GetOperatorMetric();
+
+                if ((op_t == OperatorReduce ||
+                     op_t == OperatorFocus  ||
+                     op_t == OperatorTrim) &&
+                    metric < 0)
+                  {
+                    error = 107;
+                    break;
+                  }
+
+                TempStack >> Op1;
+
+                if (Op1 == NULL)
+                  {
+                    error = 108; // Defective RPN stack
+                    break;
+                  }
+
+                delete Op1;
+                Op1 = NULL;
+
+                TempStack << Foo;
+              }
+              break;
+
+            /*
+             * Supported binary operators consume two result sets
+             * and produce one.
+             */
+            case OperatorOr:
+            case OperatorAnd:
+            case OperatorAndNot:
+            case OperatorNotAnd:
+
+            case OperatorJoin:
+            case OperatorJoinL:
+            case OperatorJoinR:
+
+            case OperatorXor:
+            case OperatorXnor:
+            case OperatorNor:
+            case OperatorNand:
+
+            case OperatorNeighbor:
+            case OperatorNear:
+            case OperatorProximity:
+            case OperatorFar:
+            case OperatorAfter:
+            case OperatorBefore:
+            case OperatorAdj:
+            case OperatorFollows:
+            case OperatorPrecedes:
+
+            case OperatorAndWithin:
+            case OperatorBeforeWithin:
+            case OperatorAfterWithin:
+            case OperatorOrWithin:
+
+            case OperatorPeer:
+            case OperatorAfterPeer:
+            case OperatorBeforePeer:
+            case OperatorXPeer:
+            case OperatorAncestor:
+              TempStack >> Op1;
+              TempStack >> Op2;
+
+              if (Op1 == NULL || Op2 == NULL)
+                {
+                  if (Op1)
+                    delete Op1;
+                  if (Op2)
+                    delete Op2;
+
+                  Op1 = Op2 = NULL;
+                  error = 108; // Defective RPN stack
+                  break;
+                }
+
+              delete Op1;
+              delete Op2;
+              Op1 = Op2 = NULL;
+
+              TempStack << Foo;
+              break;
+
+            default:
+              message_log(LOG_ERROR,
+                          "RPN Stack contains unsupported operator %d.",
+                          (int)op_t);
+
+              error = 110; // Operator unsupported
+              break;
+            }
+        }
+      else if (OpPtr->GetOpType() == TypeOperand)
+        {
+          switch (OpPtr->GetOperandType())
+            {
+            case TypeTerm:
+            case TypeRset:
+              /*
+               * Both a term and an existing result-set operand
+               * produce one result set.
+               */
+              TempStack << Foo;
+              break;
+
+            default:
+              error = 125; // Malformed search term
+              break;
+            }
+        }
+      else
+        {
+          error = 125; // Malformed search term
+        }
+
+      delete OpPtr;
+      OpPtr = NULL;
+    }
+
+  if (error)
+    return error;
+
+  /*
+   * Valid playback must leave exactly one result set.
+   *
+   * Empty stack:
+   *   no result-producing operand survived parsing.
+   *
+   * More than one object:
+   *   incomplete or malformed RPN expression.
+   */
+  TempStack >> Op1;
+
+  if (Op1 == NULL)
+    return 125; // Malformed search term
+
+  TempStack >> Op2;
+
+  if (Op2 != NULL)
+    {
+      delete Op1;
+      delete Op2;
+      return 108; // Defective RPN stack
+    }
+
+  delete Op1;
+  return 0; // No Error
+}
+
+#else
+
 int QUERY::Run ()
 {
   // Flip OPSTACK upside-down to convert so we can
@@ -2725,6 +2961,7 @@ int QUERY::Run ()
                     case OperatorAfterPeer:
                     case OperatorBeforePeer:
                     case OperatorXPeer:
+		    case OperatorAncestor:
 		      TempStack << Foo;
                       break;
                     default:
@@ -2755,5 +2992,7 @@ int QUERY::Run ()
         } /* TypeOperand */
     }
 
-  return terms > 0;
+  return terms > 0 ? 0 : 125; // No term -> "Malformed search term"
 }
+
+#endif
