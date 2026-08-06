@@ -22,6 +22,8 @@ Description:	Command-line search utility
 #include <locale.h>
 #endif
 
+#include "jsonstring.hxx"
+
 static const int _isearch_main_version = 3;
 
 #ifndef _WIN32
@@ -352,6 +354,8 @@ static void HelpUsage(const char *progname)
 	"  -pager (EXE)     // Use program EXE to page results (e.g. more)." << endl <<
         "  -more            // Same as -pager /bin/more" << endl <<
 	"  -copyright       // Display the copyright statement" << endl <<
+	"  -help            // Display the help" << endl <<
+	"  -qhelp[=json]    // Display the query operators available" << endl <<
 	"  (...)            // Terms (X), (Y), .. or a query sentence." << endl <<
 	"                   // If -rpn was specified then the sentence is expected to be in RPN." << endl <<
         "                   // If -infix then the conventional in-fix notation is expected." << endl << 
@@ -470,6 +474,10 @@ static void HelpUsage(const char *progname)
 extern "C" {
   int _Isearch_main(int argc, char **argv);
 };
+
+
+static void HelpUsageJSON(const char *progname) ;
+
 
 int _Isearch_main (int argc, char **argv)
 {
@@ -730,6 +738,21 @@ int _Isearch_main (int argc, char **argv)
 	  else if (Flag.Equals("-help"))
 	    {
 	      HelpUsage(  RemovePath(argv[0]).c_str() );
+	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-help=json"))
+	    {
+	      HelpUsageJSON( RemovePath(argv[0]).c_str());
+	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-qhelp=json"))
+	    {
+	      SQUERY::WriteOperatorHelpJSON(std::cout);
+	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-qhelp"))
+	    {
+	      SQUERY::WriteOperatorHelp(std::cout);
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals("-h"))
@@ -2302,3 +2325,823 @@ again:
 	#endif
 	  return 0;
 }
+
+
+#if 1
+
+
+#include <iostream>
+#include <string>
+
+using std::cout;
+using std::endl;
+
+namespace
+{
+  struct CLI_OPTION_DOC
+  {
+    const char *Group;
+    const char *Option;
+    const char *Argument;
+    const char *Description;
+  };
+
+  static const CLI_OPTION_DOC CliOptions[] =
+  {
+    /*
+     * Database and environment
+     */
+    {
+      "database",
+      "-d",
+      "database",
+      "Search the database having the specified root name."
+    },
+    {
+      "database",
+      "-fuel",
+      "percent",
+      "Set the available space fuel as a percentage."
+    },
+    {
+      "database",
+      "-cd",
+      "directory",
+      "Change the working directory before opening the database."
+    },
+    {
+      "database",
+      "-id",
+      "document-id",
+      "Request documents having the specified document identifier."
+    },
+    {
+      "database",
+      "-D",
+      "file",
+      "Load a result set from the specified file."
+    },
+
+    /*
+     * Record presentation
+     */
+    {
+      "presentation",
+      "-p",
+      "element-set",
+      "Present the specified element set as the identifier with each result."
+    },
+    {
+      "presentation",
+      "-P",
+      "ancestor|ancestor/descendant",
+      "Present ancestor content for hits. May be specified repeatedly. "
+      "The ancestor/descendant form selects a descendant within the named ancestor."
+    },
+    {
+      "presentation",
+      "-show",
+      NULL,
+      "Show the best hit neighborhood."
+    },
+    {
+      "presentation",
+      "-summary",
+      NULL,
+      "Show the record summary or description."
+    },
+    {
+      "presentation",
+      "-XML",
+      NULL,
+      "Present results using an XML-like structure."
+    },
+    {
+      "presentation",
+      "-Json",
+      NULL,
+      "Present search results using JSON."
+    },
+    {
+      "presentation",
+      "-H[TML]",
+      NULL,
+      "Use HTML record presentation."
+    },
+    {
+      "presentation",
+      "-q[uiet]",
+      NULL,
+      "Print results and exit immediately."
+    },
+    {
+      "presentation",
+      "-t[erse]",
+      NULL,
+      "Print terse result records."
+    },
+    {
+      "presentation",
+      "-tab",
+      NULL,
+      "Use tab-delimited terse output."
+    },
+    {
+      "presentation",
+      "-prefix",
+      "text",
+      "Add the specified prefix to matched terms in presented documents."
+    },
+    {
+      "presentation",
+      "-suffix",
+      "text",
+      "Add the specified suffix to matched terms in presented documents."
+    },
+    {
+      "presentation",
+      "-headline",
+      "element",
+      "Use an alternative headline display based on the specified element."
+    },
+    {
+      "presentation",
+      "-filename",
+      NULL,
+      "Display filenames only."
+    },
+    {
+      "presentation",
+      "-filesystem",
+      NULL,
+      "Equivalent to -q -filename -byterange."
+    },
+
+    /*
+     * Result ordering
+     */
+    {
+      "sorting",
+      "-c",
+      NULL,
+      "Sort results chronologically."
+    },
+    {
+      "sorting",
+      "-cr",
+      NULL,
+      "Sort results chronologically from oldest to newest."
+    },
+    {
+      "sorting",
+      "-s",
+      NULL,
+      "Sort results by relevance score."
+    },
+    {
+      "sorting",
+      "-sc",
+      NULL,
+      "Sort results by score modified by category."
+    },
+    {
+      "sorting",
+      "-smag",
+      "factor",
+      "Sort by score and category using the specified magnetism factor."
+    },
+    {
+      "sorting",
+      "-scat",
+      NULL,
+      "Sort results by category."
+    },
+    {
+      "sorting",
+      "-snews",
+      NULL,
+      "Sort results by news rank."
+    },
+    {
+      "sorting",
+      "-h",
+      NULL,
+      "Sort results by the number of different matching terms. See -joint."
+    },
+    {
+      "sorting",
+      "-k",
+      NULL,
+      "Sort results by record key."
+    },
+    {
+      "sorting",
+      "-n",
+      NULL,
+      "Do not sort results; retain indexing order."
+    },
+    {
+      "sorting",
+      "-sort",
+      "B[entley]|S[edgewick]|D[ualPivot]|T[im]|N[ative]",
+      "Select the sorting implementation."
+    },
+
+    /*
+     * Score normalization
+     */
+    {
+      "normalization",
+      "-AF_norm",
+      NULL,
+      "Use AF normalization."
+    },
+    {
+      "normalization",
+      "-bytes_norm",
+      NULL,
+      "Use byte-count normalization."
+    },
+    {
+      "normalization",
+      "-euclidean_norm",
+      NULL,
+      "Use Euclidean normalization."
+    },
+    {
+      "normalization",
+      "-L1_norm",
+      NULL,
+      "Use cosine L1 normalization."
+    },
+    {
+      "normalization",
+      "-L2_norm",
+      NULL,
+      "Use cosine L2 normalization. This is the default."
+    },
+    {
+      "normalization",
+      "-log_norm",
+      NULL,
+      "Use logarithmic normalization."
+    },
+    {
+      "normalization",
+      "-max_norm",
+      NULL,
+      "Use maximum-score normalization."
+    },
+    {
+      "normalization",
+      "-no_norm",
+      NULL,
+      "Do not calculate or normalize scores."
+    },
+
+    /*
+     * Query interpretation
+     */
+    {
+      "query",
+      "-scan",
+      "field",
+      "Use the field scan service."
+    },
+    {
+      "query",
+      "-shell",
+      NULL,
+      "Enter interactive search mode."
+    },
+    {
+      "query",
+      "-rpn",
+      NULL,
+      "Interpret the query using Reverse Polish Notation."
+    },
+    {
+      "query",
+      "-infix",
+      NULL,
+      "Interpret the query using conventional infix notation. "
+      "Additional forms include ! for NOT and field/ for WITHIN:field."
+    },
+    {
+      "query",
+      "-words",
+      NULL,
+      "Interpret the remaining arguments as words."
+    },
+    {
+      "query",
+      "-and",
+      NULL,
+      "Interpret the remaining words as an intersection."
+    },
+    {
+      "query",
+      "-smart",
+      "field",
+      "Perform a fielded smart search."
+    },
+    {
+      "query",
+      "-regular",
+      NULL,
+      "Use a regular query supporting fields and weights but no operators."
+    },
+    {
+      "query",
+      "-syn",
+      NULL,
+      "Perform synonym expansion."
+    },
+
+    /*
+     * Scoring and result reduction
+     */
+    {
+      "scoring",
+      "-priority",
+      "factor",
+      "Override the priority factor."
+    },
+    {
+      "scoring",
+      "-scale",
+      "maximum",
+      "Normalize scores into the range zero through the specified maximum."
+    },
+    {
+      "scoring",
+      "-max",
+      "count",
+      "Return at most the specified number of results."
+    },
+    {
+      "scoring",
+      "-negative",
+      NULL,
+      "Include results having negative scores."
+    },
+    {
+      "scoring",
+      "-positive",
+      NULL,
+      "Include only results having positive scores."
+    },
+    {
+      "scoring",
+      "-clip",
+      "count",
+      "Clip the result set at the specified count."
+    },
+    {
+      "scoring",
+      "-common",
+      "threshold",
+      "Set the common-word threshold."
+    },
+    {
+      "scoring",
+      "-reduce",
+      NULL,
+      "Reduce the result set using the minimum number of different matches."
+    },
+    {
+      "scoring",
+      "-reduce0",
+      NULL,
+      "Equivalent to -h -reduce."
+    },
+    {
+      "scoring",
+      "-drop_h",
+      "count",
+      "Drop results having fewer than the specified number of different matches."
+    },
+    {
+      "scoring",
+      "-drop_a",
+      "score",
+      "Drop results whose absolute score is below the specified value."
+    },
+    {
+      "scoring",
+      "-drop_s",
+      "score",
+      "Drop results whose scaled score is below the specified value."
+    },
+
+    /*
+     * Result metadata
+     */
+    {
+      "metadata",
+      "-hits",
+      NULL,
+      "Display the total number of matching hits for each record."
+    },
+    {
+      "metadata",
+      "-joint",
+      NULL,
+      "Display the number of different matching terms for each record."
+    },
+    {
+      "metadata",
+      "-score",
+      NULL,
+      "Display unnormalized scores."
+    },
+    {
+      "metadata",
+      "-date",
+      NULL,
+      "Display the record date."
+    },
+    {
+      "metadata",
+      "-datemodified",
+      NULL,
+      "Display the record modification date."
+    },
+    {
+      "metadata",
+      "-key",
+      NULL,
+      "Display the record key."
+    },
+    {
+      "metadata",
+      "-doctype",
+      NULL,
+      "Display the record document type."
+    },
+    {
+      "metadata",
+      "-byterange",
+      NULL,
+      "Display the byte range occupied by each document within its source file."
+    },
+
+    /*
+     * Result ranges and date restrictions
+     */
+    {
+      "range",
+      "-range",
+      "first[-last]",
+      "Display results from the first position through the optional last position."
+    },
+    {
+      "range",
+      "-daterange",
+      "date-range",
+      "Restrict all searches to records whose record dates fall within the "
+      "specified range."
+    },
+    {
+      "range",
+      "-startdoc",
+      "position",
+      "Start displaying the result set at the specified document position."
+    },
+    {
+      "range",
+      "-enddoc",
+      "position",
+      "Stop displaying the result set at the specified document position."
+    },
+
+    /*
+     * Storage and document-type options
+     */
+    {
+      "storage",
+      "-o",
+      "option",
+      "Specify a document-type-specific option."
+    },
+    {
+      "storage",
+      "-table",
+      "file",
+      "Save the result set into the specified file."
+    },
+
+    /*
+     * Diagnostics and process control
+     */
+    {
+      "diagnostics",
+      "-level",
+      "0-255",
+      "Set the message level."
+    },
+    {
+      "diagnostics",
+      "-debug",
+      NULL,
+      "Enable extensive debugging messages."
+    },
+    {
+      "diagnostics",
+      "-bench",
+      NULL,
+      "Display process resource usage."
+    },
+    {
+      "diagnostics",
+      "-pager",
+      "program",
+      "Use the specified program to page results."
+    },
+    {
+      "diagnostics",
+      "-more",
+      NULL,
+      "Equivalent to -pager /bin/more."
+    },
+    {
+      "diagnostics",
+      "-copyright",
+      NULL,
+      "Display the copyright statement."
+    },
+    {
+      "diagnostics",
+      "-help",
+      NULL,
+      "Display command-line help."
+    },
+    {
+      "diagnostics",
+      "-qhelp[=json]",
+      NULL,
+      "Display available query operators, optionally as JSON."
+    }
+  };
+
+
+  struct TERM_MODIFIER_DOC
+  {
+    const char *Form;
+    const char *Description;
+  };
+
+  static const TERM_MODIFIER_DOC TermModifiers[] =
+  {
+    {
+      "fieldname/searchterm",
+      "Search for the term within the specified field."
+    },
+    {
+      "searchterm*",
+      "Perform right truncation."
+    },
+    {
+      "*searchterm",
+      "Perform left truncation."
+    },
+    {
+      "* and ?",
+      "Use glob-pattern matching."
+    },
+    {
+      "searchterm~",
+      "Perform fuzzy Ratcliff matching."
+    },
+    {
+      "searchterm#",
+      "Perform phonetic Soundex matching."
+    },
+    {
+      "searchterm=",
+      "Perform exact case-dependent matching."
+    },
+    {
+      "searchterm>",
+      "Perform exact right-truncated matching; equivalent to =*."
+    },
+    {
+      "searchterm.",
+      "Perform exact-term matching so that, for example, auto does not "
+      "match auto-mobile."
+    },
+    {
+      "searchterm$",
+      "Interpret the term as a freeform encoded address using a sparse vector."
+    },
+    {
+      "searchterm@",
+      "Interpret the term as an embeddings address using a dense vector."
+    },
+    {
+      "searchterm:weight",
+      "Apply a term weight. The default weight is 1; negative values lower rank."
+    },
+    {
+      "\"literal phrase\"",
+      "Perform a literal phrase search."
+    }
+  };
+
+
+  static void WriteCliOptionJSON(
+      std::ostream& out,
+      const CLI_OPTION_DOC& option,
+      const char *indent)
+  {
+    out << indent << "{\n";
+
+    out << indent << "  \"group\": ";
+    WriteJsonString(out, option.Group);
+    out << ",\n";
+
+    out << indent << "  \"option\": ";
+    WriteJsonString(out, option.Option);
+    out << ",\n";
+
+    out << indent << "  \"argument\": ";
+
+    if (option.Argument)
+      WriteJsonString(out, option.Argument);
+    else
+      out << "null";
+
+    out << ",\n";
+
+    out << indent << "  \"description\": ";
+    WriteJsonString(out, option.Description);
+    out << "\n";
+
+    out << indent << "}";
+  }
+}
+
+
+static void HelpUsageJSON(const char *progname)
+{
+  const char *prog =
+    progname && *progname ? progname : "Isearch";
+
+  const std::string usage =
+    std::string(prog) + " -d <database> [options] term...";
+
+  const size_t optionCount =
+    sizeof(CliOptions) / sizeof(CliOptions[0]);
+
+  const size_t modifierCount =
+    sizeof(TermModifiers) / sizeof(TermModifiers[0]);
+
+  cout << "{\n";
+
+  cout << "  \"program\": ";
+  WriteJsonString(cout, prog);
+  cout << ",\n";
+
+  cout << "  \"usage\": ";
+  WriteJsonString(cout, usage.c_str());
+  cout << ",\n";
+
+  /*
+   * Command-line options
+   */
+  cout << "  \"options\": [\n";
+
+  for (size_t i = 0; i < optionCount; ++i)
+    {
+      WriteCliOptionJSON(cout, CliOptions[i], "    ");
+
+      if (i + 1 < optionCount)
+        cout << ',';
+
+      cout << '\n';
+    }
+
+  cout << "  ],\n";
+
+  /*
+   * Positional query argument
+   */
+  cout << "  \"arguments\": [\n";
+  cout << "    {\n";
+  cout << "      \"name\": \"terms\",\n";
+  cout << "      \"syntax\": \"term...\",\n";
+  cout << "      \"required\": true,\n";
+  cout << "      \"description\": "
+          "\"Terms, operands, or a complete query expression.\"\n";
+  cout << "    }\n";
+  cout << "  ],\n";
+
+  /*
+   * Query interpretation
+   */
+  cout << "  \"query_interpretation\": {\n";
+
+  cout << "    \"default\": "
+          "\"Smart search when no explicit query mode is selected.\",\n";
+
+  cout << "    \"rpn\": "
+          "\"With -rpn, the query expression must use Reverse Polish "
+          "Notation.\",\n";
+
+  cout << "    \"infix\": "
+          "\"With -infix, the query expression uses conventional infix "
+          "notation.\",\n";
+
+  cout << "    \"words\": "
+          "\"With -words or -regular, terms are combined using OR unless "
+          "another mode changes that behavior.\"\n";
+
+  cout << "  },\n";
+
+  /*
+   * Fielded query syntax
+   */
+  cout << "  \"fielded_search\": {\n";
+
+  cout << "    \"syntax\": ";
+  WriteJsonString(
+      cout,
+      "[[fieldname][relation]]searchterm[*][:weight]");
+  cout << ",\n";
+
+  cout << "    \"relations\": ["
+          "\"<\", \">\", \">=\", \"<=\", \"<>\"],\n";
+
+  cout << "    \"relation_semantics\": "
+          "\"The meaning of each relation depends on the field datatype.\",\n";
+
+  cout << "    \"field_prefix_syntax\": "
+          "\"fieldname/searchterm\",\n";
+
+  cout << "    \"term_modifiers\": [\n";
+
+  for (size_t i = 0; i < modifierCount; ++i)
+    {
+      cout << "      {\n";
+
+      cout << "        \"form\": ";
+      WriteJsonString(cout, TermModifiers[i].Form);
+      cout << ",\n";
+
+      cout << "        \"description\": ";
+      WriteJsonString(cout, TermModifiers[i].Description);
+      cout << "\n";
+
+      cout << "      }";
+
+      if (i + 1 < modifierCount)
+        cout << ',';
+
+      cout << '\n';
+    }
+
+  cout << "    ]\n";
+  cout << "  },\n";
+
+  /*
+   * Date-range syntax
+   */
+  cout << "  \"date_ranges\": {\n";
+
+  cout << "    \"syntax\": [\n";
+  cout << "      \"YYYY[MM[DD]][-YYYY[MM[DD]]]\",\n";
+  cout << "      \"YYYY[MM[DD]]/[[YYYY]MM]DD\",\n";
+  cout << "      \"ISO 8601 and other recognized date formats\"\n";
+  cout << "    ],\n";
+
+  cout << "    \"example\": "
+          "\"2005 selects all records dated during the year 2005.\",\n";
+
+  cout << "    \"record_date_note\": "
+          "\"The -daterange option uses the record date rather than an "
+          "ordinary indexed date field.\",\n";
+
+  cout << "    \"scope_note\": "
+          "\"-daterange restricts all searches, while the unary "
+          "WITHIN:<daterange> operator applies only to its operand set.\"\n";
+
+  cout << "  },\n";
+
+  /*
+   * Reserved syntax
+   */
+  cout << "  \"reserved_syntax\": [\n";
+  cout << "    {\n";
+  cout << "      \"prefix\": \"RECT\",\n";
+  cout << "      \"syntax\": \"RECT{N,W,S,E}\",\n";
+  cout << "      \"description\": "
+          "\"Reserved for bounding-box searches in predefined numeric "
+          "quadrant fields.\"\n";
+  cout << "    }\n";
+  cout << "  ]\n";
+
+  cout << "}\n";
+}
+
+
+#endif

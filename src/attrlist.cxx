@@ -655,7 +655,7 @@ enum StructureValues {
   String = 108,
   NumericString = 109, // Number
   Glob = 200, // Local Extension
-  DenseVector // Dense Vector (TODO)
+  DenseVector = 201 // Dense Vector 
 };
 
 enum TruncationValues {

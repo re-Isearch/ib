@@ -4429,8 +4429,10 @@ for (size_t i = 1; i <= NewIrset->GetTotalEntries(); i++)
 
   if (terms == 0)
     {
-      message_log (LOG_DEBUG, "4     Terms only exclusion (stop) words   (unspecified)");
-      Parent->SetErrorCode(4);
+      if (!Parent->GetErrorCode() )  {
+        // message_log (LOG_DEBUG, "4     Terms only exclusion (stop) words   (unspecified)");
+        Parent->SetErrorCode(4);
+      }
     }
   else if (Method == CosineMetricNormalization || Method == EuclideanNormalization) {
     NewIrset->ComputeScoresCosineMetricNormalization(1);

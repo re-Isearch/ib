@@ -41,6 +41,9 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 # include <alloca.h>
 #endif
 
+#include <memory>
+#include <vector>
+
 
 #define   NAMESPACE
 #define CQL 1 /* Rule is that terms always have quotes */
@@ -248,15 +251,12 @@ means
 */
 
 
-// Operator(%d)  where d is a number --> metric, else string
-t_Operator SQUERY::GetOperator (const STRING& Operator, FLOAT *Metric, STRING *StringArgs) const
-{
-    // Expand this table as more operators are added
-    const struct
-      {
-        const char *name;
-        t_Operator code;
-      } Ops[] =
+// Expand this table as more operators are added
+const struct
+ {
+   const char *name;
+   t_Operator code;
+ } Ops[] =
     {
       { "OR",          OperatorOr },
       {  SOperatorOr,  OperatorOr },
@@ -318,8 +318,13 @@ t_Operator SQUERY::GetOperator (const STRING& Operator, FLOAT *Metric, STRING *S
 // Last stuff
       { "<noop>",  OperatorNoop }, //  A B NOOP OP := A B OP
       { SOperatorNoop,  OperatorNoop}
-    };
+};
 
+
+// Operator(%d)  where d is a number --> metric, else string
+
+t_Operator SQUERY::GetOperator (const STRING& Operator, FLOAT *Metric, STRING *StringArgs) const
+{
     if (Metric) *Metric = 0;
     if (StringArgs) StringArgs->Clear();
     for (size_t i=0; i<sizeof(Ops)/sizeof(Ops[0]); i++)
@@ -2996,3 +3001,1122 @@ int QUERY::Run ()
 }
 
 #endif
+
+
+/*
+
+Initial SIBLING rules
+
+SIBLING(A)                  → A
+SIBLING(SIBLING(A))         → SIBLING(A) → A
+
+SIBLING(AND(A,B))           → PEER(SIBLING(A), SIBLING(B))
+SIBLING(OR(A,B))            → PEER(SIBLING(A), SIBLING(B))
+SIBLING(PEER(A,B))          → PEER(SIBLING(A), SIBLING(B))
+
+SIBLING(XOR(A,B))           → EMPTY
+SIBLING(ANDNOT(A,B))        → EMPTY
+SIBLING(NOTAND(A,B))        → EMPTY
+SIBLING(XPEER(A,B))         → EMPTY
+
+Opaque Operands:
+
+SIBLING(AND(ADJ(A,B), C))
+    → PEER(ADJ(A,B), C)
+
+A B AND SIBLING C PEER SIBLING
+    → A B PEER C PEER
+
+Rejections:
+
+SIBLING directly above a reducing unary operator
+    → reject when that unary wraps a compound expression
+
+reducing unary operator above SIBLING
+    → normalize SIBLING normally, then preserve the reducer
+
+*/
+
+namespace {
+
+struct QUERY_NODE {
+  std::unique_ptr<OPOBJ> Object;
+  std::vector<std::unique_ptr<QUERY_NODE> > Children;
+  bool Empty;
+
+  explicit QUERY_NODE(POPOBJ ObjectPtr = NULL)
+    : Object(ObjectPtr), Empty(false)
+  {
+  }
+
+  static std::unique_ptr<QUERY_NODE> MakeEmpty()
+  {
+    std::unique_ptr<QUERY_NODE> node(new QUERY_NODE);
+    node->Empty = true;
+    return node;
+  }
+
+  bool IsOperator() const
+  {
+    return !Empty &&
+           Object.get() != NULL &&
+           Object->GetOpType() == TypeOperator;
+  }
+
+  bool IsOperator(const t_Operator Op) const
+  {
+    return IsOperator() &&
+           Object->GetOperatorType() == Op;
+  }
+
+  t_Operator GetOperatorType() const
+  {
+    return IsOperator()
+      ? Object->GetOperatorType()
+      : OperatorERR;
+  }
+};
+
+
+static bool IsResultProducingOperator(const t_Operator Op)
+{
+  // These are represented as operators, but behave like
+  // zero-argument term searches during RPN playback.
+  return Op == OperatorKey || Op == OperatorFile;
+}
+
+
+static bool IsAssociativeOperator(const t_Operator Op)
+{
+  return Op == OperatorAnd ||
+         Op == OperatorOr  ||
+         Op == OperatorPeer;
+}
+
+
+static bool SameOperatorForm(const QUERY_NODE& A,
+                             const QUERY_NODE& B)
+{
+  if (!A.IsOperator() || !B.IsOperator())
+    return false;
+
+  if (A.GetOperatorType() != B.GetOperatorType())
+    return false;
+
+  if (A.Object->GetOperatorMetric() !=
+      B.Object->GetOperatorMetric())
+    return false;
+
+  return A.Object->GetOperatorString() ==
+         B.Object->GetOperatorString();
+}
+
+
+static bool IsSiblingBarrier(const t_Operator Op)
+{
+  switch (Op)
+    {
+    // These alter, trim, rank or reorder an already-produced set.
+    case OperatorFocus:
+    case OperatorReduce:
+    case OperatorHitCount:
+    case OperatorTrim:
+    case OperatorSortBy:
+    case OperatorBoostScore:
+
+    // These cross physical index boundaries.
+    case OperatorJoin:
+    case OperatorJoinL:
+    case OperatorJoinR:
+
+    // Their relationship to unary PEER is not being defined yet.
+    case OperatorXnor:
+    case OperatorNor:
+    case OperatorNand:
+      return true;
+
+    default:
+      return false;
+    }
+}
+
+
+static void ReplaceOperator(QUERY_NODE *Node,
+                            const t_Operator NewOperator)
+{
+  OPERATOR op;
+  op.SetOperatorType(NewOperator);
+
+  // AND/OR -> PEER should not retain any unrelated metric
+  // or string argument from the old operator.
+  Node->Object.reset(new OPERATOR(op));
+}
+
+
+static bool FlattenAssociative(QUERY_NODE *Node)
+{
+  if (Node == NULL || !Node->IsOperator())
+    return false;
+
+  const t_Operator op = Node->GetOperatorType();
+
+  if (!IsAssociativeOperator(op))
+    return false;
+
+  std::vector<std::unique_ptr<QUERY_NODE> > flattened;
+
+  for (size_t i = 0; i < Node->Children.size(); ++i)
+    {
+      std::unique_ptr<QUERY_NODE> child =
+        std::move(Node->Children[i]);
+
+      if (child.get() != NULL &&
+          child->IsOperator(op) &&
+          SameOperatorForm(*Node, *child))
+        {
+          for (size_t j = 0;
+               j < child->Children.size();
+               ++j)
+            {
+              flattened.push_back(
+                std::move(child->Children[j]));
+            }
+        }
+      else
+        {
+          flattened.push_back(std::move(child));
+        }
+    }
+
+  Node->Children.swap(flattened);
+  return true;
+}
+
+
+static int BuildQueryTree(
+    const SQUERY& Query,
+    std::unique_ptr<QUERY_NODE> *Root)
+{
+  OPSTACK rpn;
+  Query.GetOpstack(&rpn);
+
+  // OPSTACK pops in the opposite direction from RPN playback.
+  rpn.Reverse();
+
+  std::vector<std::unique_ptr<QUERY_NODE> > values;
+  POPOBJ object = NULL;
+
+  while (rpn >> object)
+    {
+      std::unique_ptr<OPOBJ> holder(object);
+      object = NULL;
+
+      if (holder->GetOpType() == TypeOperand)
+        {
+          if (holder->GetOperandType() == TypeNil)
+            return 125; // Malformed search term
+
+          values.push_back(
+            std::unique_ptr<QUERY_NODE>(
+              new QUERY_NODE(holder.release())));
+
+          continue;
+        }
+
+      if (holder->GetOpType() != TypeOperator)
+        return 125;
+
+      const t_Operator op = holder->GetOperatorType();
+
+      if (op == OperatorERR)
+        return 110; // Operator unsupported
+
+      if (op == OperatorNoop)
+        {
+          // It consumes and produces nothing.
+          continue;
+        }
+
+      if (IsResultProducingOperator(op))
+        {
+          values.push_back(
+            std::unique_ptr<QUERY_NODE>(
+              new QUERY_NODE(holder.release())));
+
+          continue;
+        }
+
+      if (IsUnaryOperator(op))
+        {
+          if (values.empty())
+            return 108; // Defective RPN stack
+
+          std::unique_ptr<QUERY_NODE> child =
+            std::move(values.back());
+
+          values.pop_back();
+
+          std::unique_ptr<QUERY_NODE> node(
+            new QUERY_NODE(holder.release()));
+
+          node->Children.push_back(std::move(child));
+          values.push_back(std::move(node));
+
+          continue;
+        }
+
+      if (IsBinaryOperator(op))
+        {
+          if (values.size() < 2)
+            return 108;
+
+          // RPN stack order: right is popped before left.
+          std::unique_ptr<QUERY_NODE> right =
+            std::move(values.back());
+          values.pop_back();
+
+          std::unique_ptr<QUERY_NODE> left =
+            std::move(values.back());
+          values.pop_back();
+
+          std::unique_ptr<QUERY_NODE> node(
+            new QUERY_NODE(holder.release()));
+
+          node->Children.push_back(std::move(left));
+          node->Children.push_back(std::move(right));
+
+          values.push_back(std::move(node));
+          continue;
+        }
+
+      return 110;
+    }
+
+  if (values.empty())
+    return 125;
+
+  if (values.size() != 1)
+    return 108;
+
+  *Root = std::move(values.back());
+  return 0;
+}
+
+
+static int RewriteNode(
+    std::unique_ptr<QUERY_NODE> *Node,
+    bool *Changed)
+{
+  if (Node == NULL || Node->get() == NULL)
+    return 108;
+
+  QUERY_NODE *current = Node->get();
+
+  /*
+   * Normalize children first. This handles:
+   *
+   *   A B AND SIBLING C PEER SIBLING
+   *
+   * from the inside out.
+   */
+  for (size_t i = 0; i < current->Children.size(); ++i)
+    {
+      const int error =
+        RewriteNode(&current->Children[i], Changed);
+
+      if (error)
+        return error;
+    }
+
+  if (current->IsOperator() &&
+      IsAssociativeOperator(current->GetOperatorType()))
+    {
+      FlattenAssociative(current);
+    }
+
+  if (!current->IsOperator(OperatorSibling))
+    return 0;
+
+  if (current->Children.size() != 1)
+    return 108;
+
+  std::unique_ptr<QUERY_NODE> child =
+    std::move(current->Children[0]);
+
+  if (child.get() == NULL)
+    return 108;
+
+  *Changed = true;
+
+  if (child->Empty)
+    {
+      *Node = std::move(child);
+      return 0;
+    }
+
+  /*
+   * A SIBLING
+   *
+   * Unary PEER over one completed operand is identity.
+   */
+  if (!child->IsOperator())
+    {
+      *Node = std::move(child);
+      return 0;
+    }
+
+  const t_Operator childOp = child->GetOperatorType();
+
+  switch (childOp)
+    {
+    /*
+     * The child has already been flattened, so:
+     *
+     *   ((A AND B) AND (C AND D)) SIBLING
+     *
+     * is represented as one AND node with four children.
+     */
+    case OperatorAnd:
+    case OperatorOr:
+      ReplaceOperator(child.get(), OperatorPeer);
+      FlattenAssociative(child.get());
+      *Node = std::move(child);
+      return 0;
+
+    /*
+     * PEER already has the required meaning.
+     */
+    case OperatorPeer:
+      FlattenAssociative(child.get());
+      *Node = std::move(child);
+      return 0;
+
+    /*
+     * These cannot have both positive operands contributing
+     * peer hits.
+     */
+    case OperatorXor:
+    case OperatorAndNot:
+    case OperatorNotAnd:
+    case OperatorXPeer:
+      *Node = QUERY_NODE::MakeEmpty();
+      *Changed = true; // Need to mark this!
+      return 0;
+
+    default:
+      break;
+    }
+
+  /*
+   * Do not invent semantics for:
+   *
+   *   A B AND FOCUS:4 SIBLING
+   *   A B JOIN C SIBLING
+   */
+  if (IsSiblingBarrier(childOp))
+    return 110;
+
+  /*
+   * ADJ, NEAR, WITHIN, ANCESTOR, NOT, etc. are treated as
+   * one completed operand. Unary SIBLING is therefore identity.
+   *
+   * Example:
+   *
+   *   (A ADJ B) C AND SIBLING
+   *     -> (A ADJ B) C PEER
+   */
+  *Node = std::move(child);
+  return 0;
+}
+
+
+static void EmitQueryTree(const QUERY_NODE& Node,
+                          OPSTACK *Output)
+{
+  if (Node.Empty)
+    {
+      // Canonical empty-result operand.
+      IRSET empty;
+      *Output << empty;
+      return;
+    }
+
+  if (Node.Object.get() == NULL)
+    return;
+
+  if (Node.Children.empty())
+    {
+      *Output << *Node.Object;
+      return;
+    }
+
+  /*
+   * Unary node.
+   */
+  if (Node.Children.size() == 1)
+    {
+      EmitQueryTree(*Node.Children[0], Output);
+      *Output << *Node.Object;
+      return;
+    }
+
+  /*
+   * Binary or flattened associative node.
+   *
+   * Emit as a left-deep RPN chain:
+   *
+   *   AND[A,B,C,D]
+   *     -> A B AND C AND D AND
+   */
+  EmitQueryTree(*Node.Children[0], Output);
+
+  for (size_t i = 1; i < Node.Children.size(); ++i)
+    {
+      EmitQueryTree(*Node.Children[i], Output);
+      *Output << *Node.Object;
+    }
+}
+
+} // anonymous namespace
+
+
+#if 1
+
+
+bool SQUERY::Rewrite(int *ErrorCode)
+{
+  int error = 0;
+  if (ErrorCode)
+    *ErrorCode = error;
+
+  std::unique_ptr<QUERY_NODE> root;
+
+  error = BuildQueryTree(*this, &root);
+  if (error)
+    {
+      if (ErrorCode)
+        *ErrorCode = error;
+      return false;
+    }
+
+  bool changed = false;
+
+  error = RewriteNode(&root, &changed);
+  if (error)
+    {
+      if (ErrorCode)
+        *ErrorCode = error;
+      return false;
+    }
+
+  changed |= FlattenAssociative(root.get());
+
+  if (changed)
+    {
+      OPSTACK rewritten;
+      EmitQueryTree(*root, &rewritten);
+      SetOpstack(rewritten);
+    }
+
+  if (root->Empty && ErrorCode) {
+    *ErrorCode = 135;
+  }
+
+  return changed;
+}
+
+
+#else
+
+int SQUERY::Rewrite()
+{
+  std::unique_ptr<QUERY_NODE> root;
+
+  int error = BuildQueryTree(*this, &root);
+
+  if (error)
+    return error;
+
+  bool changed = false;
+
+  error = RewriteNode(&root, &changed);
+
+  if (error)
+    return error;
+
+  if (!changed)
+    {
+      /*
+       * Flattening might still have changed the shape, although
+       * currently Changed is only set by SIBLING. Emitting anyway
+       * is cheap and gives us the canonical associative form.
+       */
+    }
+
+  OPSTACK rewritten;
+  EmitQueryTree(*root, &rewritten);
+  SetOpstack(rewritten);
+
+
+cerr << "root:"
+     << " Empty=" << root->Empty
+     << " Object=" << root->Object.get()
+     << " Children=" << root->Children.size()
+     << endl;
+
+  if (root->Empty && ErrorCode) {
+    *ErrorCode = 135;
+   }
+
+  return 0;
+}
+
+#endif
+
+static const SQUERY::OPERATOR_DOC OperatorDocs[] =
+{
+  /*
+   * Boolean and set operators
+   */
+  {
+    OperatorOr,
+    "OR",
+    2,
+    "A B OR",
+    "Union: returns records matching either operand."
+  },
+  {
+    OperatorAnd,
+    "AND",
+    2,
+    "A B AND",
+    "Intersection: returns records matching both operands."
+  },
+  {
+    OperatorAndNot,
+    "ANDNOT",
+    2,
+    "A B ANDNOT",
+    "Difference: returns records matching A but not B."
+  },
+  {
+    OperatorNotAnd,
+    "NOTAND",
+    2,
+    "A B NOTAND",
+    "Reverse difference: equivalent to B A ANDNOT."
+  },
+  {
+    OperatorXor,
+    "XOR",
+    2,
+    "A B XOR",
+    "Exclusive union: returns records matching exactly one operand."
+  },
+  {
+    OperatorXnor,
+    "XNOR",
+    2,
+    "A B XNOR",
+    "Equivalence: returns records for which both operands have the same match state."
+  },
+  {
+    OperatorNand,
+    "NAND",
+    2,
+    "A B NAND",
+    "Complement of intersection: equivalent to A B AND NOT."
+  },
+  {
+    OperatorNor,
+    "NOR",
+    2,
+    "A B NOR",
+    "Complement of union: equivalent to A B OR NOT."
+  },
+
+  /*
+   * Unary Boolean and structural modifiers
+   */
+  {
+    OperatorNOT,
+    "NOT",
+    1,
+    "A NOT",
+    "Set complement: returns records not contained in A."
+  },
+  {
+    OperatorSibling,
+    "SIBLING",
+    1,
+    "EXPRESSION SIBLING",
+    "Postfix structural modifier that rewrites a compatible expression "
+    "as a same-container PEER expression."
+  },
+
+  /*
+   * Positional and proximity operators
+   */
+  {
+    OperatorAdj,
+    "ADJ",
+    2,
+    "A B ADJ",
+    "Returns matches whose terms are immediately adjacent or within the "
+    "engine's tight adjacency distance."
+  },
+  {
+    OperatorNear,
+    "NEAR",
+    2,
+    "A B NEAR[:distance]",
+    "Returns matches whose hits are near one another. An integer distance "
+    "is measured in source positions; a fractional or percent distance is "
+    "relative to the record size."
+  },
+  {
+    OperatorProximity,
+    "PROXIMITY",
+    2,
+    "A B PROXIMITY:distance | A B DIST[<|<=|>|>=]distance",
+    "General distance relation between operand hits. DIST comparison forms "
+    "select hits whose source distance satisfies the specified relation."
+  },
+  {
+    OperatorBefore,
+    "BEFORE",
+    2,
+    "A B BEFORE[:distance]",
+    "Ordered proximity: returns matches where A occurs before B within the "
+    "specified or default distance."
+  },
+  {
+    OperatorAfter,
+    "AFTER",
+    2,
+    "A B AFTER[:distance]",
+    "Ordered proximity: returns matches where A occurs after B within the "
+    "specified or default distance."
+  },
+  {
+    OperatorNeighbor,
+    "NEIGHBOR",
+    2,
+    "A B NEIGHBOR",
+    "Character-proximity relation using a record-relative neighborhood."
+  },
+  {
+    OperatorFollows,
+    "FOLLOWS",
+    2,
+    "A B FOLLOWS",
+    "Tight ordered proximity requiring A to follow B."
+  },
+  {
+    OperatorPrecedes,
+    "PRECEDES",
+    2,
+    "A B PRECEDES",
+    "Tight ordered proximity requiring A to precede B."
+  },
+  {
+    OperatorFar,
+    "FAR",
+    2,
+    "A B FAR",
+    "Returns matches whose hits are structurally separate or beyond the "
+    "engine's default near distance."
+  },
+
+  /*
+   * Schema-blind structural operators
+   */
+  {
+    OperatorPeer,
+    "PEER",
+    2,
+    "A B PEER",
+    "Returns matches whose hits occur within the same immediate non-root "
+    "structural container."
+  },
+  {
+    OperatorBeforePeer,
+    "PEERb",
+    2,
+    "A B PEERb",
+    "Ordered PEER relation using BEFORE ordering within the same immediate "
+    "structural container."
+  },
+  {
+    OperatorAfterPeer,
+    "PEERa",
+    2,
+    "A B PEERa",
+    "Ordered PEER relation using AFTER ordering within the same immediate "
+    "structural container."
+  },
+  {
+    OperatorXPeer,
+    "XPEER",
+    2,
+    "A B XPEER",
+    "Returns matches whose hits do not occur within the same immediate "
+    "structural container."
+  },
+  {
+    OperatorAncestor,
+    "ANCESTOR",
+    2,
+    "A B ANCESTOR",
+    "Returns matches whose hits share a common non-root structural ancestor."
+  },
+
+  /*
+   * Field-qualified binary operators
+   */
+  {
+    OperatorAndWithin,
+    "AND:field",
+    2,
+    "A B AND:<field>",
+    "Returns matches whose operand hits occur within the same instance of "
+    "the named field."
+  },
+  {
+    OperatorOrWithin,
+    "OR:field",
+    2,
+    "A B OR:<field>",
+    "Returns matches from either operand constrained to the named field."
+  },
+  {
+    OperatorBeforeWithin,
+    "BEFORE:field",
+    2,
+    "A B BEFORE:<field>",
+    "Returns matches where A occurs before B within the same instance of "
+    "the named field."
+  },
+  {
+    OperatorAfterWithin,
+    "AFTER:field",
+    2,
+    "A B AFTER:<field>",
+    "Returns matches where A occurs after B within the same instance of "
+    "the named field."
+  },
+
+  /*
+   * Unary field and record filters
+   */
+  {
+    OperatorWithin,
+    "WITHIN",
+    1,
+    "A WITHIN:<field-or-date-range>",
+    "Restricts A to hits within the named field, or to records within the "
+    "specified date range. In RPN, term WITHIN:field and field/term are "
+    "equivalent."
+  },
+  {
+    OperatorXWithin,
+    "XWITHIN",
+    1,
+    "A XWITHIN:<field>",
+    "Returns records from A having no hits within the named field."
+  },
+  {
+    OperatorInclusive,
+    "INCLUSIVE",
+    1,
+    "A INCLUSIVE:<field>",
+    "Returns records from A only when all retained hits are within the "
+    "named field."
+  },
+  {
+    OperatorNotWithin,
+    "NOT:field",
+    1,
+    "A NOT:<field>",
+    "Excludes matches occurring within the named field."
+  },
+  {
+    OperatorInside,
+    "INSIDE",
+    1,
+    "A INSIDE:<field>",
+    "Reserved structural containment operator. This form may not be "
+    "supported by every result-set implementation."
+  },
+  {
+    OperatorWithKey,
+    "WITHKEY",
+    1,
+    "A WITHKEY:<pattern>",
+    "Restricts A to records whose record key matches the specified pattern."
+  },
+  {
+    OperatorWithinFile,
+    "FILE",
+    1,
+    "A FILE:<pattern>",
+    "Restricts A to records whose local source pathname matches the pattern."
+  },
+  {
+    OperatorWithinFileExtension,
+    "EXTENSION",
+    1,
+    "A EXTENSION:<extension>",
+    "Restricts A to records whose source filename has the specified extension."
+  },
+  {
+    OperatorWithinDoctype,
+    "DOCTYPE",
+    1,
+    "A DOCTYPE:<name>",
+    "Restricts A to records associated with the specified document type."
+  },
+
+  /*
+   * Result-producing source operators
+   */
+  {
+    OperatorKey,
+    "KEY",
+    0,
+    "KEY:<pattern>",
+    "Produces a result set containing records whose key matches the pattern."
+  },
+  {
+    OperatorFile,
+    "FILE",
+    0,
+    "FILE:<pattern>",
+    "Produces a result set containing records whose local source pathname "
+    "matches the pattern."
+  },
+
+  /*
+   * Result reducers and scoring operators
+   */
+  {
+    OperatorReduce,
+    "REDUCE",
+    1,
+    "A REDUCE:<count>",
+    "Reduces A to records matching at least the requested number of distinct "
+    "query terms. REDUCE:0 uses the maximum distinct-term count found in A."
+  },
+  {
+    OperatorFocus,
+    "FOCUS",
+    1,
+    "A FOCUS:<count>",
+    "Prefers or retains records with stronger joint evidence from multiple "
+    "query terms."
+  },
+  {
+    OperatorHitCount,
+    "HITCOUNT",
+    1,
+    "A HITCOUNT:<count> | A HITCOUNT[<|<=|>|>=]<count>",
+    "Retains records whose number of hits satisfies the requested count or "
+    "comparison."
+  },
+  {
+    OperatorTrim,
+    "TRIM",
+    1,
+    "A TRIM:<count>",
+    "Truncates A to at most count records. TRIM:0 produces an empty set."
+  },
+  {
+    OperatorBoostScore,
+    "BOOST",
+    1,
+    "A BOOST:<weight>",
+    "Multiplies or increases the scores in A by the specified weight."
+  },
+  {
+    OperatorSortBy,
+    "SORTBY",
+    1,
+    "A SORTBY:<criterion>",
+    "Sorts A by a supported criterion such as Key, Hits, Date, Index, Score, "
+    "AuxCount, Newsrank, Category, or a reverse-order variant."
+  },
+
+  /*
+   * Cross-index operators
+   */
+  {
+    OperatorJoin,
+    "JOIN",
+    2,
+    "A B JOIN",
+    "Joins two result sets across physical indexes using the configured "
+    "join relationship."
+  },
+  {
+    OperatorJoinL,
+    "JOINL",
+    2,
+    "A B JOINL",
+    "Left-oriented cross-index join."
+  },
+  {
+    OperatorJoinR,
+    "JOINR",
+    2,
+    "A B JOINR",
+    "Right-oriented cross-index join."
+  },
+
+  /*
+   * Parser/control operator
+   */
+  {
+    OperatorNoop,
+    "NOOP",
+    0,
+    "NOOP",
+    "Performs no query operation."
+  }
+};
+
+const size_t OperatorDocsCount = sizeof(OperatorDocs) / sizeof(OperatorDocs[0]);
+
+
+const SQUERY::OPERATOR_DOC * SQUERY::GetOperatorDocs(size_t *Count)
+{
+  if (Count)
+    *Count = OperatorDocsCount;
+
+  return OperatorDocs;
+}
+
+const char *SQUERY::GetOperatorName(t_Operator Op)
+{
+  for (size_t i = 0; i < OperatorDocsCount; ++i)
+    {
+      if (OperatorDocs[i].Code == Op)
+        return OperatorDocs[i].Name;
+    }
+
+  return NULL;
+}
+
+const char * SQUERY::GetOperatorDescription(t_Operator Op)
+{
+  for (size_t i = 0; i < OperatorDocsCount; ++i)
+    {
+      if (OperatorDocs[i].Code == Op)
+        return OperatorDocs[i].Description;
+    }
+
+  return NULL;
+}
+
+
+#include "jsonstring.hxx"
+
+void SQUERY::WriteOperatorHelpJSON(std::ostream& out)
+{
+  size_t docCount = 0;
+
+  const OPERATOR_DOC *docs =
+    GetOperatorDocs(&docCount);
+
+  const size_t aliasCount = sizeof(Ops) / sizeof(Ops[0]);
+
+  out << "[\n";
+
+  for (size_t i = 0; i < docCount; ++i)
+    {
+      const OPERATOR_DOC& doc = docs[i];
+
+      out << "  {\n";
+
+      out << "    \"name\": ";
+      WriteJsonString(out, doc.Name);
+      out << ",\n";
+
+      out << "    \"code\": "
+          << static_cast<int>(doc.Code)
+          << ",\n";
+
+      out << "    \"arity\": "
+          << doc.Arity
+          << ",\n";
+
+      out << "    \"syntax\": ";
+      WriteJsonString(out, doc.Syntax);
+      out << ",\n";
+
+      out << "    \"aliases\": [";
+
+      bool firstAlias = true;
+
+      for (size_t j = 0; j < aliasCount; ++j)
+        {
+          if (Ops[j].code != doc.Code)
+            continue;
+	  if (strcasecmp(Ops[j].name, doc.Name) == 0)
+	    continue;
+
+          /*
+           * Avoid emitting duplicate spellings in case the canonical name
+           * appears more than once in Ops[].
+           */
+          bool duplicate = false;
+
+          for (size_t k = 0; k < j; ++k)
+            {
+              if (Ops[k].code == doc.Code &&
+                  std::strcmp(Ops[k].name, Ops[j].name) == 0)
+                {
+                  duplicate = true;
+                  break;
+                }
+            }
+
+          if (duplicate)
+            continue;
+
+          if (!firstAlias)
+            out << ", ";
+
+          WriteJsonString(out, Ops[j].name);
+          firstAlias = false;
+        }
+
+      out << "],\n";
+
+      out << "    \"description\": ";
+      WriteJsonString(out, doc.Description);
+      out << "\n";
+
+      out << "  }";
+
+      if (i + 1 < docCount)
+        out << ',';
+
+      out << '\n';
+    }
+
+  out << "]\n";
+}
+
+
+void SQUERY::WriteOperatorHelp(std::ostream& out)
+{
+  char *terms[] = {"Identity", "Unary", "Binary"}; 
+  size_t count = 0;
+  const SQUERY::OPERATOR_DOC *docs =
+  SQUERY::GetOperatorDocs(&count);
+  for (size_t i = 0; i < count; ++i) {
+     out << docs[i].Name << "\t" << terms[docs[i].Arity] << "\t" << 
+	docs[i].Syntax << "\t" << docs[i].Description << endl;
+  }
+}
+

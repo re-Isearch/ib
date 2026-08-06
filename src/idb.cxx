@@ -2852,8 +2852,9 @@ PIRSET IDB::Search (const QUERY& nQuery)
 
 #if 1
    // Now optimise
-   if (OptimizeQuery(&Query))
-     message_log(LOG_INFO, "Optimzed query: %s", STRING(Query).c_str());
+   if (OptimizeQuery(&Query)) {
+     // message_log(LOG_INFO, "Optimized query: %s", STRING(Query).c_str());
+   }
 #endif
 
   IRSET *IrsetPtr = MainIndex->Search (Query);
@@ -5412,6 +5413,14 @@ const char *IDB::ErrorMessage() const
 
 const char *IDB::ErrorMessage(int ErrorCode) const
 {
+#if 1
+  switch (ErrorCode) {
+    case -64: return "32-bit indexes are not compatible with 64-bit libs.";
+    case -32: return "64-bit indexes are not compatible with 32-bit libs. ";
+    default:  return Z3950_ERROR::ErrorMessage(ErrorCode);
+  }
+
+#else
   switch (ErrorCode) {
     case -64: return "32-bit indexes are not compatible with 64-bit libs.";
     case -32: return "64-bit indexes are not compatible with 32-bit libs. ";
@@ -5484,6 +5493,7 @@ const char *IDB::ErrorMessage(int ErrorCode) const
     case 132: return "Unsupported proximity unit code";
     default:  return "Unknown Error";
   }
+#endif
 }
 
 
@@ -6046,10 +6056,10 @@ bool IDB::OptimizeQuery(QUERY* Query)
 
   Query->SetPlanType(Result.PlanType);
 
-  if (Result.Rewritten)
+  const bool rewritten = Result.Rewritten();
+  if (rewritten)
     Query->SetSQUERY(SearchExpression);
-
-  return Result.Rewritten;
+  return rewritten;
 }
 
 
@@ -6073,6 +6083,21 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
 
   if (Query == NULL || MainIndex == NULL)
     return Result;
+
+  // Our optimization via syntaxical rewriting
+  int error = 0;
+
+  if (Query->Rewrite(&error))
+    Result.Normalized = true;
+
+  if (error)
+    {
+      SetErrorCode(error);
+      return Result;
+    }
+
+  // Now we can optimize on the basis of Expectations
+  // Right now only with AND expressions
 
   OPSTACK Source;
   Query->GetOpstack(&Source);
@@ -6257,7 +6282,7 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
 
   Query->SetOpstack(Optimized);
 
-  Result.Rewritten = true;
+  Result.Reordered = true;
 
   return Result;
 }

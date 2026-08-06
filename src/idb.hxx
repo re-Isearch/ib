@@ -55,6 +55,9 @@ enum DbState {
 };
 
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winconsistent-missing-override"
+
 class IDB : public IDBOBJ {
 friend class INDEX;
 friend class IRSET;
@@ -832,6 +835,9 @@ private:
 
   IDBOBJ     *Parent;  
 };
+
+#pragma clang diagnostic pop
+
 
 typedef IDB* PIDB;
 

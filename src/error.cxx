@@ -32,7 +32,7 @@ NAMESPACE ostream& operator<<(NAMESPACE ostream& os, const Z3950_ERROR& Error)
 
 static bool IsAdvisoryError(int error)
 {
-  return error == 133 || error == 134;
+  return error == 133 || error == 134 || error == 135 || error == 136;
 }
 
 
@@ -129,6 +129,8 @@ const char *Z3950_ERROR::ErrorMessage(int ErrorCode)
     case 132: return "Unsupported proximity unit code";
     case 133: return "Unsupported sort code";
     case 134: return "Result set clipped at configured threshold - valid subset available";
+    case 135: return "Query constraints reduce the result set to empty";
+    case 136: return "Query reduced to an empty expression";
     default:
 	if (__Private_IB_ErrorMessage) return __Private_IB_ErrorMessage(ErrorCode);
 	return "Unknown Error";

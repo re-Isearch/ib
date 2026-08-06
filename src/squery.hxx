@@ -29,13 +29,30 @@ enum QueryPlanType {
 
 struct QueryOptimizationResult {
   QueryPlanType PlanType = QueryPlanGeneral;
-  bool Rewritten = false;
-} ;
+  bool Normalized = false;
+  bool Reordered  = false;;
+  bool Rewritten() const { return Normalized || Reordered; }
+};
 
 class OPERATOR;
 
 class SQUERY {
 public:
+  struct OPERATOR_DOC
+  {
+    t_Operator  Code;
+    const char *Name;
+    unsigned    Arity;
+    const char *Syntax;
+    const char *Description;
+  };
+
+  static const char *GetOperatorName(t_Operator Operator);
+  static const char *GetOperatorDescription(t_Operator Operator);
+  static const OPERATOR_DOC * GetOperatorDocs(size_t *Count);
+  static void WriteOperatorHelpJSON(std::ostream& Out);
+  static void WriteOperatorHelp(std::ostream& out);
+
   SQUERY();
   SQUERY(THESAURUS *Thesaurus);
   SQUERY(const STRING& QueryTerm, THESAURUS *Thesaurus=NULL);
@@ -153,6 +170,8 @@ public:
   void Write (PFILE Fp) const;
   bool Read (PFILE Fp);
 
+  bool Rewrite(int *errorCode = NULL);
+
   ~SQUERY();
 private:
   size_t      SetTerm(const STRING&, bool);
@@ -259,6 +278,8 @@ public:
   QueryPlanType GetPlanType() const { return PlanType; }
   void SetPlanType(QueryPlanType Type) { PlanType = Type; }
   bool CanTerminateOnEmpty() const { return PlanType == QueryPlanPureAnd; }
+
+  bool Rewrite(int *errorCode = NULL) { return Squery.Rewrite(errorCode); }
 
 private:
   SQUERY                    Squery;

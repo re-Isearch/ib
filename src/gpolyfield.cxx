@@ -168,7 +168,7 @@ int GPOLYFLD::Read(FILE *fp)
 
   if (obj != objGPOLYFLD)
     {
-      if (obj == -1 && feof(fp))
+      if (obj == (obj_t)-1 && feof(fp))
 	return -1;
       message_log (LOG_WARN, "GPOLYFLD::Read. Not a GPOLY Field (%d!=%d @%ld)?",
 	(int)obj, (int)objGPOLYFLD, (long)(ftell(fp)-1));
