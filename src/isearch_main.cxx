@@ -24,10 +24,30 @@ Description:	Command-line search utility
 
 #include "jsonstring.hxx"
 
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+  
+using std::cout;
+using std::endl;
+
+
 static const int _isearch_main_version = 3;
 
 #ifndef _WIN32
 # define SHOW_RUSAGE 1
+
+static unsigned long MaxResidentKiB(const struct rusage& usage)
+{               
+#if defined(__APPLE__)
+  return static_cast<unsigned long>(usage.ru_maxrss / 1024);
+#else       
+  return static_cast<unsigned long>(usage.ru_maxrss);
+#endif      
+}    
+
+
 #else
 # include <io.h>
 #endif
@@ -254,8 +274,18 @@ PRSET LoadResultSet(SQUERY *QueryPtr, const STRING& LoadTable)
 #endif
 
 
+
+static void HelpUsageJSON(const char *progname);
+static void HelpUsageText( const char *progname, std::ostream& out = std::cout);
+
 static void HelpUsage(const char *progname)
 {
+#if 1
+  if (isatty(fileno(stdout)))
+    HelpUsageText(RemovePath(progname));
+  else
+    HelpUsageJSON(RemovePath(progname));
+#else
   const char *prog = (progname && *progname ? progname : "Isearch");
   cout << prog << " -d db [options] term..." << endl <<
 	"options:" << endl << 
@@ -469,14 +499,12 @@ static void HelpUsage(const char *progname)
 	"By contrast 1,speech returns ALL the speeches in record #1." << endl <<
 	"The above 'special' elements may also be specified, e.g. 1,H" << endl << endl;
 //    PrintDoctypeList();
+#endif
 }
 
 extern "C" {
   int _Isearch_main(int argc, char **argv);
 };
-
-
-static void HelpUsageJSON(const char *progname) ;
 
 
 int _Isearch_main (int argc, char **argv)
@@ -737,14 +765,20 @@ int _Isearch_main (int argc, char **argv)
 	    }
 	  else if (Flag.Equals("-help"))
 	    {
-	      HelpUsage(  RemovePath(argv[0]).c_str() );
+	      HelpUsage(RemovePath(argv[0]).c_str());
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals("-help=json"))
 	    {
-	      HelpUsageJSON( RemovePath(argv[0]).c_str());
+	      HelpUsageText( RemovePath(argv[0]).c_str());
 	      LastUsed = x;
 	    }
+	  else if (Flag.Equals("-help=txt"))
+	    {
+	      HelpUsageText(RemovePath(argv[0]).c_str() );
+	      LastUsed = x;
+	    }
+
 	  else if (Flag.Equals("-qhelp=json"))
 	    {
 	      SQUERY::WriteOperatorHelpJSON(std::cout);
@@ -2302,7 +2336,7 @@ again:
 			rusage.ru_utime.tv_usec/1000000.0) << " seconds" << endl <<
 		"    System time:        " << (rusage.ru_stime.tv_sec + 
 			rusage.ru_stime.tv_usec/1000000.0)  << " seconds" << endl <<
-		"Max resident size:      " << rusage.ru_maxrss << "k" << endl <<
+		"Max resident size:      " << MaxResidentKiB(rusage) << "k" << endl <<
 		"Shared text memory:     " << (rusage.ru_ixrss)/ticks << "k" << endl <<
 		"Unshared data:          " << (rusage.ru_idrss)/ticks << "k" << endl <<
 		"Unshared stack:         " << (rusage.ru_isrss)/ticks << "k" << endl <<
@@ -2325,16 +2359,6 @@ again:
 	#endif
 	  return 0;
 }
-
-
-#if 1
-
-
-#include <iostream>
-#include <string>
-
-using std::cout;
-using std::endl;
 
 namespace
 {
@@ -3142,6 +3166,183 @@ static void HelpUsageJSON(const char *progname)
 
   cout << "}\n";
 }
+
+
+#if 1
+
+static std::string OptionSyntax(const CLI_OPTION_DOC& doc)
+{
+  std::string text = doc.Option ? doc.Option : "";
+
+  if (doc.Argument && *doc.Argument)
+    {
+      text += " ";
+      text += doc.Argument;
+    }
+
+  return text;
+}
+
+
+static void WriteWrappedText(
+    std::ostream& out,
+    const std::string& text,
+    size_t firstIndent,
+    size_t continuationIndent,
+    size_t width = 100)
+{
+  std::istringstream input(text);
+  std::string word;
+  size_t column = firstIndent;
+  bool first = true;
+
+  while (input >> word)
+    {
+      const size_t separator = first ? 0 : 1;
+
+      if (!first && column + separator + word.size() > width)
+        {
+          out << '\n'
+              << std::string(continuationIndent, ' ');
+
+          column = continuationIndent;
+          separator ? void() : void();
+        }
+      else if (!first)
+        {
+          out << ' ';
+          ++column;
+        }
+
+      out << word;
+      column += word.size();
+      first = false;
+    }
+
+  out << '\n';
+}
+
+
+static void HelpUsageText( const char *progname, std::ostream& out)
+{
+  const char *prog =
+      progname && *progname ? progname : "Isearch";
+
+  const size_t optionCount =
+      sizeof(CliOptions) / sizeof(CliOptions[0]);
+
+  const size_t optionColumnWidth = 25;
+  const size_t descriptionColumn = 2 + optionColumnWidth + 2;
+
+  out << prog << " -d db [options] term...\n"
+      << "options:\n";
+
+  const char *currentGroup = NULL;
+
+  for (size_t i = 0; i < optionCount; ++i)
+    {
+      const CLI_OPTION_DOC& doc = CliOptions[i];
+
+      if (!currentGroup ||
+          std::strcmp(currentGroup, doc.Group) != 0)
+        {
+          currentGroup = doc.Group;
+
+          out << '\n'
+              << currentGroup
+              << ":\n";
+        }
+
+      const std::string syntax = OptionSyntax(doc);
+
+      out << "  "
+          << std::left
+          << std::setw(optionColumnWidth)
+          << syntax
+          << std::right
+          << "  ";
+
+      WriteWrappedText(
+          out,
+          doc.Description ? doc.Description : "",
+          descriptionColumn,
+          descriptionColumn);
+    }
+
+  out << "\n"
+      << "terms:\n"
+      << "  Terms, operands, or a complete query expression.\n"
+      << "  With -rpn, the expression must use Reverse Polish Notation.\n"
+      << "  With -infix, conventional infix notation is expected.\n"
+      << "  With -words or -regular, terms are combined using OR.\n"
+      << "  The default query mode is Smart search.\n"
+      << "\n"
+      << "fielded search:\n"
+      << "  [[fieldname][relation]]searchterm[*][:weight]\n"
+      << "  Relations are <, >, >=, <= and <>. Their semantics depend\n"
+      << "  upon the field datatype.\n"
+      << "\n"
+      << "term modifiers:\n";
+
+  const size_t modifierCount =
+      sizeof(TermModifiers) / sizeof(TermModifiers[0]);
+
+  for (size_t i = 0; i < modifierCount; ++i)
+    {
+      out << "  "
+          << std::left
+          << std::setw(optionColumnWidth)
+          << TermModifiers[i].Form
+          << std::right
+          << "  ";
+
+      WriteWrappedText(
+          out,
+          TermModifiers[i].Description,
+          descriptionColumn,
+          descriptionColumn);
+    }
+
+  out << "\n"
+      << "date ranges:\n"
+      << "  YYYY[MM[DD]][-YYYY[MM[DD]]]\n"
+      << "  YYYY[MM[DD]]/[[YYYY]MM]DD\n"
+      << "  ISO 8601 and other recognized date formats are accepted.\n"
+      << "  Example: 2005 selects every record dated during 2005.\n"
+      << "  -daterange restricts all searches; WITHIN:<daterange>\n"
+      << "  restricts only its operand set.\n"
+      << "\n"
+      << "reserved syntax:\n"
+      << "  RECT{N,W,S,E} is reserved for bounding-box searches in\n"
+      << "  predefined numeric quadrant fields.\n";
+
+   out << endl <<
+        "Examples: " << prog << " -d POETRY truth 'beaut*' urn:2\n" << 
+        "          " << prog << " -d FTP -headline L C++\n" <<
+        "          " << prog << " -d WEBPAGES title/library\n" << 
+        "          " << prog << " -d WEBPAGE  -rpn library WITHIN:title\n" << 
+        "          " << prog << " -d WEBPAGES library WITHIN:title\n" << 
+        "          " << prog << " -d STORIES -rpn title/cat title/dog OR title/mouse OR\n" << 
+        "          " << prog << " -d STORIES -infix title/(cat or dog or mouse)\n" << 
+        "          " << prog << " -d POETRY -rpn speaker/hamlet line/love AND:scene\n" << 
+        "          " << prog << " -d POETRY -infix (speaker/hamlet and:scene line/love)\n" << 
+        "          " << prog << " -d POETRY -infix act/(speaker/hamlet and:scene line/love)\n" << 
+        "          " << prog << " -d MAIL -H -infix from/edz AND 'subject/\"Isearch Doctypes\"'\n" << 
+        "          " << prog << " -d KFILM -XML -show -rpn microsoft NT AND windows NOT\n" << 
+        "          " << prog << " -d BILLS -rpn vendor/BSn price<100 AND\n" << 
+        "          " << prog << " -d NEWS  -rpn unix WITHIN:2006\n" << 
+        "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -rpn out spot PEER" << endl <<
+        "Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short.\n" << endl <<
+        "Additional \"Special\" elements: R for Raw, H for Highlight/Hits; and if they exist," << endl <<
+        "L for location/redirect and M for metadata." << endl << endl <<
+        "In the response one can select not just the record but also all elements of a specific field as" << endl <<
+        "well as specific contents where the hit occurs (similar to -P). Example:  1,speech/speech" << endl <<
+        "to select the contents of a speech where the hit(s) in record #1 occurs." << endl <<
+        "Shorthand for element/element is @element, so 1,@line or even 1@line is really 1,line/line" << endl <<
+        "By contrast 1,speech returns ALL the speeches in record #1." << endl <<
+        "The above 'special' elements may also be specified, e.g. 1,H" << endl << endl;
+}
+
 
 
 #endif
