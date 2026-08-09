@@ -1276,7 +1276,7 @@ Contact edz@nonmonotonic.com!!", byteCount, CHUNK_SIZE*4);
          * result, which is printed on standard output
          */
         for (i = 0; i < OUTPUT_BLOCK_SIZE; i++) {
-          sprintf(tmp, "%08lx", (long)hash[i]);
+          snprintf(tmp, sizeof(tmp), "%08lx", (long)hash[i]);
 	  Output.Cat(tmp);
 	}
   return Output;

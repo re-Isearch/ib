@@ -2839,20 +2839,20 @@ char * SRCH_DATE::ISOdate(char *buf, size_t maxsize) const
       if (mday == 0)
 	{
 	  if (mon == 0)
-	    sprintf(tmp, "%04d", year);
+	    snprintf(tmp, sizeof(tmp), "%04d", year);
 	  else
-	    sprintf(tmp, "%04d%02d", year, mon);
+	    snprintf(tmp, sizeof(tmp), "%04d%02d", year, mon);
 	}
       else if (rest == 0)
 	{
-	  sprintf(tmp, "%04d%02d%02d", year, mon, mday);
+	  snprintf(tmp, sizeof(tmp), "%04d%02d%02d", year, mon, mday);
 	}
       else
 	{
 	  int hour = _Hour(rest);
 	  int min  = _Minutes(rest);
 	  int sec  = _Seconds(rest); 
-	  sprintf(tmp, "%04d%02d%02dT%02d:%02d:%02dZ",
+	  snprintf(tmp, sizeof(tmp), "%04d%02d%02dT%02d:%02d:%02dZ",
 		year, mon, mday, hour, min, sec);
 	}
     }
@@ -2889,13 +2889,13 @@ char * SRCH_DATE::ANSIdate(char *buf, size_t maxlen) const
   if (ParseTm(&tm))
     {
       // CCYYMMDD HH:MM GMT
-      sprintf(tmp, "%04d%02d%02d",
+      snprintf(tmp, sizeof(tmp), "%04d%02d%02d",
 	tm.tm_year + TM_YEAR_BASE, tm.tm_mon + 1, tm.tm_mday);
       if (tm.tm_hour || tm.tm_min || tm.tm_sec)
 	{
-	  sprintf(tmp+8, " %02d:%02d", tm.tm_hour, tm.tm_min);
+	  snprintf(tmp+8, sizeof(tmp)-8, " %02d:%02d", tm.tm_hour, tm.tm_min);
 	  if (tm.tm_sec)
-	    sprintf(tmp+14, "%02d", tm.tm_sec);
+	    snprintf(tmp+14, sizeof(tmp)-14,  "%02d", tm.tm_sec);
 	  strcat(tmp, " GMT");
 	}
     }
@@ -2988,7 +2988,7 @@ char * SRCH_DATE::RFCdate(char *buf, size_t maxlen) const
     {
       if ( tm.tm_hour || tm.tm_min || tm.tm_sec )
 	{
-	  sprintf(tmp, "%s, %02d %s %04d %02d:%02d:%02d GMT",
+	  snprintf(tmp, sizeof(tmp), "%s, %02d %s %04d %02d:%02d:%02d GMT",
 		days[tm.tm_wday],
 		tm.tm_mday,
 		months[tm.tm_mon],
@@ -2997,7 +2997,7 @@ char * SRCH_DATE::RFCdate(char *buf, size_t maxlen) const
 	}
       else
 	{
-	  sprintf(tmp, "%s, %02d %s %04d",
+	  snprintf(tmp, sizeof(tmp), "%s, %02d %s %04d",
 		days[tm.tm_wday],
 		tm.tm_mday,
 		months[tm.tm_mon],
@@ -3678,7 +3678,7 @@ DATERANGE::DATERANGE(const STRING& DateString)
 	       end = value + 9;
 	    }
 	  // else,, an error 1911's or 1911s but we'll accept it means during..
-	  sprintf(tmp, "%d/%d", value, end);
+	  snprintf(tmp, sizeof(tmp), "%d/%d", value, end);
 	  *this = DATERANGE(tmp);
 	  return;
 	}
@@ -3740,7 +3740,7 @@ DATERANGE::DATERANGE(const STRING& DateString)
 	    if (sscanf(DateString.c_str(), "%d %*s %d", &y1, &y2) == 2)
 	      {
 		char tmp[64];
-		sprintf(tmp, "%d/%d", y1, y2);
+		snprintf(tmp, sizeof(tmp), "%d/%d", y1, y2);
 		DATERANGE d = DATERANGE(tmp);
 		if (d.Ok())
 		  {

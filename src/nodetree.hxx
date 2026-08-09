@@ -60,6 +60,8 @@ public:
   void                Print (ostream& Os) const;
 
   STRING              XMLNodeTree(const STRING& Content = NulString) const;
+  STRING              JsonNodeTree( const STRING& Content = NulString) const ;
+
 
   // Iteration methods
   TREENODELIST       *Next()        { return (TREENODELIST *)GetNextNodePtr();       }
@@ -200,6 +202,10 @@ public:
   STRING  XMLNodeTree(const STRING& Content = NulString) const {
    return  p_->table_->XMLNodeTree(Content);
   }
+ STRING  JsonNodeTree(const STRING& Content = NulString) const {
+   return  p_->table_->JsonNodeTree(Content);
+  }
+  
 
 
   int Refcount_() const { return p_ ?  p_->count_  : -1; }

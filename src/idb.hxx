@@ -246,6 +246,7 @@ public:
 
   STRING GetPeerContent(const FC& HitFc);
   STRING GetPeerContentXMLFragement(const FC& HitFc);
+  STRING GetPeerContentJsonFragement(const FC& HitFc);
 
   DFDT *GetDfdt() { return MainDfdt;};
   DFDT *GetDfdt(DFDT *DfdtBuffer, const RESULT *ResultPtr = NULL) {

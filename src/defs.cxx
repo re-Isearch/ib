@@ -99,10 +99,10 @@ static const char KeyFile[] = "/opt/nonmonotonic/lib/license";
 
 const char * const __CopyrightData = "\
 Portions Copyright (c) 1995 MCNC/CNDIR; 1995-2011 BSn/Munich and its NONMONOTONIC Lab;\n\
-1995-2000 Archie Warnock; and a host of other contributors;\n\
+Copyright (c) 1995-2000 Archie Warnock; and a host of other contributors;\n\
 Copyright (c) 2020-2022 NONMONOTONIC Networks for the re.Isearch Project.\n\
 Copyright (c) 2022-2023 Project Exodus 3.0 (Germany) and the ExoDAO Network Association (Zurich).\n\
-Copyright (c) 2024-2026 re-Isearch / DeepQuarry.eu (Germany)\n\n\
+Copyright (c) 2024-2026 re-Isearch / CoreQuarry.com\n\n\
 This software has been made available by generous public support including grants from the EU's NGI0\n\
 Discovery Fund through NLnet, grants agreement No 825322 and No 101135429 (wth support also from SERI)\n\
 under the NGI0 Commons Fund for project Schmate as well as the German BMBF as grant Nr. 01IS22S32 for\n\
@@ -623,6 +623,7 @@ RLDCACHE* Cache = NULL;
 
 long __Register_IB_Application(const char *Appname, FILE *output, int DebugFlag)
 {
+  const char *default_app = "re-Isearch";
 #ifndef NO_RLDCACHE
   extern RLDCACHE* Cache;
 #endif
@@ -646,7 +647,7 @@ long __Register_IB_Application(const char *Appname, FILE *output, int DebugFlag)
   registered = 1;
 
 #define DEF_LOG (iLOG_ALL&(~iLOG_DEBUG))
-  _globalMessageLogger.Init(DebugFlag ? iLOG_ALL : DEF_LOG, Appname, output);
+  _globalMessageLogger.Init(DebugFlag ? iLOG_ALL : DEF_LOG, Appname ? Appname : default_app, output);
 
 #ifndef MSDOS
   if (!DebugFlag)

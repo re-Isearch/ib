@@ -174,7 +174,7 @@ static STRING EntityFix(const STRING& Input)
 	  default:
 	    if (ch< 32 && !isspace(ch))
 	      {
-		sprintf(tmp, "&#%d;", ch);
+		snprintf(tmp, sizeof(tmp), "&#%d;", ch);
 		String.Cat(tmp);
 	      }
 	    else

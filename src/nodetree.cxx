@@ -10,7 +10,7 @@ Author:         Edward C. Zimmermann
 @@@*/
 
 #include "nodetree.hxx"
-
+#include "jsonstring.hxx"
 
 static int NodeCompare (const void *y, const void *x)
 {
@@ -153,4 +153,30 @@ int TREENODELIST::Sort ()
   return TotalEntries; 
 }
 
+
+STRING TREENODELIST::JsonNodeTree( const STRING& Content) const
+{
+  STRING Result;
+
+  for (const TREENODELIST *p = Prev();
+       p != this;
+       p = p->Prev())
+    {
+      Result << "{";
+      WriteJsonString(Result, p->Node.Name().c_str());
+      Result << ":";
+    }
+
+  if (Content.IsEmpty())
+    Result << "null";
+  else
+    WriteJsonString(Result, Content.c_str());
+
+  for (const TREENODELIST *p = Next();
+       p != this;
+       p = p->Next())
+    Result << "}";
+
+  return Result;
+}
 

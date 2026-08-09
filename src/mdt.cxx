@@ -2147,7 +2147,7 @@ void MDT::Dump (INT Skip, ostream& os) const
       GetEntry (x, &Mdtrec);
       Mdtrec.GetKey (&key);
 
-      sprintf(tmp, "%ld-%ld ",
+      snprintf(tmp,sizeof(tmp), "%ld-%ld ",
 	(long)(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordStart ()),
 	(long)(Mdtrec.GetGlobalFileStart () + Mdtrec.GetLocalRecordEnd ()) );
 #ifdef SOLARIS

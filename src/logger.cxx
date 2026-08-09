@@ -15,6 +15,7 @@ g++ -c  -I. -I../src logger.cxx
 
 // use vasprintf instead!!!
 
+
 #ifndef HAVE_SAFESPRINTF
 # if defined(_WIN32) || defined(BSD) || defined(LINUX)
 #  define HAVE_SAFESPRINTF 1
@@ -57,13 +58,13 @@ static const char STANDARD_IBLOG[] =
 #endif
 #if defined(_MSDOS) || defined(_WIN32)
 
-static char *getlogin()
+static const char *_getlogin()
 {
   static char tmp[127];
   if (tmp[0] == '\0')
     {
       if (_IB_GetUserId(tmp, sizeof(tmp)-1) == false)
-        strcpy(tmp, "anonymous");
+        strcpy(tmp, "<anonymous>");
     }
   return tmp;
 };
@@ -72,6 +73,26 @@ static char *getlogin()
 #ifndef __GNUG__
 # define getpid() GetCurrentProcessId()  //cast DWORD to long
 #endif
+
+#else
+
+#include <pwd.h>
+#include <uuid/uuid.h>
+
+static const char *_getlogin()
+{
+  static const char *login = NULL;
+  if (login == NULL)
+    {
+      if ((login = getlogin()) == NULL)
+	{
+	  struct passwd *pw = getpwuid(geteuid());
+	  login = pw ? pw->pw_name : "<anonymous>";
+	}
+    }
+  return login;
+}
+
 #endif
 
 #define default_prefix "IB"
@@ -101,7 +122,7 @@ MessageLogger::MessageLogger()
 
   last_message = (char *)calloc(MaxMessageLength+1, sizeof(char));
   curr_message = (char *)calloc(MaxMessageLength+1, sizeof(char));
-  if (last_message == NULL || last_message == NULL)
+  if (last_message == NULL || curr_message == NULL)
     {
       perror("Out of memory: Can't allocate error message buffer");
       abort();
@@ -398,7 +419,7 @@ void MessageLogger::log_message(int level, const char *string)
 // This is where the log is written. A global instance is what the vararg call message_log(..) calls
 void MessageLogger::log (int Mask, const char *fmt,...)
 {
-  static char *login = NULL;
+  static const char *login = NULL;
   static long  count = 0;
   char         flags[127];
   int          level = Mask;
@@ -441,8 +462,11 @@ void MessageLogger::log (int Mask, const char *fmt,...)
     {
       if (mask_names[i].mask & level)
 	{
-	  if (*mask_names[i].name)
-	    sprintf (flags + strlen (flags), "[%s]", mask_names[i].name);
+	  if (*mask_names[i].name) {
+	    const size_t off = strlen(flags);
+	    if (off < sizeof(flags))
+	      snprintf (flags + off, sizeof(flags) - off,  "[%s]", mask_names[i].name);
+	  }
 	  level -= mask_names[i].mask;
 	}
     }
@@ -487,8 +511,8 @@ void MessageLogger::log (int Mask, const char *fmt,...)
 #else
       if (errno)
 	{
-	  size_t len = strlen(curr_message);
-	  sprintf (&curr_message[len], " [%s]", strerror (errno));
+	  const size_t len = strlen(curr_message);
+	  snprintf (&curr_message[len], MaxMessageLength-len,  " [%s]", strerror (errno));
 	}
 #endif
     }
@@ -504,7 +528,7 @@ void MessageLogger::log (int Mask, const char *fmt,...)
       if (OutputFunc)
 	{
 	  char tmp[BUFSIZ];
-	  sprintf(tmp, "**** last message repeated %ld times", count);
+	  snprintf(tmp, sizeof(tmp), "**** last message repeated %ld times", count);
 
 	  OutputFunc(Mask, tmp);
 	}
@@ -520,11 +544,8 @@ void MessageLogger::log (int Mask, const char *fmt,...)
 	  pThreadLocker lock(&m_mutex);
 
 #endif
-
-	  if (login == NULL)
-	    login = getlogin();
 	  fprintf(l_file, "%s [%s,pid=%ld]: **** last message repeated %ld times\n",
-		l_prefix, login ? login : "???", (long)getpid(), (long)count);
+		l_prefix, _getlogin(), (long)getpid(), (long)count);
 	}
     }
 
@@ -565,12 +586,10 @@ void MessageLogger::log (int Mask, const char *fmt,...)
 #ifdef USE_pThreadLocker
 	  pThreadLocker lock(&m_mutex);
 #endif
-	  if (login == NULL)
-	    login = getlogin();
 	  time_t t = time(NULL);
 	  strftime(tbuf, sizeof(tbuf), "%m/%d/%Y %T", localtime(&t));
 	  fprintf (l_file, "%s %s %s[%ld]: %s %s\n",
-	       tbuf, login, l_prefix, (long)getpid(), flags, curr_message);
+	       tbuf, _getlogin(), l_prefix, (long)getpid(), flags, curr_message);
 	}
       else
 	fprintf (l_file, "%s %s: %s\n", l_prefix, flags, curr_message);

@@ -3514,6 +3514,12 @@ STRING IDB::GetPeerContentXMLFragement(const FC& HitFc)
 #endif
 }
 
+STRING IDB::GetPeerContentJsonFragement(const FC& HitFc)
+{
+  return GetNodeTree(HitFc).JsonNodeTree( GetPeerContent(HitFc)  );
+}
+
+
 //
 // Writes the Headline to the cache
 //

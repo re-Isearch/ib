@@ -516,7 +516,13 @@ int _Isearch_main (int argc, char **argv)
 #endif
   if (argc < 2)
     {
-      cout << endl << "IB Search v." <<  _isearch_main_version << "." << SRCH_DATE(__DATE__).ISOdate() << "."
+      cout << endl << 
+#ifdef VECTOR_INDEX
+	"CoreQuarry Search v."
+#else
+	"IB Search v." 
+#endif
+	<<  _isearch_main_version << "." << SRCH_DATE(__DATE__).ISOdate() << "."
 	      <<  __IB_Version << " (" << __HostPlatform <<
 #ifdef _OPENMP
 	" MultiThreaded" << 
@@ -770,7 +776,7 @@ int _Isearch_main (int argc, char **argv)
 	    }
 	  else if (Flag.Equals("-help=json"))
 	    {
-	      HelpUsageText( RemovePath(argv[0]).c_str());
+	      HelpUsageJSON( RemovePath(argv[0]).c_str());
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals("-help=txt"))
@@ -784,9 +790,17 @@ int _Isearch_main (int argc, char **argv)
 	      SQUERY::WriteOperatorHelpJSON(std::cout);
 	      LastUsed = x;
 	    }
+          else if (Flag.Equals("-qhelp=txt"))
+            {               
+              SQUERY::WriteOperatorHelp(std::cout);
+              LastUsed = x; 
+            }
 	  else if (Flag.Equals("-qhelp"))
 	    {
-	      SQUERY::WriteOperatorHelp(std::cout);
+	      if (isatty(fileno(stdout)))
+		SQUERY::WriteOperatorHelp(std::cout);
+	      else
+		SQUERY::WriteOperatorHelpJSON(std::cout);
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals("-h"))
@@ -2896,13 +2910,13 @@ namespace
     },
     {
       "diagnostics",
-      "-help",
+      "-help[=json|txt]",
       NULL,
-      "Display command-line help."
+      "Display command-line help, optionally as JSON."
     },
     {
       "diagnostics",
-      "-qhelp[=json]",
+      "-qhelp[=json|txt]",
       NULL,
       "Display available query operators, optionally as JSON."
     }

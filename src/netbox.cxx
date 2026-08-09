@@ -440,10 +440,10 @@ int NETBOXPROFILE::CurrentStatus()
 #endif
   Peer = gethostbyaddr(inet_ntoa(Name.sin_addr), 4, AF_INET);
   if(Peer != NULL) {
-    sprintf(PeerName,"%s [%s]",Peer ? Peer->h_name:"?",
+    snprintf(PeerName, sizeof(PeerName), "%s [%s]",Peer ? Peer->h_name:"?",
 	    inet_ntoa(Name.sin_addr));
   } else {
-    sprintf(PeerName,"[%s]", inet_ntoa(Name.sin_addr));
+    snprintf(PeerName, sizeof(PeerName), "[%s]", inet_ntoa(Name.sin_addr));
   }
   return(0);
 }

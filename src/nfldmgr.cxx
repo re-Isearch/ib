@@ -76,14 +76,14 @@ INT NUMERICFLDMGR::Find(INT Attribute, INT4 Relation, FLOAT Key)
 
 INT NUMERICFLDMGR::LoadFields(PCHR dbName)
 {
-  CHR FullName[256];
+  CHR FullName[4096];
   CHR Input[256];
   CHR TypeString[128];
   INT Attribute;
   FILE *fp;
   INT counter=0;
   
-  sprintf(FullName,"%s.fdf",dbName); // make definition file name
+  snprintf(FullName, sizeof(FullName), "%s.fdf",dbName); // make definition file name
   fp=fopen(FullName,"rb");
   if(fp==NULL)
     return(0);			// no fields
@@ -123,9 +123,9 @@ INT NUMERICFLDMGR::LoadFields(PCHR dbName)
       continue;
     }else{
       // make the field
-      CHR FieldFile[256];
+      CHR FieldFile[4096];
       
-      sprintf(FieldFile,"%s.%d",dbName,Attribute);
+      snprintf(FieldFile, sizeof(FieldFile), "%s.%d",dbName,Attribute);
       fields[NumFields].SetFileName(FieldFile);
 //      fields[NumFields].LoadTable();
       if(fields[NumFields].GetCount()==0)

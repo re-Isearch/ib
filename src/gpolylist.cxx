@@ -153,7 +153,7 @@ INT GPOLYLIST::LoadTable(STRING& Fn)
   if ((fp = fopen(Fn,"rb"))) {
      obj_t  obj = getObjID(fp); // It it really a GPOLY Field?
 
-     if (obj == -1 && feof(fp))
+     if (obj == (obj_t)-1 && feof(fp))
 	return 0; // End-of-file
 
     if (obj == objGPOLYLIST)

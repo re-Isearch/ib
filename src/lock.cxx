@@ -169,6 +169,8 @@ static int db_lock (const char *dbname, int Lock)
 
 #if defined(__GNUC__) || defined(__GNUG__)
   const size_t len = strlen(dbname) + MAXNAMLEN + MAXPIDLEN + 3;
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wvla-cxx-extension"
   char tfile[len];
   char lfile[len];
 #else
@@ -189,16 +191,16 @@ static int db_lock (const char *dbname, int Lock)
   // Build the lock
   if (
 #if 1
-  sprintf (entry, "%lu/%s/%s/%s/", (unsigned long)getpid (), whoami, host, fullname)
+  snprintf (entry, sizeof(entry), "%lu/%s/%s/%s/", (unsigned long)getpid (), whoami, host, fullname)
 #else
   // When run under Python this segfaults
-  sprintf (entry, "%*0lu/%s/%s/%s/", MAXPIDLEN, (unsigned long)getpid (), whoami, host, fullname)
+  snprintf (entry, sizeof(entry), "%*0lu/%s/%s/%s/", MAXPIDLEN, (unsigned long)getpid (), whoami, host, fullname)
 #endif
   < 0 )
     entry[0] = '\0';
   message_log(LOG_DEBUG, "Setting lock as '%s'", entry); 
-  (void) sprintf (tfile, _PID_TEMPLATE, dbname, (long)getpid ());
-  (void) sprintf (lfile, _LOCK_TEMPLATE, dbname, LockType (Lock));
+  (void) snprintf (tfile, sizeof(tfile), _PID_TEMPLATE, dbname, (long)getpid ());
+  (void) snprintf (lfile, sizeof(lfile), _LOCK_TEMPLATE, dbname, LockType (Lock));
 
   /*
    * If the lock fails, check to see if it is currently locked
@@ -339,7 +341,7 @@ static int db_unlock (const char *dbname, int Lock)
 
 //  if (Lock == L_APPEND) db_unlock(dbname, L_WRITE);
 
-  (void) sprintf (lfile, _LOCK_TEMPLATE, dbname, LockType (Lock));
+  (void) snprintf (lfile, sizeof(lfile), _LOCK_TEMPLATE, dbname, LockType (Lock));
 
   if ((lf = open (lfile, O_RDONLY, 0)) < 0)
     return (errno == ENOENT) ? 0 : unlink (lfile);
@@ -471,7 +473,7 @@ INT LockWait (const char *DbFileStem, const int Flags, const int secs)
 
   if (Flags & L_READ)
     {
-      sprintf (lfile, _LOCK_TEMPLATE, DbFileStem, LockType (L_READ));
+      snprintf (lfile, sizeof(lfile),_LOCK_TEMPLATE, DbFileStem, LockType (L_READ));
       if (waitlock (lfile, secs))
 	{
 	  res ^= L_READ;
@@ -479,7 +481,7 @@ INT LockWait (const char *DbFileStem, const int Flags, const int secs)
     }
   if (Flags & L_WRITE)
     {
-      sprintf (lfile, _LOCK_TEMPLATE, DbFileStem, LockType (L_WRITE));
+      snprintf (lfile, sizeof(lfile), _LOCK_TEMPLATE, DbFileStem, LockType (L_WRITE));
       if (waitlock (lfile, secs))
 	{
 	  res ^= L_WRITE;
@@ -487,7 +489,7 @@ INT LockWait (const char *DbFileStem, const int Flags, const int secs)
     }
   if (Flags & L_APPEND)
     {
-      sprintf (lfile, _LOCK_TEMPLATE, DbFileStem, LockType (L_APPEND));
+      snprintf (lfile, sizeof(lfile), _LOCK_TEMPLATE, DbFileStem, LockType (L_APPEND));
       if (waitlock (lfile, secs))
 	{
 	  res ^= L_APPEND;
