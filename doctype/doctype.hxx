@@ -224,6 +224,9 @@ protected:
   }
   INT         ffclose(FILE *Fp) const { return Db ? Db->ffclose(Fp) : fclose(Fp); }
 
+ GPTYPE      ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
+                        GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength);
+
   IDBOBJ     *Db;
   STRING      Doctype;
   STRING      HeadlineFmt;

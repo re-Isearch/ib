@@ -9,6 +9,7 @@ class STRING;
 #ifndef STRING_HXX
 #include "string.hxx"
 #endif
+#include "utf8_utils.hxx"
 
 #ifndef OCTET
 # define OCTET char
@@ -317,11 +318,15 @@ bool SetGlobalCharset (BYTE Charset = 0xFF);
 BYTE        GetGlobalCharset (STRING *StringBuffer = NULL);
 #endif
 
+
+#if 0
 int _ib_IsUTF8TermChr(const unsigned char *Buffer);
 unsigned char *_utf_StrToLower(unsigned char *pString, const bool clean, unsigned length = 0);
 unsigned char *_utf_StrToUpper(unsigned char *pString, unsigned length = 0);
 INT _utf_strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
         bool *look = NULL, size_t *p2_bytes = NULL);
+
+#endif
 
 inline int _utf8_codepoint_len(const UCHR *p)
 {

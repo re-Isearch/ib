@@ -23,7 +23,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #define OCTET char
 
 
-static bool globalUTF8 = false;
+bool _is_globalUTF8 = false;
 
 extern "C" {
   extern const OCTET _ib_ctype_8859_1[256];
@@ -3878,7 +3878,7 @@ BYTE CHARSET::SetSet (BYTE Id)
     }
    if (Id == UTF8)
      {
-       globalUTF8 = true; // UTF8 is special. It has global application!
+       _is_globalUTF8 = true; // UTF8 is special. It has global application!
        SetSet(charsets[0].Id); // The 7-bit ASCII is OK
        return Which = UTF8;
      }
@@ -4187,7 +4187,7 @@ char *_octet_tolower (char *pString, const bool clean)
 // Multichar to lower
 int   _ib_tolower(const char *ptr)
 {
-  if (globalUTF8) {
+  if (_is_globalUTF8) {
     wchar_t  lwc;
     // Either we can definintely rule out multichar or find we can't decode
     // as valid UTF8 then its just an octet.
@@ -4199,7 +4199,7 @@ int   _ib_tolower(const char *ptr)
 // Multichar to upper
 int   _ib_toupper(const char *ptr)
 {
-  if (globalUTF8) {
+  if (_is_globalUTF8) {
     wchar_t  lwc;
     // Either we can definintely rule out multichar or find we can't decode
     // as valid UTF8 then its just an octet.

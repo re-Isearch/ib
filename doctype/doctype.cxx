@@ -582,8 +582,13 @@ size_t DOCTYPE::ParseWords2(const STRING& Buffer, WORDSLIST *ListPtr) const
 GPTYPE DOCTYPE::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
 	GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
 {
-  GPTYPE GpListSize = 0;
-  const  UCHR  zapChar = '\0'; // Was ' '
+  extern bool _is_globalUTF8;
+
+#if 1
+  // Are we in global UTF8 mode?
+  if (_is_globalUTF8)
+    return ParseWordsUTF8(DataBuffer, DataLength, DataOffset, GpBuffer, GpLength);
+#endif
 
   if (DataBuffer == NULL)
     {
@@ -601,6 +606,9 @@ GPTYPE DOCTYPE::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
   message_log (LOG_DEBUG, "ParseWords: Len: Data=%lld Buff=%lld / off=%lld",
 	(long long)DataLength, (long long)GpLength, (long long)DataOffset);
 #endif
+
+  GPTYPE GpListSize = 0;
+  const  UCHR  zapChar = '\0'; // Was ' '
 
   for (REGISTER GPTYPE Position =0; Position < DataLength;)
     {
@@ -664,7 +672,6 @@ GPTYPE DOCTYPE::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
       while ( itr )
         {
           // Make lowercase
-          // For UTF8 we'll need it reworked..
           DataBuffer[Position] = _ib_tolower( DataBuffer[Position] );
           if (++Position >= DataLength) break;
 	  itr = IsTermChr(DataBuffer+Position);

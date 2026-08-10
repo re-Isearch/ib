@@ -1347,7 +1347,7 @@ message_log (LOG_DEBUG, "AFTER INDEXING");
 #endif
 		  else if (doctype.Compare("English ", 8) == 0 ||
 		       // doctype.SearchAny("ascii text") || doctype.SearchAny("ISO-8859 text") ||
-			doctyoe.Search("text")) 
+			doctype.Search("text")) 
 		    {
 		      doctype = "PLAINTEXT";
 		      message_log(LOG_INFO, "%s identified '%s', using %s",

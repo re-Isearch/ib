@@ -692,6 +692,7 @@ add_library(ibUtils
     ${SRC_DIR}/object.cxx       ${SRC_DIR}/dictionary.cxx
     ${SRC_DIR}/strlist.cxx      ${SRC_DIR}/strstack.cxx
     ${SRC_DIR}/lang-codes.cxx   ${SRC_DIR}/unicode.cxx
+    ${SRC_DIR}/utf8_utils.cxx 
     ${SRC_DIR}/htmlcat.cxx      ${SRC_DIR}/date.cxx
     ${SRC_DIR}/listof.cxx       ${SRC_DIR}/hash.cxx
     ${SRC_DIR}/hashof.cxx       ${SRC_DIR}/buffer.cxx
@@ -807,7 +808,7 @@ endif()
 # ibDoc — document type handlers
 # ─────────────────────────────────────────────
 add_library(ibDoc
-    ${SRC_DIR}/dtreg.cxx
+    ${SRC_DIR}/dtreg.cxx            ${DOCTYPE_DIR}/ParseWordsUTF8.cxx
     ${DOCTYPE_DIR}/doctype.cxx      ${DOCTYPE_DIR}/autodetect.cxx
     ${DOCTYPE_DIR}/resourcedoc.cxx  ${DOCTYPE_DIR}/image.cxx
     ${DOCTYPE_DIR}/plaintext.cxx    ${DOCTYPE_DIR}/simple.cxx

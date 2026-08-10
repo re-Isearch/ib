@@ -1464,8 +1464,6 @@ const utf_t utf[] = {
 };
 
 
-#pragma GCC diagnostic pop
-
 #if 1
 static int utf8_len(const char ch)
 {
@@ -1496,28 +1494,8 @@ static int utf8_len(const char ch)
 
 // To UCS-4
 #if 0
-static uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp)
-{
-  uint32_t codep = 0;
-  const int bytes = chr ? utf8_len(*chr) : 0;
 
- if (bytes > 0)
-    {
-      int shift = utf[0]->bits_stored * (bytes - 1);
-      codep = (*chr++ & utf[bytes]->mask) << shift;
- 
-      for(int i = 1; i < bytes; ++i, ++chr) {
-	shift -= utf[0]->bits_stored;
-	codep |= ((char)*chr & utf[0]->mask) << shift;
-      }
-  }
-  if (cp) *cp = codep;
-  return codep;
-}
-
-#else
-
-static uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp)
+uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp)
 {
   uint32_t codep = 0;
   const int bytes = chr ? utf8_len(*chr) : 0;
@@ -1539,6 +1517,8 @@ static uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp)
 #endif
 
 
+
+#if 0
 int _ib_IsUTF8TermChr (const unsigned char *Buffer)
 {
   uint32_t cp;
@@ -1548,5 +1528,6 @@ int _ib_IsUTF8TermChr (const unsigned char *Buffer)
   return bytes && (IsTermChar(cp) || (IsDotInWord(tcp[0]) &&
         (IsAfterDotChar(tcp[1]) || (IsDotInWord(tcp[1]) && IsAfterDotChar(tcp[2])))));
 }
+#endif
 
 
