@@ -110,7 +110,8 @@ Despite being a new project it has a long and esteemed history reaching back int
 Featues/Uses
 * Low-code ETL / "Any-to-Any" architecture
 * No need for a “middle layer” of content manipulation code. Instead of getting URLs from a search engine, fetching documents, parsing them, and navigating the DOMs to find required elements, it lets you simply request the elements you need and they are returned directly.
-* Handles a wide range of document formats (from Atom to JSON to XML) including “live” data.
+* Handles a wide range of document formats (from Atom to JSON to XML including many legacy formats such as Medline flat file, USPTO Greenbook, SGML etc) including “live” data.
+* Support for UTF8 as well as "legacy" 8-bit character set encoded documents (ISO 8859-x formats).
 * Powerful Search (Structure, Objects, Spatial) / Relevancy Engine
 * NoSQL Datastore
 * Useful for Analytics
