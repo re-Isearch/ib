@@ -16,3 +16,5 @@ void _ib_ZapNonTermASCII(unsigned char *pString, unsigned length, unsigned char 
 int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End, unsigned char ZapChr = _SP);
 
 uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp);
+int      _to_ucs4(const unsigned char *chr, const unsigned char *end, uint32_t *cp);
+

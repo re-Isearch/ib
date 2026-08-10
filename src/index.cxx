@@ -643,11 +643,21 @@ void INDEX::SetCacheSize(size_t newCacheSize)
   SetCache = newSetCache;
 }
 
+/*
+  SIS length doesn't need to cover nearly every complete term. It only has to reduce
+  the candidate range enough that the ordered StringCompLengthcomparison stage is cheap.
+
+  That makes the 15/20/24/28 decision something you can benchmark on candidate-range
+  size and search latency, rather than choosing some X merely because it covers ~all
+  word lengths.
+*/
+
+
 void INDEX::SetSisLimit(size_t NewLimit)
 {
   if (NewLimit > 2 && NewLimit < StringCompLength)
     SisLimit = NewLimit;
-  message_log (LOG_INFO, "SISLimit is %d", SisLimit);
+  message_log (LOG_INFO, "SISLimit is %zu", SisLimit);
 }
 
 

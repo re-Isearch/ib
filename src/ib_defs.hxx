@@ -594,8 +594,17 @@ const size_t DocumentTypeSize = 16-1;
 const size_t MaxDocPathNameSize = 128 - 2; // 256 - 2;
 #endif
 
-const size_t StringCompLength = 56; // to align with 64: 56+8 // how many characters to compare
-const size_t DefaultSisLength = 15; // 16 == 99.9% of English text 28; // was 32
+
+// Internal fast-path comparison width; chosen for record/cache layout.
+// Longer terms fall back to extended comparison.
+const size_t StringCompLength = 56; // to align with 64: 56+8 // how many bytes to compare
+
+// SIS keys are byte prefixes, compared binary with memcmp().
+// 28 bytes covers essentially all observed Wikipedia token lengths,
+// including UTF-8 Cyrillic; the prefix may end inside a UTF-8 sequence.
+
+// sis_size = 2 + unique_terms * (SisLength + 9)
+const size_t DefaultSisLength = 20; // 16 == 99.9% of English // was 32
 
 // Locks
 const int L_WRITE  = 0x01;

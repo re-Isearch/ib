@@ -59,6 +59,119 @@
 
 #define _IB_UTF8_SILENT_ZAP ((unsigned char)0x01)
 
+
+#if 0 /* Moved to utf8_utils */
+static inline int _to_ucs4(const unsigned char *chr, const unsigned char *end, uint32_t *cp)
+{
+    if (cp)
+        *cp = 0;
+
+    if (!chr || !end || chr >= end)
+        return 0;
+
+    const unsigned char c0 = chr[0];
+
+    // ASCII
+    if (c0 < 0x80)
+    {
+        if (cp)
+            *cp = c0;
+        return 1;
+    }
+
+    // 2-byte UTF-8
+    if (c0 >= 0xC2 && c0 <= 0xDF)
+    {
+        if (chr + 1 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+
+        if ((c1 & 0xC0) != 0x80)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x1F) << 6) |
+             (uint32_t)(c1 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 2;
+    }
+
+    // 3-byte UTF-8
+    if (c0 >= 0xE0 && c0 <= 0xEF)
+    {
+        if (chr + 2 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+        const unsigned char c2 = chr[2];
+
+        if ((c1 & 0xC0) != 0x80 ||
+            (c2 & 0xC0) != 0x80)
+            return 0;
+
+        // Overlong sequence.
+        if (c0 == 0xE0 && c1 < 0xA0)
+            return 0;
+
+        // UTF-16 surrogate range.
+        if (c0 == 0xED && c1 >= 0xA0)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x0F) << 12) |
+            ((uint32_t)(c1 & 0x3F) << 6) |
+             (uint32_t)(c2 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 3;
+    }
+
+    // 4-byte UTF-8
+    if (c0 >= 0xF0 && c0 <= 0xF4)
+    {
+        if (chr + 3 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+        const unsigned char c2 = chr[2];
+        const unsigned char c3 = chr[3];
+
+        if ((c1 & 0xC0) != 0x80 ||
+            (c2 & 0xC0) != 0x80 ||
+            (c3 & 0xC0) != 0x80)
+            return 0;
+
+        // Overlong sequence.
+        if (c0 == 0xF0 && c1 < 0x90)
+            return 0;
+
+        // Beyond U+10FFFF.
+        if (c0 == 0xF4 && c1 > 0x8F)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x07) << 18) |
+            ((uint32_t)(c1 & 0x3F) << 12) |
+            ((uint32_t)(c2 & 0x3F) << 6) |
+             (uint32_t)(c3 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 4;
+    }
+
+    // Continuation byte, illegal lead byte, etc.
+    return 0;
+}
+#endif
+
 GPTYPE DOCTYPE::ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
         GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
 {
@@ -160,35 +273,69 @@ GPTYPE DOCTYPE::ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
       if (Position >= DataLength)
         break;
       int itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd, (unsigned char)zapChar);
-      if (!itr)
+      if (itr == 0)
         {
-#if 0 /* DEBUGING */
+	  unsigned char *p = reinterpret_cast<unsigned char *>(DataBuffer) + Position;
+	  uint32_t cp = 0; 
+	  const int n = _to_ucs4(p, DataEnd, &cp);
 
-const unsigned char *p =
-    reinterpret_cast<const unsigned char *>(DataBuffer) + Position;
 
-uint32_t cp = 0; int decoded = to_ucs4(p, &cp);
+	  if (n <= 0)
+	    {
 
-fprintf(stderr,
-        "ITR=0 pos=%zu lead=%02X bytes=%02X %02X %02X %02X "
-        "decoded=%d cp=U+%04X zap=%02X\n",
-        (size_t)Position,
-        p < DataEnd ? p[0] : 0,
-        p + 1 < DataEnd ? p[1] : 0,
-        p + 2 < DataEnd ? p[2] : 0,
-        p + 3 < DataEnd ? p[3] : 0,
-        decoded,
-        (unsigned)cp,
-        (unsigned)(unsigned char)zapChar);
+#if 1
+
+{
+const unsigned char *base = reinterpret_cast<const unsigned char *>(DataBuffer);
+const unsigned char *p = base + Position;
+
+message_log(LOG_ERROR,
+    "(1)ITR=%d pos=%zu "
+    "prev=%02X %02X %02X "
+    "lead=%02X next=%02X %02X %02X",
+    itr,
+    Position,
+    Position >= 3 ? base[Position - 3] : 0,
+    Position >= 2 ? base[Position - 2] : 0,
+    Position >= 1 ? base[Position - 1] : 0,
+    p[0],
+    p + 1 < DataEnd ? p[1] : 0,
+    p + 2 < DataEnd ? p[2] : 0,
+    p + 3 < DataEnd ? p[3] : 0);
+}
+
+	      message_log(LOG_ERROR, "(2)ITR=0 pos=%zu lead=%02X bytes=%02X %02X %02X %02X "
+                "decoded=%d cp=U+%04X zap=%02X\n",
+                        (size_t)Position,
+                        p < DataEnd ? p[0] : 0,
+                        p + 1 < DataEnd ? p[1] : 0,
+                        p + 2 < DataEnd ? p[2] : 0,
+                        p + 3 < DataEnd ? p[3] : 0,
+                        n,
+                        (unsigned)cp, 
+                        (unsigned)(unsigned char)zapChar);
 #endif
-          // Genuinely unresolvable: not ZapChr, not a dot-class byte
-          // (those are handled above), and not classified as a term char
-          // either -- this really does indicate an audit gap or a broken
-          // callback, unlike the ordinary dot-rejection case above.
-	  message_log(LOG_PANIC, "Invalid UTF-8 encountered while indexing in UTF-8 mode. "
-		"Check the document or ingest pipeline.");
-          if (GpListSize == 1) GpListSize = 0;
-          break;
+	      message_log(LOG_PANIC,
+		"Invalid UTF-8 encountered while indexing in UTF-8 mode. "
+		"Check the document encoding and ingest pipeline.");
+	      /*
+	       * Recovery: zap one bad byte so that we always make progress.
+	       */
+	      *p = (unsigned char)zapChar;
+	      ++Position;
+	      continue;
+	    }
+
+	  /*
+	   * Valid UTF-8, but not a term character.
+	   *
+	   * This should normally have been removed by the cleaning pass.
+	   * Zap the entire UTF-8 sequence, never just its lead byte.
+	   */
+	   memset(p, (unsigned char)zapChar, (size_t)n);
+
+	   Position += (size_t)n;
+	   continue;
         }
       while ( itr )
         {

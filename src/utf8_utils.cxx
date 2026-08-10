@@ -6489,9 +6489,121 @@ int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End,
 
     // Slow path: everything else — unaudited 2-byte leads, and all 3/4-byte
     // sequences. Identical to the original _ib_IsUTF8TermChr's decode step.
-    uint32_t cp;
-    int bytes = to_ucs4(Buffer, &cp);
-    if (!bytes)
+    uint32_t cp = 0;
+    int bytes = _to_ucs4(Buffer, End, &cp);
+    if (bytes < 0)
         return 0;
     return IsTermChar(cp) ? bytes : 0;
 }
+
+
+int _to_ucs4(const unsigned char *chr, const unsigned char *end, uint32_t *cp)
+{
+    if (cp)
+        *cp = 0;
+
+    if (!chr || !end || chr >= end)
+        return 0;
+
+    const unsigned char c0 = chr[0];
+
+    // ASCII
+    if (c0 < 0x80)
+    {
+        if (cp)
+            *cp = c0;
+        return 1;
+    }
+
+    // 2-byte UTF-8
+    if (c0 >= 0xC2 && c0 <= 0xDF)
+    {
+        if (chr + 1 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+
+        if ((c1 & 0xC0) != 0x80)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x1F) << 6) |
+             (uint32_t)(c1 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 2;
+    }
+
+    // 3-byte UTF-8
+    if (c0 >= 0xE0 && c0 <= 0xEF)
+    {
+        if (chr + 2 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+        const unsigned char c2 = chr[2];
+
+        if ((c1 & 0xC0) != 0x80 ||
+            (c2 & 0xC0) != 0x80)
+            return 0;
+
+        // Overlong sequence.
+        if (c0 == 0xE0 && c1 < 0xA0)
+            return 0;
+
+        // UTF-16 surrogate range.
+        if (c0 == 0xED && c1 >= 0xA0)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x0F) << 12) |
+            ((uint32_t)(c1 & 0x3F) << 6) |
+             (uint32_t)(c2 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 3;
+    }
+
+    // 4-byte UTF-8
+    if (c0 >= 0xF0 && c0 <= 0xF4)
+    {
+        if (chr + 3 >= end)
+            return 0;
+
+        const unsigned char c1 = chr[1];
+        const unsigned char c2 = chr[2];
+        const unsigned char c3 = chr[3];
+
+        if ((c1 & 0xC0) != 0x80 ||
+            (c2 & 0xC0) != 0x80 ||
+            (c3 & 0xC0) != 0x80)
+            return 0;
+
+        // Overlong sequence.
+        if (c0 == 0xF0 && c1 < 0x90)
+            return 0;
+
+        // Beyond U+10FFFF.
+        if (c0 == 0xF4 && c1 > 0x8F)
+            return 0;
+
+        const uint32_t value =
+            ((uint32_t)(c0 & 0x07) << 18) |
+            ((uint32_t)(c1 & 0x3F) << 12) |
+            ((uint32_t)(c2 & 0x3F) << 6) |
+             (uint32_t)(c3 & 0x3F);
+
+        if (cp)
+            *cp = value;
+
+        return 4;
+    }
+
+    // Continuation byte, illegal lead byte, etc.
+    return 0;
+}
+

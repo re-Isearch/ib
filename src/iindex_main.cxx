@@ -1774,7 +1774,8 @@ static void Usage()
   << " -rel               // Use relative paths and assume relation between index location" << endl
   << "                    // and files remains constant." << endl
   << " -absolute_paths    // Make file paths absolute (default)." << endl
-  << " -ds NN             // Set the sis block to NN (max " << StringCompLength << ")." << endl
+  << " -ds NN             // Set the sis block to NN (max " << StringCompLength << ", default " <<
+				DefaultSisLength << ")." << endl
   << " -mdt NN            // Advise NN records for MDT." << endl
   << " -common NN         // Set common words threshold at NN." << endl
   << " -sep sep           // Use C-style sep as record separator." << endl
