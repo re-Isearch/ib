@@ -1672,3 +1672,92 @@ GPTYPE JSONDOC::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
    ResolveJSONUnicodeEscapes(DataBuffer, DataLength, '\0');
    return DOCTYPE::ParseWords(DataBuffer, DataLength, DataOffset, GpBuffer, GpLength);
 }
+
+
+INT JSONDOC::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length)
+{
+  if (!Buffer || Length == 0)
+    return 0;
+
+  /*
+   * Read the original bytes exactly as stored in the JSON document.
+   * If SGMLNORM calls a different base implementation here, use the
+   * same one.
+   */
+  INT n = DOCTYPE::GetTerm(Filename, Buffer, Offset, Length);
+
+  if (n <= 0)
+    return n;
+
+  /*
+   * Resolve \uXXXX (including surrogate pairs, assuming the resolver
+   * already handles them as it does for lexical indexing).
+   *
+   * During indexing the resolver must preserve offsets, so escaped
+   * sequences contract to UTF-8 and the unused source footprint is
+   * filled with ZapChr.
+   *
+   * Here offsets no longer matter.  Use a byte which can never occur
+   * in valid UTF-8 as the temporary padding marker, then remove it.
+   */
+  const UCHR JSON_PAD = 0xff;
+
+  ResolveJSONUnicodeEscapes(
+      reinterpret_cast<UCHR *>(Buffer),
+      (GPTYPE)n,
+      JSON_PAD);
+
+  /*
+   * GetTerm() returns presentation/type-conversion text, so remove
+   * the offset-preserving padding left by the lexical resolver.
+   */
+  CHR *src = Buffer;
+  CHR *dst = Buffer;
+  CHR *end = Buffer + n;
+
+  while (src < end)
+    {
+      if ((UCHR)*src != JSON_PAD)
+        *dst++ = *src;
+
+      ++src;
+    }
+
+  /*
+   * Caller presumably provides the same Length+1 termination room
+   * expected by the existing GetTerm() implementations.
+   */
+  *dst = '\0';
+
+  return (INT)(dst - Buffer);
+}
+
+
+
+
+INT JSONDOC::ReadFile(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Length) const
+{
+  INT count = DOCTYPE::ReadFile(Fp, StringPtr, Offset, Length);
+
+  if (count)
+    ResolveJSONUnicodeEscapes(
+        reinterpret_cast<UCHR *>(const_cast<CHR *>(StringPtr->c_str())),
+        (GPTYPE)count,
+        (UCHR)' '); // WARNING: same c_str() mutation hack as SGMLNORM
+
+  return count;
+}
+
+
+INT JSONDOC::ReadFile(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) const
+{
+  INT count = DOCTYPE::ReadFile(Fp, Buffer, Offset, Length);
+
+  if (count)
+    ResolveJSONUnicodeEscapes(
+        reinterpret_cast<UCHR *>(Buffer),
+        (GPTYPE)count,
+        (UCHR)' ');
+
+  return count;
+}

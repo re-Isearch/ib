@@ -1001,6 +1001,225 @@ void HTMLEntities::normalize(char *input, size_t len) const
 #endif
 
 
+#if 1
+void HTMLEntities::normalize2(char *input, size_t len) const
+{
+  if (!input || len == 0)
+    return;
+
+  /*
+   * Preserve the old 8-bit behaviour exactly.
+   */
+  if (!_is_globalUTF8)
+    {
+      size_t         pos    = 0;
+      size_t         count  = 0;
+      REGISTER char *buffer = input;
+      REGISTER char *ptr    = buffer;
+
+      do {
+        if (*ptr == '\0')
+          {
+            *buffer++ = ' ';
+            ptr++;
+            break;
+          }
+        else
+          {
+            *buffer = ((*ptr == '&') ? translate(&pos, &ptr) : *ptr++);
+
+            if (pos &&
+                (isspace((unsigned char)*buffer) || *buffer == '\0'))
+              {
+                const char ch = *buffer;
+
+                memset(buffer, ' ', pos);
+                buffer[pos] = ch;
+
+                buffer += pos + 1;
+                count  += pos;
+                pos     = 0;
+              }
+            else
+              buffer++;
+          }
+      } while (++count < len);
+
+      if (ptr > buffer)
+        memset(buffer, ' ', ptr - buffer - 1);
+
+      return;
+    }
+
+
+  /*
+   * UTF-8 presentation path.
+   *
+   * src walks the original text and dst compacts translated entities
+   * in-place.  An entity always occupies at least as many source bytes
+   * as its UTF-8 replacement, so dst never overtakes src.
+   */
+  char       *src = input;
+  char       *dst = input;
+  const char *end = input + len;
+
+  while (src < end)
+    {
+      if (*src == '\0')
+        {
+          /*
+           * Match the historical normalize2() behaviour: turn the NUL
+           * encountered in the presentation slice into a space and stop.
+           */
+          if (dst < end)
+            *dst++ = ' ';
+
+          src++;
+          break;
+        }
+
+      /*
+       * Ordinary text, including already-encoded UTF-8, is copied
+       * byte-for-byte.  normalize2() does not need to classify it.
+       */
+      if (*src != '&')
+        {
+          *dst++ = *src++;
+          continue;
+        }
+
+      char entity[12];
+      const size_t entityLen = _html_extract_entity(src, end, entity);
+
+      if (!entityLen)
+        {
+          /*
+           * Not a valid entity.  Preserve the '&' literally.
+           */
+          *dst++ = *src++;
+          continue;
+        }
+
+      unsigned long cp = 0;
+      bool translated = false;
+
+      /*
+       * Numeric entities denote Unicode code points directly.
+       *
+       * Do NOT pass these through the historical 8-bit translate()
+       * mapping; &#169; must become U+00A9, not the raw byte A9.
+       */
+      if (entity[0] == '#')
+        {
+          translated = _html_numeric_entity(entity, &cp);
+        }
+      else
+        {
+          const int value = translate(entity);
+
+          if (value >= 0)
+            {
+              translated = true;
+
+              /*
+               * The historical named-entity table is mostly Latin-1,
+               * with these Windows-1252-era exceptions.
+               */
+              if (strcmp(entity, "euro") == 0)
+                cp = 0x20ac;       // €
+              else if (strcmp(entity, "trade") == 0)
+                cp = 0x2122;       // ™
+              else
+                cp = (unsigned long)(unsigned char)value;
+            }
+        }
+
+      if (!translated)
+        {
+          /*
+           * Keep an unrecognised entity unchanged.  Copy only '&' now;
+           * the following bytes will be copied normally on subsequent
+           * iterations.
+           */
+          *dst++ = *src++;
+          continue;
+        }
+
+      char utf8[4];
+      const size_t outLen = _html_ucs4_to_utf8(cp, utf8);
+
+      if (!outLen)
+        {
+          /*
+           * Invalid Unicode scalar.  Preserve the entity literally
+           * rather than manufacturing malformed presentation text.
+           */
+          *dst++ = *src++;
+          continue;
+        }
+
+      /*
+       * Historical normalize2() gives whitespace entities their original
+       * footprint.  In practice &nbsp; translates to ASCII space in the
+       * existing table, so retain that behaviour for ASCII whitespace/NUL.
+       */
+      const bool whitespace =
+          cp == 0 ||
+          (cp < 0x80 && isspace((unsigned char)cp));
+
+      if (whitespace)
+        {
+          /*
+           * Preserve entity width.  entityLen includes '&' and ';'.
+           *
+           * For whitespace outLen will normally be 1, but write this
+           * generally.
+           */
+          const size_t pad =
+              (entityLen > outLen) ? entityLen - outLen : 0;
+
+          if (pad)
+            {
+              memset(dst, ' ', pad);
+              dst += pad;
+            }
+
+          memcpy(dst, utf8, outLen);
+          dst += outLen;
+        }
+      else
+        {
+          /*
+           * Presentation entities such as &#169; contract naturally:
+           *
+           *     "&#169;"   (6 bytes)
+           *        ->
+           *     C2 A9      (2 bytes)
+           */
+          memcpy(dst, utf8, outLen);
+          dst += outLen;
+        }
+
+      src += entityLen;
+    }
+
+  /*
+   * Just as the old implementation did, blank the bytes vacated by
+   * entity contraction so stale source text is not left in the slice.
+   */
+  if (dst < src)
+    memset(dst, ' ', (size_t)(src - dst));
+
+  /*
+   * If we processed the whole supplied slice, src == end.  A contraction
+   * may have left additional unused bytes all the way to end.
+   */
+  if (dst < end)
+    memset(dst, ' ', (size_t)(end - dst));
+}
+
+
+#else
 void HTMLEntities::normalize2(char *input, size_t len) const
 {
   size_t          pos   = 0;
@@ -1035,6 +1254,7 @@ void HTMLEntities::normalize2(char *input, size_t len) const
   if (ptr > buffer)
     memset(buffer, ' ', ptr - buffer - 1); // Added -1
 }
+#endif
 
 
 
