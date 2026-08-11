@@ -978,7 +978,12 @@ STRING STRING::Escape () const
 	  // Default
 	  default: {
 	    // Is it a control sequence?
-	    if (!_ib_isprint(Ch) && !_ib_isspace(Ch))
+	   extern bool _is_globalUTF8;
+	   if (_is_globalUTF8 && Ch >= 0x80)
+	     {
+		Temp += Ch;
+	     }
+	    else if (!_ib_isprint(Ch) && !_ib_isspace(Ch))
 	      {
 		// Escape as Octal
 		char buf[5];

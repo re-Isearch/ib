@@ -5,7 +5,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #define  OEM_VERSION
 
 #define IsDotInWord(_x)     _ib_isdot(_x)
-#define IsTermChar(_x)     (_ib_isalnum(_x))
+#define IsTermChar(_x)     (_ib_isalnum(_x)) // 8-bit semantics
 #define IsAfterDotChar(_x) (_ib_isalpha(_x))
 
 #define IsWordSep(_x)   (!IsTermChar(_x))
@@ -116,6 +116,38 @@ extern int  _ib_tolower(int c) ;
 #endif /* INLINE_CC_MACROS */
 #endif /* _private_lang */
 
+
+#if 1
+
+// Legacy single-byte implementation. NEVER dispatches to UTF-8.
+inline int _ib_Is8BitTermChr(const UCHR *Buffer)
+{
+    return Buffer &&
+           (IsTermChar(Buffer[0]) ||
+            (IsDotInWord(Buffer[0]) && IsAfterDotChar(Buffer[1])));
+}
+
+inline int IsTermChr(const UCHR *Buffer)
+{
+    extern bool _is_globalUTF8;
+    extern int  _ib_IsUTF8TermChr(const unsigned char *);
+#ifdef OEM_VERSION
+    if (_ib_IsTermChr)
+        return _ib_IsTermChr((const unsigned char *)Buffer);
+#endif
+    if (!Buffer)
+        return 0;
+
+    return _is_globalUTF8 ? (_ib_IsUTF8TermChr(Buffer) != 0) : _ib_Is8BitTermChr(Buffer);
+}
+
+inline int IsTermChr(const CHR *Buffer)
+{
+    return IsTermChr((const UCHR *)Buffer);
+}
+
+#else
+
 inline int IsTermChr(const UCHR *Buffer) {
 #ifdef OEM_VERSION
     if (_ib_IsTermChr) return _ib_IsTermChr ((const unsigned char *)Buffer);
@@ -125,6 +157,12 @@ inline int IsTermChr(const UCHR *Buffer) {
 inline int IsTermChr(const CHR *Buffer) {
   return IsTermChr((const UCHR *)Buffer);
 }
+
+
+#endif
+
+
+
 inline int IsTermChr(const UCHR Ch) {
   return IsTermChar(Ch);
 }

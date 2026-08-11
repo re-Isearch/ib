@@ -109,6 +109,8 @@ public:
   char  *ToUTF(char *buffer, const char *From) const;
   STRING ToUTF(const STRING& From) const;
 
+  bool   isUTF8() const;
+
   size_t ReadUCS (UINT2 *buf, size_t DataFileSize, PFILE Fp) const;
   UINT2  UCS(CHR Ch) const     { return CharTab[(UCHR)Ch];}
   UINT2  UCS(UCHR Ch) const    { return CharTab[Ch];      }

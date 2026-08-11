@@ -1655,6 +1655,9 @@ static const char *unicode_UTF[]    = {"utf-8", "utf8", "ISO_10646-1/AnnexD:2000
 static const BYTE UTF8 = 128;
 
 
+bool   CHARSET::isUTF8() const { return Which == UTF8; } 
+
+
   // Map locale to cannonical
 static const struct {
   BYTE Id;
@@ -3867,8 +3870,7 @@ static int funcLocal(const void *s1, const void *s2)
 }
 
 
-static bool _setcharset(BYTE, const OCTET **, const OCTET **,
-const OCTET **, const OCTET **);
+static bool _setcharset(BYTE, const OCTET **, const OCTET **, const OCTET **, const OCTET **);
 
 BYTE CHARSET::SetSet (BYTE Id)
 {
@@ -3980,10 +3982,10 @@ static bool _setcharset(BYTE Charset,
 {
   const char msgfmt[] = "Set character set to %s";
 
-  BYTE oldCharsetId = CharsetId;
-  CharsetId = Charset; 
+  //BYTE oldCharsetId = CharsetId;
+  //CharsetId = Charset; 
 
-  switch (CharsetId)
+  switch (Charset)
     {
       case  0:
 	*ctype = _ib_ctype_ASCII;
@@ -4079,7 +4081,6 @@ static bool _setcharset(BYTE Charset,
 	break;
 #endif
 
-#if 1
       case UTF8:
       *ctype = _ib_ctype_ASCII;
       *trans_upper = _trans_upper_ASCII;
@@ -4087,8 +4088,6 @@ static bool _setcharset(BYTE Charset,
       *cclass      = _cclass_ASCII;
       message_log (LOG_DEBUG, msgfmt, "UTF8");
       break;
-#endif
-
 
       case 0xFF: 
 	{
@@ -4098,8 +4097,8 @@ static bool _setcharset(BYTE Charset,
 	}
 	// fall into...
       default: /* Not available */
-	message_log (LOG_DEBUG, "Using old character set %d", oldCharsetId);
-	CharsetId = oldCharsetId;
+	message_log (LOG_INFO, "Charset #%d not available. Using old character set", (int)Charset);
+	//CharsetId = oldCharsetId;
 	return false;
     }
   return true;
@@ -4108,8 +4107,10 @@ static bool _setcharset(BYTE Charset,
 
 bool SetGlobalCharset (BYTE Charset)
 {
-  return _setcharset(Charset,
-	&__IB_ctype, &__IB_trans_upper, &__IB_trans_lower, &__IB_cclass);
+  if (!_setcharset(Charset, &__IB_ctype, &__IB_trans_upper, &__IB_trans_lower, &__IB_cclass))
+    return false;
+  CharsetId  = Charset;
+  return true;
 }
 
 BYTE GetGlobalCharset(PSTRING StringBuffer)

@@ -6080,6 +6080,9 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
 {
   QueryOptimizationResult Result;
 
+cerr << "OPTIMIZE QUERY CALLED" << endl;
+return Result; 
+
   struct TERM_ENTRY {
     STRING Word;
     ATTRLIST Attributes;
@@ -6187,6 +6190,7 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
         Attributes.AttrGetLeftAndRightTruncation() ||
         Attributes.AttrGetGlob();
 
+cerr << "Running the Expectation code operatr count =" << OperatorCount << endl;
     double Expectation =
         GetTermExpectation(
             Word,

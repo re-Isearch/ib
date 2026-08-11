@@ -107,6 +107,8 @@ inline int _utf8_codepoint_len(const unsigned char *p)
 #ifndef _SP
 #define _SP ' '
 #endif
+#define _IB_UTF8_SILENT_ZAP ((unsigned char)0x01)
+
 
 static inline int _utf8_lower_cp(const unsigned char *src, unsigned char dst[5])
 {
@@ -267,6 +269,39 @@ INT _utf_strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
 }
 
 
+static inline int _ib_IsUTF8CodepointTerm( const unsigned char *Buffer, size_t bytes)
+{
+    unsigned char tmp[4];
+
+    if (!Buffer || bytes == 0 || bytes > sizeof(tmp))
+        return 0;
+
+    memcpy(tmp, Buffer, bytes);
+
+    /*
+     * Clean exactly one UTF-8 codepoint.
+     * Use a sentinel which cannot be confused with surviving UTF-8.
+     */
+    const unsigned char ZapChr = 0;
+
+    _utf_StrToLowerBuf(tmp, (unsigned)bytes, true, ZapChr);
+
+    /*
+     * Genuine non-term character.
+     */
+    if (tmp[0] == ZapChr)
+        return 0;
+
+    /*
+     * Combining mark / format character stripped silently.
+     */
+    if (tmp[0] == _IB_UTF8_SILENT_ZAP)
+        return 0;
+
+    return 1;
+}
+
+
 // _ib_IsUTF8TermChr
 //
 // Returns non-zero if the codepoint at Buffer is a term character, applying
@@ -297,6 +332,43 @@ INT _utf_strncasecmp(const UCHR *p1, const UCHR *p2, const INT n,
 //       term  dot  alpha          → term char  (e.g. "3.14", "U.S.A")
 //       term  dot  dot   alpha    → term char  (e.g. "e.g.")  [debatable but preserved]
 //
+
+#if 1
+
+
+int _ib_IsUTF8TermChr(const unsigned char *Buffer)
+{
+    if (!Buffer || !*Buffer)
+        return 0;
+
+    const size_t bytes = _ib_UTF8CharBytes(Buffer, 4);
+    if (!bytes)
+        return 0;
+
+    /*
+     * ASCII retains the historical rules, especially dot-in-word.
+     */
+    if (bytes == 1)
+    {
+        if (IsTermChar(Buffer[0]))
+            return 1;
+
+        if (IsDotInWord(Buffer[0]) &&
+            IsAfterDotChar(Buffer[1]))
+            return 1;
+
+        return 0;
+    }
+
+    /*
+     * Non-ASCII: use the exact same clean/classification policy
+     * as indexing.
+     */
+    return _ib_IsUTF8CodepointTerm(Buffer, bytes) ? (int)bytes : 0;
+}
+
+
+#else
 int _ib_IsUTF8TermChr(const unsigned char *Buffer)
 {
     if (!Buffer || !*Buffer)
@@ -335,6 +407,7 @@ int _ib_IsUTF8TermChr(const unsigned char *Buffer)
 
     return 0;
 }
+#endif
 
 
 // Convert a UTF-8 string (or buffer slice) to lower case in-place.
@@ -1399,7 +1472,6 @@ unsigned char *_utf_StrToUpper(unsigned char *pString, unsigned length)
 // _ib_IsUTF8TermChrFast and the ParseWordsUTF8 tokenizer both need to
 // know about this constant -- see their own comments for how each uses
 // it. Keep this definition in sync if it's hoisted into a shared header.
-#define _IB_UTF8_SILENT_ZAP ((unsigned char)0x01)
 
 #if 0
 unsigned char *_utf_StrToLowerBuf(unsigned char *pString, unsigned length, const bool clean, unsigned char ZapChr)

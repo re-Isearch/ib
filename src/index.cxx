@@ -32,6 +32,8 @@ TODO:
 extern int _ib_defaultMaxCPU_ticks;
 extern int _ib_defaultMaxQueryCPU_ticks;
 
+extern bool _is_globalUTF8;
+
 #define XXX_DEBUG 1
 #undef XXX_DEBUG /* NO DEBUG */
 
@@ -287,6 +289,37 @@ static inline size_t BufferClean(UCHR *Buffer, size_t Length=StringCompLength,
 }
 
 
+#if 1
+
+static inline STRING TermClean(const STRING String, bool ToLower = false)
+{
+    STRING Result;
+    UCHR *Buffer = String.NewUCString();
+    const size_t len = String.GetLength();
+
+    if (_is_globalUTF8 && ToLower)
+      {
+        _utf_StrToLowerBuf(Buffer,
+                           (unsigned)len,
+                           true,
+                           (UCHR)' ');
+
+        _ib_ZapNonTermASCII(Buffer,
+                            (unsigned)len,
+                            (UCHR)' ');
+      }
+    else
+      {
+        BufferClean(Buffer, len, ToLower);
+      }
+
+    Result = Buffer;
+    delete[] Buffer;
+
+    return Result;
+}
+
+#else
 static inline STRING TermClean(const STRING String, bool ToLower = false)
 {
   STRING Result;
@@ -296,6 +329,7 @@ static inline STRING TermClean(const STRING String, bool ToLower = false)
   delete[] Buffer;
   return Result;
 }
+#endif
 
 INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSize)
 {
@@ -3372,7 +3406,8 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
 #endif		/* OPTIM */
   if (dp)
     {
-      const BYTE cset = GetGlobalCharset();
+      const BYTE cset = GetGlobalCharset(); // NEED TO WRITE the Character Set to the SIS File 
+      if ( _is_globalUTF8 && cset == 0) cerr <<"CSET ERROR = " << (int)cset << endl;
 #if 0
       /* Need some magic now to handle the version */
       fputc(0, dp);  // Start off with a ZERO
@@ -5955,6 +5990,42 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
 
       // Lowercase the term
 #if 1
+    /*
+     * Fold enough bytes to include any UTF-8 character which crosses
+     * maxLength, THEN truncate to maxLength.
+     *
+     * UTF-8 is at most 4 bytes, so maxLength + 3 is sufficient.
+     */
+    if (Charset.isUTF8())
+      {
+        const size_t foldLength =
+            std::min(TermLength, maxLength + (size_t)3);
+
+        UCHR folded[StringCompLength + 4]; // assuming maxLength < StringCompLength
+
+        memcpy(folded, Term, foldLength);
+
+        _utf_StrToLowerBuf(folded,
+                       (unsigned)foldLength,
+                       false,       // case-fold only -- DO NOT clean query
+                       (UCHR)' ');  // effectively unused with current folds
+
+        length = std::min(TermLength, maxLength);
+
+        memcpy(n + 2, folded, length);
+        n[length + 2] = '\0';
+      }
+    else
+      {
+        length = std::min(TermLength, maxLength);
+
+        for (size_t i = 0; i < length; ++i)
+          n[i + 2] = Charset.ib_tolower(Term[i]);
+
+        n[length + 2] = '\0';
+      }
+
+#elif 1 
       for (length = 0; length < maxLength && Term[length]; length++)
         n[length + 2] = Charset.ib_tolower(Term[length]);
       n[length + 2] = '\0';       // ASCIIZ
@@ -6065,6 +6136,7 @@ INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Tr
           return -1; // Bad Error!
         }
     }
+
   if (MemorySISCache->CreateMap(Slot, SisFn, MapRandom))
     return findIt (MemorySISCache->Map(Slot), Term, TermLength, Truncate, start, overflow);
   message_log (LOG_ERRNO, "Could not create MAP in Slot %d for '%s'!", Slot, SisFn.c_str());
@@ -6273,8 +6345,6 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   const UCHR     *FullTerm = ( const UCHR * ) QueryTerm.c_str ();
   STRING          FieldName(fieldName);
 
-// cerr << "XXXX TermSearch (\"" << QueryTerm << "\", " << fieldName << ")" << endl;
-
  if (DebugMode)
     message_log (LOG_DEBUG, "TermSearch(%s, %s, %d)", QueryTerm.c_str(), fieldName.c_str(), (int)Typ);
 
@@ -6437,6 +6507,40 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   const UCHR     *WordTerm;
   const size_t    FullTerm_length = x;
 
+#if 0
+
+// Code only for UTF8
+
+const unsigned char *p =
+    reinterpret_cast<const unsigned char *>(WordTerm);
+
+const size_t first_len = _ib_UTF8CharBytes(p, x);
+
+    if (!Special &&
+    first_len > 0 &&
+    first_len < (size_t)x &&
+    WordTerm[first_len] &&
+    !_ib_IsUTF8TermChr(
+        reinterpret_cast<const unsigned char *>(WordTerm + first_len)))
+  {
+    do
+      {
+        const size_t n = _ib_UTF8CharBytes(
+            reinterpret_cast<const unsigned char *>(WordTerm), x);
+
+        if (n == 0)
+          break;
+
+        WordTerm += n;
+        x -= n;
+      }
+    while (x > 0 &&
+           *WordTerm &&
+           !_ib_IsUTF8TermChr(
+               reinterpret_cast<const unsigned char *>(WordTerm)));
+  }
+
+#else
   // Skip after ' as in l'espace but not can't or computers'
   if ( IsTermChar ( FullTerm[0] ) && ( WordTerm = (UCHR *) strchr ((const char *)FullTerm, '\'' ) ) != NULL
        && IsTermChar ( WordTerm[1] ) && IsTermChar ( WordTerm[2] ) )
@@ -6445,6 +6549,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     }
   else
     WordTerm = FullTerm;
+#endif
 
 #if 1
   if ( *WordTerm == '"' || *WordTerm == '\'' )
@@ -6454,7 +6559,9 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   // Skip over single letter stuff..
   // Tue Aug 29 15:23:15 MET DST 2000
   // Bug: E. Zimmermann could not match..
-  if (!Special && WordTerm[1] && !IsTermChr(WordTerm+1)) /// was !IsTermChar(WordTerm[1]) June 2008
+
+
+  if (!Special && ((unsigned char)WordTerm[0] < 0x80) && WordTerm[1] && !IsTermChr(WordTerm + 1))
     {
       do
         {
@@ -6462,7 +6569,6 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         }
       while (!IsTermChr(WordTerm)); // was (!IsTermChar(WordTerm[0])); June 2008
     }
-
 
   // Look for a non-stopword...
   while ( x > 0 && IsStopWord ( WordTerm, x ) )
@@ -6475,14 +6581,86 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         WordTerm++, x--;
       // Now pointing at word after stop
     }
+
+
   if ( x == 0 )
     {
       x = FullTerm_length;
       WordTerm = FullTerm;
     }
 
-  const UCHR     *Term = WordTerm;
+   const UCHR     *Term = WordTerm;
 
+#if 1
+
+for (size_t i = 0; i < x; )
+  {
+    const unsigned char *p =
+      reinterpret_cast<const unsigned char *>(Term + i);
+
+    const int isTerm = _is_globalUTF8
+      ? _ib_IsUTF8TermChr(p)
+      : IsTermChr(Term + i);
+
+    const size_t n = _is_globalUTF8
+      ? _ib_UTF8CharBytes(p, x - i)
+      : 1;
+
+//    cerr << "i=" << i << " bytes=" << n << " term=" << isTerm << " text=[" << (Term + i) << "]" << endl;
+
+    if (!isTerm)
+      {
+        x = i;
+        break;
+      }
+
+    if (n == 0 || n > x - i)
+      {
+        x = i;
+        break;
+      }
+
+    i += n;
+  }
+
+#elif 1
+
+// Find byte length of first word
+for (size_t i = 0; i < x; )
+  {
+    const unsigned char *p =
+      reinterpret_cast<const unsigned char *>(Term + i);
+
+    const bool isTerm =
+      _is_globalUTF8 ? (_ib_IsUTF8TermChr(p) != 0)
+                     : IsTermChr(Term + i);
+
+    if (!isTerm)
+      {
+        x = i;                        // Length in bytes of first word
+        break;
+      }
+
+    if (_is_globalUTF8)
+      {
+        const size_t n = _ib_UTF8CharBytes(p, x - i);
+
+        if (n == 0 || n > x - i)
+          {
+            x = i;                    // malformed/truncated UTF-8
+            break;
+          }
+
+        i += n;
+      }
+    else
+      {
+        ++i;
+      }
+  }
+
+
+#else
   // Find length of first word (max StringCompLength)
   for ( size_t i = 0; i < x /* && i < StringCompLength */ ; i++ )
     {
@@ -6499,6 +6677,9 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
           break;
         }
     }
+
+#endif
+
   // Empty term or a single letter?
   // added IsStopWord (to allow for single character searches) August 2007
   if (x <= 1 && IsStopWord(Term,x))

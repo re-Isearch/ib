@@ -18,3 +18,24 @@ int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End,
 uint32_t to_ucs4(const unsigned char *chr, uint32_t *cp);
 int      _to_ucs4(const unsigned char *chr, const unsigned char *end, uint32_t *cp);
 
+
+inline size_t _ib_UTF8CharBytes(const unsigned char *p, size_t left)
+{
+  if (p == NULL || left == 0 || *p == '\0')
+    return 0;
+
+  if (*p < 0x80)
+    return 1;
+
+  if ((*p & 0xE0) == 0xC0)
+    return left >= 2 ? 2 : 1;
+
+  if ((*p & 0xF0) == 0xE0)
+    return left >= 3 ? 3 : 1;
+
+  if ((*p & 0xF8) == 0xF0)
+    return left >= 4 ? 4 : 1;
+
+  // Invalid lead/continuation byte: consume one byte safely.
+  return 1;
+}
