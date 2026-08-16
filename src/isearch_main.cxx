@@ -334,7 +334,7 @@ static void HelpUsage(const char *progname)
 	"                   //   Additional Unary Ops:  ! for NOT, field/  for WITHIN:field" << endl <<
 	"  -words           // Interpret as words." << endl <<
 	"  -and             // Interpret as intersection of words." << endl <<
-	"  -smart field     // Fielded Smart search." << endl << 
+	"  -smart field     // Fielded Smart search (fallback to OR). Field -- means generic smart." << endl << 
  	"  -regular         // Regular Query (fields, weights etc. but no operators)." << endl <<
 	"  -syn             // Do synonym expansion." << endl <<
 	"  -priority (NN.NN)// Over-ride priority factor with NN.NN" << endl <<
@@ -859,7 +859,7 @@ int _Isearch_main (int argc, char **argv)
               Method = LogNormalization;
               LastUsed = x;
             }
-          else if (Flag.Equals("-bytes_norm"))
+          else if (Flag.Equals("-bytes_norm") || Flag.Equals("-norm=bytes"))
             {
               Method = BytesNormalization;
               LastUsed = x;
@@ -2602,55 +2602,55 @@ namespace
      */
     {
       "normalization",
-      "-AF_norm",
+      "-AF_norm | -norm=AF",
       NULL,
       "Use AF normalization."
     },
     {
       "normalization",
-      "-bytes_norm",
+      "-bytes_norm | -norm=bytes",
       NULL,
       "Use byte-count normalization."
     },
     {
       "normalization",
-      "-euclidean_norm",
+      "-euclidean_norm | -norm=E1",
       NULL,
       "Use Euclidean normalization."
     },
   {          
       "normalization",
-      "-E2_norm", 
+      "-E2_norm | -norm=E2", 
       NULL, 
       "Use experimental E2 normalization."
     },    
     {
       "normalization",
-      "-L1_norm",
+      "-L1_norm | -norm=L1",
       NULL,
       "Use cosine L1 normalization."
     },
     {
       "normalization",
-      "-L2_norm",
+      "-L2_norm | -norm=L2",
       NULL,
       "Use cosine L2 normalization.."
     },
    {         
       "normalization",
-      "-S2_norm", 
+      "-S2_norm | -norm=S2", 
       NULL, 
       "Use cosine S2 normalization. Similar to L2 but with saturation.."
     },  
     {
       "normalization",
-      "-log_norm",
+      "-log_norm | -norm=log",
       NULL,
       "Use logarithmic normalization."
     },
     {
       "normalization",
-      "-max_norm",
+      "-max_norm | -norm=max",
       NULL,
       "Use maximum-score normalization."
     },
