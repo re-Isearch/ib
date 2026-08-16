@@ -313,7 +313,7 @@ static void HelpUsage(const char *progname)
 	"  -euclidean_norm  // Euclidean Normalization." << endl << 
 //	"  -metric_norm     // (Cosine) Metric Normalization." << endl << 
         "  -L1_norm         // Cosine L1 Normalization." << endl <<
-        "  -L2_norm         // Cosine L2 Normalization (default)." << endl <<
+        "  -L2_norm         // Cosine L2 Normalization." << endl <<
         "  -log_norm        // Log Normalization." << endl << 
         "  -max_norm        // Max. normalization. " << endl <<
 	"  -no_norm         // Don't calculate scores or normalize." << endl <<
@@ -551,7 +551,7 @@ int _Isearch_main (int argc, char **argv)
   STRING ResTable;
   STRING LoadTable;
   enum SortBy Sort = ByScore; 
-  enum NormalizationMethods Method = NormalizationL2;
+  enum NormalizationMethods Method = NormalizationS2;
   DOUBLE MagFactor = 0.0;
   DOUBLE PriorityFactor = 1.192092896E-07F;
   size_t Clip = 0;
@@ -821,6 +821,11 @@ int _Isearch_main (int argc, char **argv)
 	  else if (Flag.Equals("-cosine_norm") || Flag.Equals("-L2_norm"))
 	    {
 	      Method = NormalizationL2;
+	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-S2_norm"))
+	    {
+	      Method = NormalizationS2;
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals("-L1_norm"))
@@ -1573,6 +1578,7 @@ again:
 	} 
       else if (SmartQuery && !(AndWordsQuery || WordsQuery))
         {
+	  if (SmartField == "--" ) SmartField.Clear();
   	  prset = pdb->VSearchSmart(originalQueryString, SmartField, Sort, MaxHits, &match, Method, &squery);
 	  termCount = squery.GetRpnTerm (&QueryString);
 	  message_log (LOG_DEBUG, "Query: %s", QueryString.c_str());
@@ -1617,7 +1623,7 @@ again:
       {
 /*  The value of CLOCKS_PER_SEC is required to be 1 million on all
     XSI-conformant systems. */
-	sprintf(line, 
+	snprintf(line, BUFSIZ,
         // XSI 
 	"Process time: %.0f ms. (%.0f) Search: %.0f ms. (%.1f ms/term)"
 	// "Process time: %.1f ms. (%.1f) Search: %.1f ms. (%.2f ms/term)"
@@ -1625,7 +1631,7 @@ again:
       }
     else // 1 term 
       {
-	sprintf(line,
+	snprintf(line, BUFSIZ,
 	// XSI
 	"Process time: %.0f ms. (%.0f) Search: %.0f ms."
 	// "Process time: %.1f ms. (%.1f) Search: %.1f ms."
@@ -2616,8 +2622,14 @@ namespace
       "normalization",
       "-L2_norm",
       NULL,
-      "Use cosine L2 normalization. This is the default."
+      "Use cosine L2 normalization.."
     },
+   {         
+      "normalization",
+      "-S2_norm", 
+      NULL, 
+      "Use cosine S2 normalization. Similar to L2 but with saturation.."
+    },  
     {
       "normalization",
       "-log_norm",

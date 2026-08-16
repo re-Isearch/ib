@@ -409,6 +409,16 @@ private:
   INT         IndexNum; // count of indexes to merge
 #ifdef VECTOR_INDEX
   EmbeddingIndexer *embeddingIndexer = nullptr;
+  EmbeddingIndexer *embeddingIndexer2 = nullptr;
+  EmbeddingIndexer *embeddingIndexer3 = nullptr;
+
+  EmbeddingIndexer *&EmbeddingIndexerFor(int type) {       
+    switch (type) {
+    case FIELDTYPE::db_hnsw2: return embeddingIndexer2;
+    case FIELDTYPE::db_hnsw3: return embeddingIndexer3;
+    default:                  return embeddingIndexer;
+    }
+  }        
 #endif
 
   // Volatile and active stuff

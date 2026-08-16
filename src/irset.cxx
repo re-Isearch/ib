@@ -2850,13 +2850,20 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
 
               NewTable[current].SetAuxCount(2);
 
-              const DOUBLE score = NewTable[current++].GetScore();
+#if 1
+    	      const DOUBLE score = IresultPtr->GetScore() + OtherIresultPtr->GetScore();
+	      NewTable[current].SetScore(score);
+#else
+              const DOUBLE score = NewTable[current].GetScore();
+#endif
 
               if (score < newMinScore)
                 newMinScore = score;
 
               if (score > newMaxScore)
                 newMaxScore = score;
+
+	      current++;
             }
         }
 
@@ -4477,6 +4484,8 @@ OPOBJ *atomicIRSET::ComputeScores (const float TermWeight, enum NormalizationMet
 	    break;
 	  case NoNormalization:
 	    return ComputeScoresNoNormalization (TermWeight);
+	  case NormalizationS2:
+	    return ComputeScoresNormalizationS2 (TermWeight);
 	  case NormalizationL2:
 	    return ComputeScoresNormalizationL2 (TermWeight);
 	  case NormalizationL1:
@@ -4552,29 +4561,35 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
 	{
 	  FC Fc;
 	  FC oldFc;
-	  int min_dist = 1000;
+	  int min_dist = INT_MAX; // was 1000;
 
 	  if (Table[i].GetAuxCount() <= 1)
 	    continue; // Not interested
 
 	  const auto Hits = Table[i].GetHitTable();
-	  for (const FC& hit : Hits)
-	    {
-	      int distance;
+	  auto it = Hits.begin();
 
-	      if (Fc == FC(0,0)) oldFc = hit;
-	      else               oldFc = Fc;
-	      Fc = hit; 
-	      if ((distance = Fc.GetFieldStart() - oldFc.GetFieldEnd()) < 0)
-		distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
-	      if (distance < min_dist)
-		min_dist = distance;
-	    }
+	  for (; it != Hits.end(); ++it)
+	    {
+              const FC Fc = *it;
+
+              int distance;
+
+              if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
+                distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
+              else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
+                distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
+              else
+                distance = 0; // overlapping
+              if (distance < min_dist)
+                min_dist = distance;
+              oldFc = Fc;
+           }
 
           DOUBLE Score = Table[i].GetScore();
-//cerr << "MinDistance=" << min_dist << "   Score = " << Score;
+// cerr << "MinDistance=" << min_dist << "   Score = " << Score;
 	  Score *=_ib_Distrank_weight_factor(min_dist)*TermWeight;
-//cerr << " --> " << Score << endl;
+// cerr << " --> " << Score << endl;
 	  Table[i].SetScore ( Score );
 	  if ((Score - MaxScore) > 0.0) MaxScore=Score;
 	  if ((Score - MinScore) < 0.0) MinScore=Score;
@@ -4583,6 +4598,132 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
     }
   return this;
 }
+
+#if 0
+
+OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
+{
+  if (ComputedS == E2Normalization)
+    return this;
+
+  //
+  // E2 uses the same L2 preparation as the cosine metric.
+  //
+  if (ComputedS != preCosineMetricNormalization &&
+      ComputedS != NormalizationL2)
+    {
+      ComputeScoresNormalizationL2 (1) ;
+      ComputedS = preCosineMetricNormalization;
+    }
+
+  if (TotalEntries == 0)
+    {
+      ComputedS = E2Normalization;
+      return this;
+    }
+
+  if ((ComputedS == preCosineMetricNormalization ||
+       ComputedS == NormalizationL2) && Parent)
+    {
+      UINT MaxAuxCount = 1;
+
+      //
+      // Determine the strongest term coverage present
+      // in this result set.
+      //
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          const UINT aux = Table[i].GetAuxCount();
+
+          if (aux > MaxAuxCount)
+            MaxAuxCount = aux;
+        }
+
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          DOUBLE Score = Table[i].GetScore();
+
+          const UINT AuxCount = Table[i].GetAuxCount();
+
+          const DOUBLE Coverage = MaxAuxCount ?  (DOUBLE)AuxCount / (DOUBLE)MaxAuxCount : 1.0;
+
+          //
+          // Full query coverage = 1.0
+          // Partial coverage approaches 0.5.
+          //
+          const DOUBLE CoverageWeight = 0.5 + 0.5 * Coverage;
+
+          DOUBLE ProximityWeight = 1.0;
+
+          //
+          // Proximity only has meaning when more than
+          // one distinct search term contributed.
+          //
+          if (AuxCount > 1)
+            {
+              const auto Hits = Table[i].GetHitTable();
+
+              if (Hits.Size() > 1)
+                {
+                  int MinDistance = INT_MAX;
+
+                  auto it = Hits.begin();
+                  FC oldFc = *it++;
+
+                  for (; it != Hits.end(); ++it)
+                    {
+                      const FC Fc = *it;
+
+                      int Distance;
+
+                      if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
+                        Distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
+
+                      else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
+                        Distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
+
+                      else
+                        Distance = 0;
+
+                      if (Distance < MinDistance)
+                        MinDistance = Distance;
+
+                      oldFc = Fc;
+                    }
+
+                  if (MinDistance != INT_MAX)
+                    {
+                      const DOUBLE DistanceWeight = _ib_Distrank_weight_factor( MinDistance);
+
+                      //
+                      // A partial query match gets only
+                      // part of the proximity bonus.
+                      //
+                      ProximityWeight = 1.0 + (DistanceWeight - 1.0) * Coverage;
+                    }
+                }
+            }
+
+          Score *= CoverageWeight * ProximityWeight * TermWeight;
+
+          Table[i].SetScore(Score);
+
+          if (Score > MaxScore)
+            MaxScore = Score;
+
+          if (Score < MinScore)
+            MinScore = Score;
+        }
+
+      ComputedS = E2Normalization;
+    }
+
+  return this;
+}
+#endif
 
 /*
  Dave Hawking's AF1:
@@ -4620,6 +4761,48 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationAF (const int f_qt)
 }
 */
 
+static inline DOUBLE TermIdf(off_t totalDocs, size_t docFreq)
+{
+    if (totalDocs <= 0 || docFreq == 0)
+        return 0.0;
+
+    return 1.0 + log((DOUBLE)totalDocs / (DOUBLE)docFreq);
+}
+
+OPOBJ *atomicIRSET::ComputeScoresNormalizationS2(const float TermWeight)
+{
+  if (TotalEntries && ComputedS != NormalizationS2 && Parent)
+    {
+      const off_t TotalDocs = Parent->GetTotalRecords();
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          const DOUBLE tf = Table[i].GetHitCount();
+
+          // Saturating TF: 1 -> 1, 2 -> 1.333, 3 -> 1.5, ...
+          const DOUBLE SatTF = (2.0 * tf) / (tf + 1.0);
+
+          DOUBLE Score = SatTF * InvDocFreq;
+
+#if USE_GEOSCORE
+          if (Table[i].HaveGscore())
+            Score += Table[i].GetGscore().Potenz();
+#endif
+
+          Score *= TermWeight;
+          Table[i].SetScore(Score);
+
+          if ((Score - MaxScore) > 0.0) MaxScore = Score;
+          if ((Score - MinScore) < 0.0) MinScore = Score;
+        }
+
+      ComputedS = NormalizationS2;
+    }
+
+  return this;
+}
+
 // TF-IDF
 // L2 score normalization
 OPOBJ *atomicIRSET::ComputeScoresNormalizationAF (const float TermWeight)
@@ -4636,7 +4819,8 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationAF (const float TermWeight)
 
       // Get Freq of <Total Docs in Db>/<Total Docs in Result Set> 
       const off_t   TotalDocs = Parent->GetTotalRecords ();
-      const DOUBLE InvDocFreq = log ( (double)(TotalDocs) / (double)TotalEntries ); // Added log // 2024
+
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
       const DOUBLE w_t  = log((TotalDocs - InvDocFreq + 0.5F) / (InvDocFreq + 0.5F)) * log(TermWeight+1);
       const DOUBLE w_qt = ((k3 + 1) * (DOUBLE)TermWeight) / (k3 + (DOUBLE)TermWeight);
 
@@ -4683,7 +4867,7 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationL2 (const float TermWeight)
     {
       // Get Freq of <Total Docs in Db>/<Total Docs in Result Set> 
       const off_t   TotalDocs = Parent->GetTotalRecords ();
-      const DOUBLE InvDocFreq = log ( (double)(TotalDocs) / (double)TotalEntries ); // Added log // 2024
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
 
       double SumSqScores = 0;
       // Get sum of squares
@@ -4733,7 +4917,7 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationL1 (const float TermWeight)
     {
       // Get Freq of <Total Docs in Db>/<Total Docs in Result Set> 
       const off_t   TotalDocs = Parent->GetTotalRecords ();
-      const DOUBLE InvDocFreq = log ( (double)(TotalDocs) / (double)TotalEntries );
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
 
       double SumScores   = 0;
       // Get sum of scores
@@ -4779,7 +4963,8 @@ OPOBJ *atomicIRSET::ComputeScoresMaxNormalization (const float TermWeight)
   if (TotalEntries && ComputedS != MaxNormalization && Parent)
     {
       // Get Freq of <Total Docs in Db>/<Total Docs in Result Set> 
-      const DOUBLE InvDocFreq = log ( Parent->GetTotalRecords () / (double)TotalEntries);
+      const off_t   TotalDocs = Parent->GetTotalRecords ();
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
 
       MinScore=MAXFLOAT;
       MaxScore=0.0;
@@ -4832,7 +5017,9 @@ OPOBJ *atomicIRSET::ComputeScoresLogNormalization (const float TermWeight)
 {
   if (TotalEntries && ComputedS != LogNormalization && Parent)
     {
-      const DOUBLE InvDocFreq = log (Parent->GetTotalRecords () / (double)TotalEntries);
+      const off_t   TotalDocs = Parent->GetTotalRecords ();
+      const DOUBLE InvDocFreq = TermIdf (TotalDocs, TotalEntries);
+
       MinScore=MAXFLOAT;
       MaxScore=0.0;
 //#pragma omp parallel for reduction(+:MinScore, MaxScore)

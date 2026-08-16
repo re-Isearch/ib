@@ -101,14 +101,14 @@ const char * const __CopyrightData = "\
 Portions Copyright (c) 1995 MCNC/CNDIR; 1995-2011 BSn/Munich and its NONMONOTONIC Lab;\n\
 Copyright (c) 1995-2000 Archie Warnock; and a host of other contributors;\n\
 Copyright (c) 2020-2022 NONMONOTONIC Networks for the re.Isearch Project.\n\
-Copyright (c) 2022-2023 Project Exodus 3.0 (Germany) and the ExoDAO Network Association (Zurich).\n\
+Copyright (c) 2022-2023 Project Exodus 3.0 and the ExoDAO Network Association (Zurich).\n\
 Copyright (c) 2024-2026 re-Isearch / CoreQuarry.com\n\n\
-This software has been made available by generous public support including grants from the EU's NGI0\n\
-Discovery Fund through NLnet, grants agreement No 825322 and No 101135429 (wth support also from SERI)\n\
-under the NGI0 Commons Fund for project Schmate as well as the German BMBF as grant Nr. 01IS22S32 for\n\
-the Exodus 3.0 project.\n\
-Thanks also to the Mercator Foundation and Opendata.ch for their generous support of the ExoDAO project.\n\
-This software is provided under the conditions of the Apache License Version 2.0, January 2004";
+This software has been made available by generous public support including grants\n\
+from the EU's NGI0 Discovery Fund through NLnet, grants agreement No 825322 and\n\
+No 101135429 (wth support also from SERI) under the NGI0 Commons Fund for project\n\
+Schmate as well as the German BMBF as grant Nr. 01IS22S32 for the Exodus 3.0 project.\n\
+Thanks also to the Mercator Foundation and Opendata.ch for their generous support\n\
+of the ExoDAO project.";
 
 const char * const __CompilerUsed = HOST_COMPILER;
 const char * const __HostPlatform = HOST_PLATFORM;

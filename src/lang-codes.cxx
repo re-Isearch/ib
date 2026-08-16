@@ -2691,6 +2691,9 @@ static const OCTET _trans_lower_8859_1[] = {
 // sets can be designed. The utility of the soundex
 // algorithm for non Anglo-Saxon languages is questionable.
 // [even for English its utility is very specific]
+#ifdef _SP
+# undef _SP
+#endif
 #define _SP -1
 static const signed char _soundex_8859_1[] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1,

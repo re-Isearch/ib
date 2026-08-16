@@ -53,9 +53,10 @@ struct EVIDENCE_COVER {
 ///
 ////
 extern enum NormalizationMethods {
-  Unnormalized = 0, NoNormalization, NormalizationL2, NormalizationL1, MaxNormalization, LogNormalization, BytesNormalization,
-  preCosineMetricNormalization, CosineMetricNormalization, EuclideanNormalization,
-  AuxNormalization1, AuxNormalization2, AuxNormalization3, NormalizationAF,  HybridNormalization,  UndefinedNormalization
+  Unnormalized = 0, NoNormalization, NormalizationL2, NormalizationL1, NormalizationS2, MaxNormalization,
+  LogNormalization, BytesNormalization, preCosineMetricNormalization, CosineMetricNormalization,
+  EuclideanNormalization, AuxNormalization1, AuxNormalization2, AuxNormalization3, NormalizationAF,
+  HybridNormalization,  UndefinedNormalization
 } defaultNormalization;
 const int CosineNormalization=NormalizationL2;
 
@@ -146,6 +147,7 @@ public:
   OPOBJ *ComputeScoresNormalizationAF (const float TermWeight);
   OPOBJ *ComputeScoresNormalizationL2 (const float TermWeight);
   OPOBJ *ComputeScoresNormalizationL1 (const float TermWeight);
+  OPOBJ *ComputeScoresNormalizationS2 (const float TermWeight);
   OPOBJ *ComputeScoresMaxNormalization (const float TermWeight);
   OPOBJ *ComputeScoresLogNormalization (const float TermWeight);
   OPOBJ *ComputeScoresBytesNormalization (const float TermWeight);
@@ -766,41 +768,39 @@ public:
     return node()->ComputeScoresNormalizationAF(TermWeight);
   }
 
-  OPOBJ* ComputeScoresNormalizationL2(
-      const float TermWeight)
+  OPOBJ* ComputeScoresNormalizationL2(const float TermWeight)
   {
     return node()->ComputeScoresNormalizationL2(TermWeight);
   }
 
-  OPOBJ* ComputeScoresNormalizationL1(
-      const float TermWeight)
+  OPOBJ* ComputeScoresNormalizationL1(const float TermWeight)
   {
     return node()->ComputeScoresNormalizationL1(TermWeight);
   }
 
-  OPOBJ* ComputeScoresMaxNormalization(
-      const float TermWeight)
+  OPOBJ* ComputeScoresNormalizationS2( const float TermWeight)
+  {
+    return node()->ComputeScoresNormalizationS2(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresMaxNormalization(const float TermWeight)
   {
     return node()->ComputeScoresMaxNormalization(TermWeight);
   }
 
-  OPOBJ* ComputeScoresLogNormalization(
-      const float TermWeight)
+  OPOBJ* ComputeScoresLogNormalization(const float TermWeight)
   {
     return node()->ComputeScoresLogNormalization(TermWeight);
   }
 
-  OPOBJ* ComputeScoresBytesNormalization(
-      const float TermWeight)
+  OPOBJ* ComputeScoresBytesNormalization(const float TermWeight)
   {
     return node()->ComputeScoresBytesNormalization(TermWeight);
   }
 
-  OPOBJ* ComputeScoresCosineMetricNormalization(
-      const float TermWeight)
+  OPOBJ* ComputeScoresCosineMetricNormalization(const float TermWeight)
   {
-    return node()->ComputeScoresCosineMetricNormalization(
-        TermWeight);
+    return node()->ComputeScoresCosineMetricNormalization(TermWeight);
   }
 
   OPOBJ* ComputeScoresHybridNormalization(

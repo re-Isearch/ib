@@ -80,9 +80,11 @@ static struct DataType {
   {"local6",    _s, FIELDTYPE::callback6, "Local callback 6 (External)"},
   {"local7",    _s, FIELDTYPE::callback7, "Local callback 7 (External)"},
 #ifdef VECTOR_INDEX 
-  {"hnsw",       _V, FIELDTYPE::db_hnsw,   "Hierarchical Navigable Small Worlds (HNSW)"},
+  {"hnsw",       _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (base Model)"},
+  {"hnsw2",      _V, FIELDTYPE::db_hnsw2, "Hierarchical Navigable Small Worlds (HNSW) (2nd Model)"},
+  {"hnsw3,       _V, FIELDTYPE::db_hnsw3, "Hierarchical Navigable Small Worlds (HNSW) (3rd Model)"},
 #else
-  {"hnsw",      _s, FIELDTYPE::db_hnsw,   "Hierarchical Navigable Small Worlds (HNSW) // NOT YET"},
+  {"hnsw",      _s, FIELDTYPE::db_hnsw,   "Hierarchical Navigable Small Worlds (HNSW) // NOT ENABLED"},
 #endif
   {"nsg",        g, FIELDTYPE::db_nsg,    "Spread Out Graph ANNS algorithms (NSG) // NOT YET"}, 
   {"ivfflat",    f, FIELDTYPE::db_IVFFlat,"IVFFlat Vectors // NOT YET"},
@@ -129,7 +131,10 @@ static struct DataType {
   {"ipv6",           n,   FIELDTYPE::dotnumber,     NULL},
   {"flat",           f,   FIELDTYPE::db_IVFFlat,    NULL},
   {"sog",            g,   FIELDTYPE::db_nsg,        NULL},
-  {"vector",        _V,   FIELDTYPE::db_hnsw,        NULL},
+  {"vector",        _V,   FIELDTYPE::db_hnsw,       NULL},
+  {"vector2",       _V,   FIELDTYPE::db_hnsw2,      NULL},
+  {"vector3",       _V,   FIELDTYPE::db_hnsw3,      NULL},
+
 // common xs: data type names
   {"xs:string",            _s,  FIELDTYPE::text,      NULL},
   // derived

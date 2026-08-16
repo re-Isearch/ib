@@ -19,7 +19,7 @@ public:
 	dotnumber, phonhash, phonhash2, metaphone, metaphone2, hash, casehash,
 	lexi, smiles, privhash, isbn, telnumber, creditcardnum, iban, bic,
 	db_string, callback, callback1, callback2, callback3, callback4, callback5, callback6, callback7,
-	db_hnsw, db_nsg, db_IVFFlat, special, __last=255};
+	db_hnsw_raw =200, db_hnsw, db_hnsw2, db_hnsw3, db_nsg = 220, db_IVFFlat, special, __last=255};
 
   FIELDTYPE();
   FIELDTYPE(const FIELDTYPE& OtherFieldType);
@@ -79,7 +79,7 @@ public:
   bool    IsSMILES() const   { return Type == smiles;    }
   bool    IsPrivHash() const { return Type == privhash;  }
   bool    IsDBMStr() const   { return Type == db_string; }
-  bool    IsHNSW()           { return Type == db_hnsw;   } // Hierarchical Navigable Small Worlds
+  bool    IsHNSW()           { return Type == db_hnsw || Type == db_hnsw2 || Type == db_hnsw3 ;} 
   bool    IsNSG()            { return Type == db_nsg;    } // Spread Out Graph
   bool    IsIVFFlat() const  { return Type == db_IVFFlat;} // IVF Flat Model
   bool    IsCallback() const { return IsCallback(Type);  }

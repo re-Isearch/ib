@@ -6486,7 +6486,8 @@ static inline bool _utf8_lead_confirmed_term_2byte(unsigned char lead)
 // all of which are 2-byte in the current whitelist).
 static inline int _utf8_seqlen_2byte(unsigned char /*lead*/) { return 2; }
 
-int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End, unsigned char ZapChr)
+int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End,
+	unsigned char ZapChr, TERM_STATE state)
 {
     if (!Buffer || Buffer >= End)
         return 0;
@@ -6515,6 +6516,23 @@ int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End,
     // routine's ASCII behaviour — same macros, same dot-in-word semantics —
     // except the after-dot lookahead also now recognises a following
     // multi-byte letter (see below), which the byte-only test never could.
+#if 1
+
+    if (lead < 0x80) {
+        if (IsTermChar(lead)) {
+          if (state == TERM_AFTER_DOT && lead >= '0' && lead <= '9')
+            return 0;
+          return 1;
+        }
+
+        if (state == TERM_INSIDE && IsDotInWord(lead)) {
+          const unsigned char *next = Buffer + 1;
+          if (next < End && _ib_IsUTF8TermChrFast(next, End, ZapChr, TERM_AFTER_DOT))
+            return 1;
+        }
+        return 0;
+    }
+#else
     if (lead < 0x80) {
         if (IsTermChar(lead))
             return 1;
@@ -6553,6 +6571,7 @@ int _ib_IsUTF8TermChrFast(const unsigned char *Buffer, const unsigned char *End,
         }
         return 0;
     }
+#endif
 
     // Fast path: confirmed-letters-only 2-byte lead byte, per the audited
     // whitelist above.

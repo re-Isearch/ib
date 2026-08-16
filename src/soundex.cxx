@@ -56,6 +56,9 @@ Author:      Edward C. Zimmermann <edz@nonmonotonic.com>
 #include "soundex.hxx"
 
 #define MODULO	7		/* 7 for Soundex, 10 otherwize */
+#ifdef _SP
+#undef _SP
+#endif
 #define _SP -1			/* Code for ' ', \r and \n: 0 or -1 */
 
 // Question: - words? eg. anti-communist ?

@@ -62,6 +62,14 @@ float _ib_Newsrank_weight_factor(int days)
 
 float _ib_Distrank_weight_factor(const int distance)
 {
+#if 1
+    int d = distance;
+
+    if (d < 0)
+        d = 0;
+
+    return 1.0f + 3.0f / (1.0f + d / 8.0f);
+#else
   if (distance <= 4)
     return 20;
   if (distance <= 10)
@@ -71,6 +79,7 @@ float _ib_Distrank_weight_factor(const int distance)
   if (distance > 1000)
     return 0.98;
   return 1;
+#endif
 }
 
 int (* __Private_IRSET_Sort) (void *, int, void *, int, void *) = 0;

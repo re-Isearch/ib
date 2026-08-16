@@ -331,6 +331,7 @@ static inline STRING TermClean(const STRING String, bool ToLower = false)
 }
 #endif
 
+
 INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSize)
 {
   if (DbParent == NULL)
@@ -509,6 +510,8 @@ INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSiz
 
 #ifdef VECTOR_INDEX
   embeddingIndexer = NULL;
+  embeddingIndexer2 = NULL;
+  embeddingIndexer3 = NULL;
 #endif
 
   SisLimit = DefaultSisLength;
@@ -1331,8 +1334,18 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	  break;
 	case FIELDTYPE::db_hnsw:
 #ifdef VECTOR_INDEX
+	case FIELDTYPE::db_hnsw2:
+	case FIELDTYPE::db_hnsw3:
 	  // Init the Embedding Indexer if not already
-          if (embeddingIndexer == NULL) embeddingIndexer = new EmbeddingIndexer (Parent);
+	  EmbeddingIndexer *&indexer = EmbeddingIndexerFor(type);
+	  if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
+#if 0
+	case FIELDTYPE::db_hnsw_raw:
+	/* No internal embedder.  No text-to-vector conversion.
+	   Index dimension comes from configuration/index metadata.
+	   Every inserted vector must match that dimension.
+	   Every search vector must match that dimension.  */
+#endif
 #endif
 	  break;
 	case FIELDTYPE::db_nsg:
@@ -1486,6 +1499,8 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 #endif
 #ifdef VECTOR_INDEX
 	  case FIELDTYPE::db_hnsw:
+	  case FIELDTYPE::db_hnsw2:
+	  case FIELDTYPE::db_hnsw3:
 	    // Don't open any file.. Our append does that
 	    break;
 #endif
@@ -1606,21 +1621,20 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
             case FIELDTYPE::db_IVFFlat:
               message_log (LOG_ERROR, "NSG and IVFFlat algorithms Not Yet Implemented. Using HSNW.");
 	    case FIELDTYPE::db_hnsw: /* HNSW */
+	    case FIELDTYPE::db_hnsw2:
+	    case FIELDTYPE::db_hnsw3:
 	    {
 #ifdef VECTOR_INDEX
-	      message_log(LOG_DEBUG, "Appending to a HNSW index '%s'", FieldName.c_str());
+	      message_log(LOG_DEBUG, "Appending to a HNSW index '%s' (model #%d)", FieldName.c_str(),
+                        (int)(type-(INT)db_hnsw0)+1);
+              // Vectorization inputs need to be in UTF8
+              STRING  text = getCharset().ToUTF(Buffer);
 	      // Create if not yet already created...
-	      if (embeddingIndexer == NULL) embeddingIndexer = new EmbeddingIndexer (Parent);
+	      EmbeddingIndexer *&indexer = EmbeddingIndexerFor(type);
+	      if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
 
-	      // Vectorization inputs need to be in UTF8
-	      STRING  text = getCharset().ToUTF(Buffer);
-#if 1
-              if (embeddingIndexer->Ok() && embeddingIndexer->Append (text, FieldName, FC(gp, gp+flen-1)))       
-                items++;
-#else
-	      if (embeddingIndexer->Ok() && embeddingIndexer->Append (text, FileName, FC(gp, gp+flen-1)))
-		items++;
-#endif
+              if (indexer->Ok() && indexer->Append (text, FieldName, FC(gp, gp+flen-1)))
+		 items++; 
 #else /* NOT YET ENABLED */
 	      message_log (LOG_ERROR, "Dense Vectors Not Yet Enabled.");
 #endif /* VECTOR_INDEX */
@@ -2913,7 +2927,7 @@ bool INDEX::CollapseIndexFiles()
 #endif
 
   }
-  if (SisInfo[0].charsetId != SisInfo[0].charsetId)
+  if (SisInfo[0].charsetId != SisInfo[1].charsetId)
     {
       message_log (LOG_WARN, "Can't collapse sub-indices with different base charsets (%d != %d) at this time.",
             SisInfo[0].charsetId, SisInfo[1].charsetId);
@@ -3878,6 +3892,9 @@ PIRSET INDEX::Search (const QUERY& Query)
                     case OperatorAnd:
 		      SwapOp(Op1,Op2);
 		      { OPOBJ* Result = Op1->And(*Op2);
+if (Result == NULL) cerr << "Result is NULL" << endl;
+else cerr << "Got " <<  Result->GetTotalEntries() << endl;
+
 			if (Query.CanTerminateOnEmpty() && Result != NULL && Result->GetTotalEntries() == 0) {
 			/* Normally Result would be pushed onto Stack and processed on the
 			 * next iteration as a TypeRset operand. Since we are terminating,
@@ -4168,27 +4185,13 @@ PIRSET INDEX::Search (const QUERY& Query)
 #ifdef VECTOR_INDEX
 		message_log(LOG_DEBUG, "Vector Search within '%s'", FieldName.c_str());
 		// If not created before we create now as searchOnly
-		if (embeddingIndexer == NULL) embeddingIndexer = new EmbeddingIndexer (Parent, true);
-#if 1 /* Used FieldName */
-		if (embeddingIndexer->Ok()) { // HNSW index
+                EmbeddingIndexer *&indexer = EmbeddingIndexerFor((INT)aFieldType);
+		if (indexer == NULL) indexer = new EmbeddingIndexer (Parent, true);
+		if (indexer->Ok()) { // HNSW index
 		   Method = HybridNormalization ; // Need to mix/match with Vectors!!  April 2026
-                   NewIrset = embeddingIndexer->search(FieldName, Term);
+                   NewIrset = indexer->search(FieldName, Term);
 		} else
 		   Parent->SetErrorCode( 3 ); // Temporarily not available
-
-#else /* Uses FileName */
-                STRING FileName = getFileName(FieldName, FieldType);
-		message_log(LOG_DEBUG, "The vector index = %s", FileName.c_str());
-		if (embeddingIndexer->Ok() && !FileName.IsEmpty()) // HNSW index
-                {
-		   Method = HybridNormalization ; // Need to mix/match with Vectors!!  April 2026
-                   NewIrset = embeddingIndexer->search(FileName, Term);
-                } else {
-		   // Since this should not normally happen...
-		   Parent->SetErrorCode( 3 ); // Temporarily not available
-		   NewIrset = new IRSET (Parent);
-		}
-#endif
 #else
 		Parent->SetErrorCode(3); //  "Unsupported search"
                 NewIrset = new IRSET (Parent);
@@ -4419,12 +4422,20 @@ PIRSET INDEX::Search (const QUERY& Query)
                         // With Text fields treat <> as !
                         if (Relation == ZRelNE) NewIrset->Not();
                       }
-		    message_log(LOG_DEBUG, "Computing scores");
-                    TermWeight = Attrlist.AttrGetTermWeight ();
-                    NewIrset->ComputeScores (TermWeight, Method);
+		    if (NewIrset->IsEmpty() && Query.CanTerminateOnEmpty())
+		      {
+		        StopEvaluation = true;
+		      }
+		    else
+		      {
+			message_log(LOG_DEBUG, "Computing scores");
+			TermWeight = Attrlist.AttrGetTermWeight ();
+			NewIrset->ComputeScores (TermWeight, Method);
+		      }
                 }
-              else
+              else {
                 NewIrset = new IRSET (Parent);
+	      }
 error:
 	      TempStack << NewIrset;
 
@@ -7337,6 +7348,7 @@ for (size_t i = 0; i < x; )
 	    // const short  length= HitList(k);
             // iresult.AddToHitTable ( FC(start, start + length) );
 	  }
+          iresult.SetHitCount(next - k);
         }
 #if AWWW
       pirset->FastAddEntry ( iresult );
@@ -7578,7 +7590,6 @@ INDEX::~INDEX ()
         DumpPersistantCache();
       delete SetCache;
       if (DebugMode) message_log (LOG_DEBUG, "Disposed of in-memory Set Cache");
-      SetCache = NULL;
     }
   if (FieldCache) delete FieldCache;
   if (PeerFieldCache) delete PeerFieldCache;
@@ -7587,19 +7598,16 @@ INDEX::~INDEX ()
     {
       delete MemorySISCache;
       if (DebugMode) message_log (LOG_DEBUG, "Disposed of Memory SIS Cache");
-      MemorySISCache = NULL;
     }
   if (MemoryIndexCache)
     {
       delete MemoryIndexCache;
       if (DebugMode) message_log (LOG_DEBUG, "Disposed of Memory Index Cache");
-      MemoryIndexCache = NULL;
     }
 #ifdef VECTOR_INDEX
-  if (embeddingIndexer) {
     delete embeddingIndexer;
-    embeddingIndexer = NULL;
-  }
+    delete embeddingIndexer2;
+    delete embeddingIndexer3;
 #endif
 
   CloseActiveFieldStreams();

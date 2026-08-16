@@ -6080,13 +6080,10 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
 {
   QueryOptimizationResult Result;
 
-cerr << "OPTIMIZE QUERY CALLED" << endl;
-return Result; 
-
   struct TERM_ENTRY {
     STRING Word;
     ATTRLIST Attributes;
-    double Expectation;
+    double Expectation = 0.0;
     size_t OriginalPosition;
   };
 
@@ -6105,6 +6102,7 @@ return Result;
       return Result;
     }
 
+  // return Result; // BUG
   // Now we can optimize on the basis of Expectations
   // Right now only with AND expressions
 
@@ -6121,9 +6119,7 @@ return Result;
 
   while (Source >> Object) {
     if (Object == NULL) {
-      message_log(
-          LOG_ERROR,
-          "IDB::OptimizeSQuery: null object in query stack");
+      message_log(LOG_ERROR, "IDB::OptimizeSQuery: null object in query stack");
       return Result;
     }
 
@@ -6180,38 +6176,11 @@ return Result;
      */
     Attributes.AttrGetFieldName(&FieldName);
 
-    /*
-     * Ask TermFreq() for a truncation-aware estimate when any expansion
-     * form is active.
-     */
-    const bool Truncate =
-        Attributes.AttrGetRightTruncation() ||
-        Attributes.AttrGetLeftTruncation() ||
-        Attributes.AttrGetLeftAndRightTruncation() ||
-        Attributes.AttrGetGlob();
-
-cerr << "Running the Expectation code operatr count =" << OperatorCount << endl;
-    double Expectation =
-        GetTermExpectation(
-            Word,
-            FieldName,
-            Truncate);
-
-    /*
-     * An unusable estimate should be sorted after all finite estimates.
-     *
-     * Negative infinity is intentionally retained because it may represent
-     * a known zero-frequency term and should therefore sort first.
-     */
-    if (std::isnan(Expectation))
-      Expectation =
-          std::numeric_limits<double>::infinity();
-
     TERM_ENTRY Entry;
 
     Entry.Word = Word;
     Entry.Attributes = Attributes;
-    Entry.Expectation = Expectation;
+    // Entry.Expectation = 0; // Expectation is defered;
     Entry.OriginalPosition = Position++;
 
     Terms.push_back(std::move(Entry));
@@ -6224,6 +6193,28 @@ cerr << "Running the Expectation code operatr count =" << OperatorCount << endl;
   if (Terms.size() < 2 ||
       OperatorCount != Terms.size() - 1) {
     return Result;
+  }
+
+  for (auto& Entry : Terms) {
+    STRING FieldName;
+    Entry.Attributes.AttrGetFieldName(&FieldName);
+
+    const bool Truncate =
+        Entry.Attributes.AttrGetRightTruncation() ||
+        Entry.Attributes.AttrGetLeftTruncation() ||
+        Entry.Attributes.AttrGetLeftAndRightTruncation() ||
+        Entry.Attributes.AttrGetGlob();
+
+    Entry.Expectation = GetTermExpectation( Entry.Word, FieldName, Truncate);
+    /*
+     * An unusable estimate should be sorted after all finite estimates.
+     *
+     * Negative infinity is intentionally retained because it may represent
+     * a known zero-frequency term and should therefore sort first.
+     */
+
+    if (std::isnan(Entry.Expectation))
+        Entry.Expectation = std::numeric_limits<double>::infinity();
   }
 
   Result.PlanType = QueryPlanPureAnd;
