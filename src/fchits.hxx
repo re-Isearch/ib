@@ -30,11 +30,50 @@ struct FcLess
   }
 };
 
+#if 0
+
+// FCHIT to extend to support source ID
+//
+// These ource identifiers represent the physical SIS layout
+// at the time of the search. They remain valid across index appends,
+// but may become incompatible with newly generated hit source
+// identifiers after an index collapse/merge.
+//
+// These IDs are solely for E (positional) normalization > E2
+
+class FCHIT : public FC
+{
+public:
+  FCHIT() : SourceId(0) { }
+
+  FCHIT(const FC& fc, FCSOURCE sourceId = 0)
+    : FC(fc), SourceId(sourceId) { }
+
+  FCSOURCE GetSourceId() const
+  {
+    return SourceId;
+  }
+
+  void SetSourceId(FCSOURCE sourceId)
+  {
+    SourceId = sourceId;
+  }
+
+private:
+  FCSOURCE SourceId;
+};
+
+#endif
+
 
 class FCHITS
 {
 public:
+#if 0
+  using container_type = std::vector<FCHIT>;
+#else
   using container_type = std::vector<FC>;
+#endif
   using const_iterator = container_type::const_iterator;
 
   FCHITS() = default;
