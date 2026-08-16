@@ -1336,9 +1336,11 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 #ifdef VECTOR_INDEX
 	case FIELDTYPE::db_hnsw2:
 	case FIELDTYPE::db_hnsw3:
-	  // Init the Embedding Indexer if not already
-	  EmbeddingIndexer *&indexer = EmbeddingIndexerFor(type);
-	  if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
+	 {
+	   // Init the Embedding Indexer if not already
+	   EmbeddingIndexer *&indexer = EmbeddingIndexerFor((INT)FieldType);
+	   if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
+	 }
 #if 0
 	case FIELDTYPE::db_hnsw_raw:
 	/* No internal embedder.  No text-to-vector conversion.
@@ -1626,7 +1628,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	    {
 #ifdef VECTOR_INDEX
 	      message_log(LOG_DEBUG, "Appending to a HNSW index '%s' (model #%d)", FieldName.c_str(),
-                        (int)(type-(INT)db_hnsw0)+1);
+                        (int)(type-(INT)FIELDTYPE::db_hnsw)+1);
               // Vectorization inputs need to be in UTF8
               STRING  text = getCharset().ToUTF(Buffer);
 	      // Create if not yet already created...
