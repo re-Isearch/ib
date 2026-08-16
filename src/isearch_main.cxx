@@ -551,7 +551,7 @@ int _Isearch_main (int argc, char **argv)
   STRING ResTable;
   STRING LoadTable;
   enum SortBy Sort = ByScore; 
-  enum NormalizationMethods Method = NormalizationS2;
+  enum NormalizationMethods Method = E2Normalization;
   DOUBLE MagFactor = 0.0;
   DOUBLE PriorityFactor = 1.192092896E-07F;
   size_t Clip = 0;

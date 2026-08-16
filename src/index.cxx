@@ -4492,6 +4492,8 @@ for (size_t i = 1; i <= NewIrset->GetTotalEntries(); i++)
     }
   else if (Method == CosineMetricNormalization || Method == EuclideanNormalization) {
     NewIrset->ComputeScoresCosineMetricNormalization(1);
+  } else if (Method == E2Normalization) {
+    NewIrset->ComputeScoresE2Normalization(1);
   }
   return NewIrset;
 }
@@ -6154,8 +6156,6 @@ static inline FCSOURCE MakeSourceId(const INT slot, const GPTYPE sisSlot)
   // Low 56 bits belong to the SIS slot.
   if (id > 0x00FFFFFFFFFFFFFFULL)
     return 0;
-
-cerr << "SOURCE ID = " << (((FCSOURCE)(BYTE)slot << 56) | id ) << " slot #" << slot  << endl;
 
   return ((FCSOURCE)(BYTE)slot << 56) | id;
 }

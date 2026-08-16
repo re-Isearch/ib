@@ -4609,8 +4609,7 @@ OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
   //
   // E2 uses the same L2 preparation as the cosine metric.
   //
-  if (ComputedS != preCosineMetricNormalization &&
-      ComputedS != NormalizationL2)
+  if (ComputedS != preCosineMetricNormalization && ComputedS != NormalizationL2)
     {
       ComputeScoresNormalizationL2 (1) ;
       ComputedS = preCosineMetricNormalization;
@@ -4622,8 +4621,8 @@ OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
       return this;
     }
 
-  if ((ComputedS == preCosineMetricNormalization ||
-       ComputedS == NormalizationL2) && Parent)
+
+  if ((ComputedS == preCosineMetricNormalization || ComputedS == NormalizationL2) && Parent)
     {
       UINT MaxAuxCount = 1;
 
