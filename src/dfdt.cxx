@@ -585,6 +585,8 @@ bool DFDT::KillAll(IDBOBJ* DbParent)
 		}
 	    }
 	  // Zap also the object tables
+	  // C++26 reflection will make this cleaner.. But for now
+	  // we need to walk though assuming no holes in the enum
 	  for (int j= FIELDTYPE::text; j< FIELDTYPE::__last; j++)
 	    {
 	      const FIELDTYPE ft ((BYTE)j);

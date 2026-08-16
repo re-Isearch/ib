@@ -175,6 +175,8 @@ static inline int _to_ucs4(const unsigned char *chr, const unsigned char *end, u
 GPTYPE DOCTYPE::ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
         GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
 {
+  enum TERM_STATE state = TERM_START;
+
   GPTYPE GpListSize = 0;
   const UCHR zapChar = '\0';
 
@@ -227,20 +229,20 @@ GPTYPE DOCTYPE::ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
           if (Position >= DataLength) break;
           if (DataBuffer[Position] == zapChar) { Position++; continue; }
           if (DataBuffer[Position] == _IB_UTF8_SILENT_ZAP) { Position++; continue; }
-          if (IsDotInWord(DataBuffer[Position]))
+
+	  int termLen = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd,
+                (unsigned char)zapChar, state);
+	  if (termLen == 0)
             {
-              int dotLen = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd, (unsigned char)zapChar);
-              if (dotLen == 0)
-                {
-                  DataBuffer[Position] = zapChar; // not mid-word -- resolved as separator
-                  Position++;
-                  continue;
-                }
-              // else: absorbed -- falls through, this position is the
-              // start of a term (possibly a leading dot-class byte).
+	       state = TERM_START; // Scanning for next term start
+               DataBuffer[Position] = zapChar; // resolved as separator
+               Position++;
+               continue;
             }
+	  state = TERM_INSIDE;
           break;
         }
+      state = TERM_START;
 
       // If the word is not in the stoplist then add it to GpBuffer
       if (( (DataLength - Position) > 0) &&
@@ -272,49 +274,17 @@ GPTYPE DOCTYPE::ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
       // Skip over the word
       if (Position >= DataLength)
         break;
-      int itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd, (unsigned char)zapChar);
+
+      int itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd,
+		(unsigned char)zapChar, state);
       if (itr == 0)
         {
 	  unsigned char *p = reinterpret_cast<unsigned char *>(DataBuffer) + Position;
 	  uint32_t cp = 0; 
 	  const int n = _to_ucs4(p, DataEnd, &cp);
 
-
 	  if (n <= 0)
 	    {
-
-#if 1
-
-{
-const unsigned char *base = reinterpret_cast<const unsigned char *>(DataBuffer);
-const unsigned char *p = base + Position;
-
-message_log(LOG_ERROR,
-    "(1)ITR=%d pos=%zu "
-    "prev=%02X %02X %02X "
-    "lead=%02X next=%02X %02X %02X",
-    itr,
-    Position,
-    Position >= 3 ? base[Position - 3] : 0,
-    Position >= 2 ? base[Position - 2] : 0,
-    Position >= 1 ? base[Position - 1] : 0,
-    p[0],
-    p + 1 < DataEnd ? p[1] : 0,
-    p + 2 < DataEnd ? p[2] : 0,
-    p + 3 < DataEnd ? p[3] : 0);
-}
-
-	      message_log(LOG_ERROR, "(2)ITR=0 pos=%zu lead=%02X bytes=%02X %02X %02X %02X "
-                "decoded=%d cp=U+%04X zap=%02X\n",
-                        (size_t)Position,
-                        p < DataEnd ? p[0] : 0,
-                        p + 1 < DataEnd ? p[1] : 0,
-                        p + 2 < DataEnd ? p[2] : 0,
-                        p + 3 < DataEnd ? p[3] : 0,
-                        n,
-                        (unsigned)cp, 
-                        (unsigned)(unsigned char)zapChar);
-#endif
 	      message_log(LOG_PANIC,
 		"Invalid UTF-8 encountered while indexing in UTF-8 mode. "
 		"Check the document encoding and ingest pipeline.");
@@ -337,6 +307,8 @@ message_log(LOG_ERROR,
 	   Position += (size_t)n;
 	   continue;
         }
+
+      state = TERM_INSIDE;
       while ( itr )
         {
           // No per-byte lowering here -- pass 1 already folded the whole
@@ -359,25 +331,17 @@ message_log(LOG_ERROR,
             Position++;
 
           if (Position >= DataLength) break;
-          if (IsDotInWord(DataBuffer[Position]))
+          itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd,
+		(unsigned char)zapChar, state);
+          if (!itr)
             {
-              // Same forward-neighbor resolution as the outer skip-loop,
-              // but reached here because we're mid-extension: a dot/hyphen
-              // absorbed into the CURRENT term if what follows is a
-              // letter, otherwise zapped and the term ends here.
-              itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd, (unsigned char)zapChar);
-              if (!itr)
-                {
-                  DataBuffer[Position] = zapChar;
-                  break;
-                }
-              continue;
+	      state = TERM_START;
+              DataBuffer[Position] = zapChar;
             }
-          itr = _ib_IsUTF8TermChrFast(reinterpret_cast<const unsigned char*>(DataBuffer) + Position, DataEnd, (unsigned char)zapChar);
+          else state = TERM_INSIDE;
         }
-      // NOTE: If the first character was NOT a TermChr then we'll be at the same
-      //       position. This only can happen when a callback makes no sense.
-
+     // NOTE: If the first character was NOT a TermChr then we'll be at the same
+     //       position. This only can happen when a callback makes no sense.
    }
    return GpListSize;
 }  // Return # of GP's added to GpBuffer

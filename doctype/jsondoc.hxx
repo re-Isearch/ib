@@ -33,6 +33,7 @@ Notes:
 #define JSONDOC_HXX
 
 #include "colondoc.hxx"
+#include "HTMLEntities.hxx"
 
 #ifndef JSON_PATH_SEP
 # define JSON_PATH_SEP '.'
@@ -56,6 +57,7 @@ class JSONDOC : public COLONDOC {
   friend class JSONLDDOC;
   friend class EJSONDOC;
   friend class ESBULKNDJSON;
+  friend class CIRRUSNDJSON;
 public:
   JSONDOC(PIDBOBJ DbParent, const STRING& Name);
 
@@ -129,10 +131,14 @@ protected:
                 GPTYPE start, GPTYPE end,
                 const STRING& contents);
 
+  HTMLEntities Entities; // JSON uses sometimes HTML entities despite \unnnn format
+
   STRING m_ScratchPath; // Holds onto internal capacity between records
   char m_PathSep;
   bool m_IndexArrayElements;
   bool m_AutoFieldTypes;
+  bool m_ConvertEntities;
+  bool m_ResolveEscapes;
 };
 
 
@@ -158,6 +164,8 @@ public:
     // Cirrus array fields (outgoing_link, category, template, …) should
     // be repeatable fields, not flattened to key|0, key|1, … key|N.
     m_IndexArrayElements = Getoption("IndexArrayElements", "false").GetBool();
+    m_ConvertEntities    = true; 
+    m_ResolveEscapes     = true; 
   }
   const char *Description(PSTRLIST List) const;
   void ParseFields(PRECORD NewRecord);

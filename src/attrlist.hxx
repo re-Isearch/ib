@@ -19,7 +19,7 @@ public:
 	dotnumber, phonhash, phonhash2, metaphone, metaphone2, hash, casehash,
 	lexi, smiles, privhash, isbn, telnumber, creditcardnum, iban, bic,
 	db_string, callback, callback1, callback2, callback3, callback4, callback5, callback6, callback7,
-	db_hnsw_raw =200, db_hnsw, db_hnsw2, db_hnsw3, db_nsg = 220, db_IVFFlat, special, __last=255};
+	db_hnsw_raw, db_hnsw, db_hnsw2, db_hnsw3, db_nsg, db_IVFFlat, special, __last=255};
 
   FIELDTYPE();
   FIELDTYPE(const FIELDTYPE& OtherFieldType);

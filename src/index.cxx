@@ -5932,7 +5932,7 @@ return (right - left + 1);
 
 
 int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Truncate,
-                  off_t *start, bool *overflow)
+                  off_t *start, bool *overflow, GPTYPE *sisSlot)
 {
   int             num_hits = -1;
 
@@ -6078,6 +6078,9 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
           if (DebugMode) message_log (LOG_DEBUG, "Found any match t='%s'(%u) [overflow=%d, *n=%d]",
 		t+1, (int)((unsigned char)(*t)), local_overflow, (int)(n[0]));
 
+	  // Slot 0 is reserved. It means no usable lexical provenance
+	  if (sisSlot) *sisSlot = (GPTYPE)((off_t)(t - Buffer)/dsiz) + 1;
+
           // We now have ANY Match...
           char           *High = t;	// Last Element in range
 
@@ -6123,15 +6126,42 @@ int INDEX::findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Tru
 }
 
 int INDEX::findIt(bool Truncate, const STRING& Index,
-                  const UCHR *Term, size_t TermLength, off_t *start, bool *overflow)
+                  const UCHR *Term, size_t TermLength, off_t *start, bool *overflow, GPTYPE *slot)
 {
   MMAP MemoryMap(Index, MapRandom);
 
-  return findIt (&MemoryMap, Term, TermLength, Truncate, start, overflow);
+  return findIt (&MemoryMap, Term, TermLength, Truncate, start, overflow, slot);
+}
+
+
+// From indexing number (slot) and sisSlot we create a SourceId to
+// uniquely identify a term (up to the overflow).
+//
+// We only use this to as a discrimator between matches...
+// This will allow us to understand the difference between the distance
+// of "dog dog" from "dog cat" when searching for dog and cat.
+/* NOTE:
+Persisted IRSET hit source identifiers represent the physical SIS layout
+at the time of the search. They remain valid across index appends, but may
+become incompatible with newly generated hit source identifiers after an
+index collapse/merge. Loaded IRSETs from an earlier layout should therefore
+not be combined with live IRSETs using source-aware E3/E4 normalization.  */
+static inline FCSOURCE MakeSourceId(const INT slot, const GPTYPE sisSlot)
+{
+  const FCSOURCE id = (FCSOURCE)sisSlot + 1;
+  if (slot == 0) return 0;
+
+  // Low 56 bits belong to the SIS slot.
+  if (id > 0x00FFFFFFFFFFFFFFULL)
+    return 0;
+
+cerr << "SOURCE ID = " << (((FCSOURCE)(BYTE)slot << 56) | id ) << " slot #" << slot  << endl;
+
+  return ((FCSOURCE)(BYTE)slot << 56) | id;
 }
 
 INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Truncate,
-                off_t *start, bool *overflow)
+                off_t *start, bool *overflow, FCSOURCE *sourceId)
 {
   size_t TermLength = Word.GetLength();
   const UCHR *Term = (const UCHR *)Word;
@@ -6148,8 +6178,15 @@ INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Tr
         }
     }
 
-  if (MemorySISCache->CreateMap(Slot, SisFn, MapRandom))
-    return findIt (MemorySISCache->Map(Slot), Term, TermLength, Truncate, start, overflow);
+  // Know the slot .. 
+  if (MemorySISCache->CreateMap(Slot, SisFn, MapRandom)) {
+    GPTYPE sisSlot = 0;
+    INT hits = findIt (MemorySISCache->Map(Slot), Term, TermLength, Truncate, start, overflow, &sisSlot);
+    // Convert into sourceId
+    if (sourceId) *sourceId = MakeSourceId(Slot, sisSlot);
+    return hits;
+  }
+
   message_log (LOG_ERRNO, "Could not create MAP in Slot %d for '%s'!", Slot, SisFn.c_str());
   Parent->SetErrorCode(2);
   return -1; // Err
@@ -6157,7 +6194,7 @@ INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Tr
 
 
 INT INDEX::find(INT Index, const STRING& Word, bool Truncate,
-                off_t *start, bool *overflow)
+                off_t *start, bool *overflow, FCSOURCE *sourceId)
 {
   INT Slot = 0;
   STRING SisFn (SisFileName);
@@ -6167,7 +6204,7 @@ INT INDEX::find(INT Index, const STRING& Word, bool Truncate,
       SisFn.Cat ((INT)Index);
       Slot = Index - 1;
     }
-  return find(SisFn, Slot, Word, Truncate, start, overflow);
+  return find(SisFn, Slot, Word, Truncate, start, overflow, sourceId);
 }
 
 long INDEX::TermFreq(const STRING& Word, bool Truncate)
@@ -6784,9 +6821,10 @@ for (size_t i = 0; i < x; )
         if (DebugMode)
 	  message_log (LOG_DEBUG, "Find '%s' in %s", Word.c_str(), SisFn.c_str());
         // New SIS code
+	FCSOURCE sourceId = 0;
         ip = find( SisFn, jj, Word, (Typ == LeftAlwaysMatches || Typ == LeftMatch)
                    && (FullTerm_length == Term_length) /* Added  Fri Jul 23 00:31:08 MET DST 1999 */
-                   , &first, &overflow );
+                   , &first, &overflow, &sourceId );
         if ( ip == 0 )
           {
 	    if (DebugMode) message_log (LOG_DEBUG, "[%d] %s not found.", jj, Word.c_str()) ;

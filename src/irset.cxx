@@ -4494,6 +4494,7 @@ OPOBJ *atomicIRSET::ComputeScores (const float TermWeight, enum NormalizationMet
 	    return ComputeScoresNormalizationAF (TermWeight);
 	  case EuclideanNormalization:
 	  case CosineMetricNormalization:
+	  case E2Normalization:
 	    if (ComputedS != preCosineMetricNormalization)
 	      {
 		OPOBJ *res = ComputeScoresNormalizationL2 (TermWeight);
@@ -4599,7 +4600,6 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
   return this;
 }
 
-#if 0
 
 OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
 {
@@ -4723,7 +4723,6 @@ OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
 
   return this;
 }
-#endif
 
 /*
  Dave Hawking's AF1:

@@ -326,14 +326,14 @@ private:
   bool IsSpecialTerm(const UCHR *Term) const;
   // These two are *very* private 
   INT find(INT Index, const STRING& Word, bool Truncate, off_t *start,
-	bool *overflow);
+	bool *overflow, FCSOURCE *sourceId = nullptr);
   INT find(const STRING& SisFn, const INT Slot, const STRING& Word,
-	bool Truncate, off_t *start, bool *overflow);
+	bool Truncate, off_t *start, bool *overflow, FCSOURCE *sourceId = nullptr);
 
   int findIt(MMAP *MemoryMap, const UCHR *Term, size_t TermLength, bool Truncate,
-	off_t *start, bool *overflow);
-  int findIt(bool Truncate, const STRING& Index,
-	const UCHR *Term, size_t TermLength, off_t *start, bool *overflow);
+	off_t *start, bool *overflow, GPTYPE *slot = nullptr);
+  int findIt(bool Truncate, const STRING& Index, const UCHR *Term,
+	size_t TermLength, off_t *start, bool *overflow, GPTYPE *slot = nullptr);
 
   GPTYPE * const GpPtr(size_t SubIndex, GPTYPE Position) const;
   GPTYPE GpOf(GPTYPE *Ptr, size_t Index) const;

@@ -3056,8 +3056,6 @@ bool IDB::GetFieldData (const RESULT &ResultRecord, const FC& Fc,
 bool IDB::GetFieldData (const RESULT &ResultRecord, const STRING& ESet,
 	PSTRLIST StrlistBuffer, const DOCTYPE *DoctypePtr)
 {
-//cerr << "HERE I AM(2)" << endl;
-
   if (StrlistBuffer == NULL)
     return false;
 
@@ -4662,6 +4660,7 @@ bool IDB::KillAll ()
       MainDfdt->KillAll(this);
       delete MainDfdt;
     }
+
   if (MainIndex)
     {
       MainIndex->KillAll();
@@ -4674,6 +4673,7 @@ bool IDB::KillAll ()
       delete MainMdt;
       MainMdt = NULL;
     }
+
 
 /*
   if (DocTypeReg) delete DocTypeReg;

@@ -818,37 +818,43 @@ int _Isearch_main (int argc, char **argv)
 	      Sort = ByReverseDate;
 	      LastUsed = x;
 	    }
-	  else if (Flag.Equals("-cosine_norm") || Flag.Equals("-L2_norm"))
+	  else if (Flag.Equals("-cosine_norm") || Flag.Equals("-L2_norm") || Flag.Equals("-norm=L2"))
 	    {
 	      Method = NormalizationL2;
 	      LastUsed = x;
 	    }
-	  else if (Flag.Equals("-S2_norm"))
+	  else if (Flag.Equals("-S2_norm") || Flag.Equals("-norm=S2"))
 	    {
 	      Method = NormalizationS2;
 	      LastUsed = x;
 	    }
-	  else if (Flag.Equals("-L1_norm"))
+	  else if (Flag.Equals("-E2_norm") || Flag.Equals("-norm=E2"))
+	    {
+	      Method = E2Normalization ;
+	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-L1_norm") || Flag.Equals("-norm=L1"))
 	   {
 	      Method = NormalizationL1;
 	      LastUsed = x;
 	   }
-          else if (Flag.Equals("-AF_norm"))
+          else if (Flag.Equals("-AF_norm") || Flag.Equals("-norm=AF"))
            {
               Method = NormalizationAF; 
               LastUsed = x; 
            }
-	  else if (Flag.Equals("-euclidean_norm") || Flag.Equals("-metric_norm"))
+	  else if (Flag.Equals("-euclidean_norm") || Flag.Equals("-metric_norm") 
+		|| Flag.Equals("-norm=E1"))
 	    {
 	      Method = EuclideanNormalization;
 	      LastUsed = x;
 	    }
-          else if (Flag.Equals("-max_norm"))
+          else if (Flag.Equals("-max_norm") || Flag.Equals("-norm=max"))
             {
               Method = MaxNormalization;
               LastUsed = x;
             }
-          else if (Flag.Equals("-log_norm"))
+          else if (Flag.Equals("-log_norm") || Flag.Equals("-norm=log"))
             {
               Method = LogNormalization;
               LastUsed = x;
@@ -2612,6 +2618,12 @@ namespace
       NULL,
       "Use Euclidean normalization."
     },
+  {          
+      "normalization",
+      "-E2_norm", 
+      NULL, 
+      "Use experimental E2 normalization."
+    },    
     {
       "normalization",
       "-L1_norm",

@@ -171,6 +171,8 @@ JSONDOC::JSONDOC(PIDBOBJ DbParent, const STRING& Name)
 
   m_IndexArrayElements = Getoption("IndexArrayElements", "true").GetBool();
   m_AutoFieldTypes     = Getoption("AutodetectFieldtypes", "Y").GetBool();
+  m_ConvertEntities    = Getoption("NormalizeEntities", "N").GetBool();
+  m_ResolveEscapes     = Getoption("ResolveJsonEscapes", "Y").GetBool();
 }
 
 JSONDOC::~JSONDOC() {}
@@ -193,7 +195,10 @@ Limited to \"pure JSON\" (RFC 8259). Nested keys are joined with path-separator.
 Indexing options (defined in .ini):\n\
   [General]\n\
   AutodetectFieldtypes=True|False // Guess fieldtypes\n\
-  IndexArrayElements=True|False\n  PathSep=Character (default '.')";
+  IndexArrayElements=True|False\n\
+  PathSep=Character (default '.')\n\
+  ResolveJsonEscapes=True|False   // Handle \\unnnn (default true)\n\
+  NormalizeEntities=True|False    // Normalize embedded entities (default false)";
 }
 
 void JSONDOC::SourceMIMEContent(PSTRING StringPtr) const
@@ -1616,10 +1621,36 @@ void ResolveJSONUnicodeEscapes(UCHR* DataBuffer, GPTYPE DataLength, UCHR ZapChr)
 
     Position = (GPTYPE)((UCHR*)hit - DataBuffer);
 
-    if (Position + 1 >= DataLength || DataBuffer[Position+1] != 'u') {
-      Position++; // ordinary backslash, not a \u escape -- leave it
+    if (Position + 1 >= DataLength) {
+      Position++; 
       continue;
     }
+
+    UCHR decoded;
+    bool simpleEscape = true;
+
+    // Handle \n as well as \uNNNN
+    switch(DataBuffer[Position+1]) {
+      case '"':  decoded = '"';  break;
+      case '\\': decoded = '\\'; break;
+      case '/':  decoded = '/';  break;
+      case 'b':  decoded = '\b'; break;
+      case 'f':  decoded = '\f'; break;
+      case 'n':  decoded = '\n'; break;
+      case 'r':  decoded = '\r'; break;
+      case 't':  decoded = '\t'; break;
+      case 'u': simpleEscape = false; break;
+      default: // Not a valid JSON escape that we know how to decode.
+        Position += 2;
+        continue;
+    }
+    if (simpleEscape) {
+      DataBuffer[Position]     = decoded;
+      DataBuffer[Position + 1] = ZapChr;
+      Position += 2;
+      continue;
+    }
+
     if (Position + 6 > DataLength) {
       Position++; // truncated at buffer end -- nothing to salvage
       continue;
@@ -1666,10 +1697,20 @@ void JSONDOC::BeforeIndexing()
 }
 
 
+// ParseWords needs to resolve the \n and \unnnn and HTML entities
+// before passing things to DOCTYPE::ParseWords
+//
 GPTYPE JSONDOC::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
      GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength)
 {
-   ResolveJSONUnicodeEscapes(DataBuffer, DataLength, '\0');
+   if (m_ResolveEscapes)
+     ResolveJSONUnicodeEscapes(DataBuffer, DataLength, ' ');
+
+  // Convert "&amp;xxx &lt;yyyy" to
+  //         "&xxxx    <yyyy   "
+   if (m_ConvertEntities)
+     Entities.normalize((char *)DataBuffer, DataLength);
+
    return DOCTYPE::ParseWords(DataBuffer, DataLength, DataOffset, GpBuffer, GpLength);
 }
 

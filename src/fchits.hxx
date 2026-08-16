@@ -14,6 +14,8 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 
 class FCLIST;
 
+typedef UINT8 FCSOURCE;
+
 struct FcLess
 {
   bool operator()(const FC& a, const FC& b) const

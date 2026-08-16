@@ -56,7 +56,7 @@ extern enum NormalizationMethods {
   Unnormalized = 0, NoNormalization, NormalizationL2, NormalizationL1, NormalizationS2, MaxNormalization,
   LogNormalization, BytesNormalization, preCosineMetricNormalization, CosineMetricNormalization,
   EuclideanNormalization, AuxNormalization1, AuxNormalization2, AuxNormalization3, NormalizationAF,
-  HybridNormalization,  UndefinedNormalization
+  HybridNormalization, E2Normalization,  UndefinedNormalization
 } defaultNormalization;
 const int CosineNormalization=NormalizationL2;
 
@@ -152,6 +152,7 @@ public:
   OPOBJ *ComputeScoresLogNormalization (const float TermWeight);
   OPOBJ *ComputeScoresBytesNormalization (const float TermWeight);
   OPOBJ *ComputeScoresCosineMetricNormalization (const float TermWeight);
+  OPOBJ *ComputeScoresE2Normalization(const float TermWeight);
 
   OPOBJ *ComputeScoresHybridNormalization(const float TermWeight);
   void SetPrecomputed(enum NormalizationMethods Method);
@@ -781,6 +782,12 @@ public:
   OPOBJ* ComputeScoresNormalizationS2( const float TermWeight)
   {
     return node()->ComputeScoresNormalizationS2(TermWeight);
+  }
+
+
+  OPOBJ* ComputeScoresE2Normalization( const float TermWeight)
+  {
+    return node()->ComputeScoresE2Normalization(TermWeight);
   }
 
   OPOBJ* ComputeScoresMaxNormalization(const float TermWeight)

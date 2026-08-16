@@ -256,11 +256,11 @@ STRING& DVBLINE::DescriptiveName(const STRING& FieldName, PSTRING Value) const
 {"AB", "Kurzinhalt"},		/* abstract */
 {"AD", "Adressaten"},		/* audience */
 {"AU", "Drehbuch"},		/* author */
-{"AV", "Datum des Verfügbarkeitszeitraumes"},		/* availability */
-{"AW", "Prädikate"},		/* awards */
-{"CA", " Titelbild"},
+{"AV", "Datum des Verfuegbarkeitszeitraumes"},		/* availability */
+{"AW", "Praedikate"},		/* awards */
+{"CA", "Titelbild"},
 {"CG", "Kamera"},		/* cinematographer */
-{"CL", "Verl. Schlüssel"},		/* clue, not official DVB */
+{"CL", "Verl. Schluessel"},		/* clue, not official DVB */
 {"CO", "Produktionsland"},		/* country */
 {"CR", "Critics"},		/* criticts, not official DVB */
 {"CS", "Character Set"},		/* charset, not official DVB */
@@ -272,48 +272,48 @@ STRING& DVBLINE::DescriptiveName(const STRING& FieldName, PSTRING Value) const
 {"ED", "Schnitt"},		/* editor */
 {"EF", "Gestaltungselemente"},		/* effects */
 {"ES", "Datum des empfohlenen Verleihendes"},		/* best_before */
-{"FM", "Länge, Format, Durchmesser"},		/* format */
+{"FM", "Laenge, Format, Durchmesser"},		/* format */
 {"FP", "Preis"},		/* fee_purchase */
-{"FR", "Gebühr"},		/* fee_rent, not official DVB */
+{"FR", "Gebuehr"},		/* fee_rent, not official DVB */
 {"GE", "Genre"},		/* genre, not official DVB */
 {"GM", "Rechte"},		/* gema */
-{"I0", " Status"},		/* LMZ-Status */
-{"I1", " Erschliesser"},		/* record_author */
-{"I2", " Dezentrale Signatur"},		/* local_signature */
-{"I4", " Zuständigkeit"},		/* record_technical_author */
+{"I0", "Status"},		/* LMZ-Status */
+{"I1", "Erschliesser"},		/* record_author */
+{"I2", "Dezentrale Signatur"},		/* local_signature */
+{"I4", "Zustaendigkeit"},		/* record_technical_author */
 {"I5", "Paralleltitel"},		/* parallel_title */
 {"I6", "Produzent/Auftraggeber"},		/* agency */
 {"I8", "FWU-Signatur"},		/* FWU-call-id */
 {"IA", "Verweis FWU-Signatur"},		/* linkto_FWU_call-id */
 {"IB", "Bemerkung"},		/* remarks */
 {"IC", "Anzahl"},		/* size */
-{"IE", "Hintergrunddokumente öffentlich"},		/* external_links_public */
-{"IF", " Hintergrunddokumente geheim"},		/* external_links_secret */
+{"IE", "Hintergrunddokumente oeffentlich"},		/* external_links_public */
+{"IF", "Hintergrunddokumente geheim"},		/* external_links_secret */
 {"IG", "Weitere Urheber"},		/* writers */
 {"IH", "Originaltitel des 2. Einzeltitels"},		/* original_alternativ_title */
 {"IJ", "Untertitel zum Serientitel"},		/* subtitle_series */
-{"IK", " Jahr der Endabnahme"},		/* year_of_baba_yaga */
+{"IK", "Jahr der Endabnahme"},		/* year_of_baba_yaga */
 {"IL", "Behandelte Personen und Institutionen"},		/* themes */
 {"IM", "Topographische Begriffe"},		/* geographical_issues */
 {"IN", "Lernziele"},		/* paed_issues */
 {"IO", "Vorkenntnisse"},		/* propaedeuticum */
-{"IU", " Sortiertitel des 2. Einzeltitels"},		/* paranoia */
+{"IU", "Sortiertitel des 2. Einzeltitels"},		/* paranoia */
 {"IV", "Beigaben, Lieferumfang"},		/* documentation */
-{"KW", "Schlagwörter"},		/* keywords */
+{"KW", "Schlagwoerter"},		/* keywords */
 {"LA", "Sprache"},		/* code-language */
-{"LC", "Öffentliche Vorführrechte"},		/* license */
+{"LC", "Oeffentliche Vorfuehrrechte"},		/* license */
 {"LN", "Laufzeit"},		/* length */
 {"LO", "Standort"},		/* location */
 {"LT", "Literarische-Vorlage"},		/* lit_author */
 {"MA", "Anzahl, Laufzeit, Farbe"},		/* media_attributes */
 {"MD", "Farbe"},		/* color */
-{"MM", "Datenträger"},		/* media */
+{"MM", "Datentraeger"},		/* media */
 {"MO", "Multimediaobjekte"},
 {"MU", "Musik"},		/* music, not official DVB */
 {"NA", "Thesaurus MOTBIS"},		/* thesaurus-motbis, not official DVB */
 {"NB", "Thesaurus TEE"},		/* thesaurus-tee, not official DVB */
 {"OM", "Systemvoraussetzungen"},		/* operating_system */
-{"OW", " Owner DT-Subsatz"},		/* owner_media_subrecord */
+{"OW", "Owner DT-Subsatz"},		/* owner_media_subrecord */
 {"PO", "Verweis-Sammelmedien"},		/* parent */
 {"PR", "Produzent/Realisator"},		/* producer */
 {"PS", "Beurteilung"},		/* commentary */
@@ -322,15 +322,15 @@ STRING& DVBLINE::DescriptiveName(const STRING& FieldName, PSTRING Value) const
 {"SA", "Sammlung"},		/* collections, not official DVB */
 {"SD", "Ton"},		/* sound */
 {"SE", "Serientitel"},		/* series */
-{"SH", " Sortierhaupttitel"},		/* sort_title */
+{"SH", "Sortierhaupttitel"},		/* sort_title */
 {"SI", "ID-Nummer"},		/* local-call-id */
 {"SL", "Verweis-Sprachfassungen"},		/* see also languages */
 {"SM", "Verweis-Einzelmedien"},		/* see also media */
 {"SO", "Verweis-Kontextmedien"},		/* see also */
 {"SR", "Originaltitel der Serie"},		/* series_original */
-{"SS", " Sortierserientitel"},		/* series_sort_title */
+{"SS", "Sortierserientitel"},		/* series_sort_title */
 {"ST", "Mitwirkende"},		/* other-credits, not official DVB */
-{"SU", " Sortieruntertitel"},		/* sort_subtitel, not official DVB */
+{"SU", "Sortieruntertitel"},		/* sort_subtitel, not official DVB */
 {"SY", "Systematik"},		/* systematic */
 {"TA", "2. Einzeltitel bei Mehrfachtiteln"},		/* second_title */
 {"TD", "Sonstige Angaben"},		/* technical_data */
@@ -346,7 +346,7 @@ STRING& DVBLINE::DescriptiveName(const STRING& FieldName, PSTRING Value) const
 {"YR", "Produktionsjahr"},		/* date-of-publication */
 {"ZC", "``Internal-Distribution/Loan'' Code for ILL"},		/* not official DVB */
 {"ZL", "Sprache (USMarc)"},		/* not official DVB */
-{"ZR", " Datum letzte Änderung"},		/* date-last-modified */
+{"ZR", "Datum letzte Aenderung"},		/* date-last-modified */
 {"ZU", "URL"},		/* URL, not official DVB */
 {"ZZ", "Verschiedenes"}		/* misc, not official DVB */
   /* NO NULL please! */
@@ -745,7 +745,7 @@ HREF=\"i.search?DATABASE%3D" << DBname
 			    {
 			      *StringBuffer << "</TD></TR>" ;
 #if 1	/* KLUDGE FOR MULTIPLE MMs in a single MM */
-			      if (LongName == "Datenträger")
+			      if (LongName == "Datentraeger")
 				{
 				  *StringBuffer << "\
 <TR><TD COLSPAN=2>&nbsp;</TD></TR>";

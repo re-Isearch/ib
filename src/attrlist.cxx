@@ -80,11 +80,15 @@ static struct DataType {
   {"local6",    _s, FIELDTYPE::callback6, "Local callback 6 (External)"},
   {"local7",    _s, FIELDTYPE::callback7, "Local callback 7 (External)"},
 #ifdef VECTOR_INDEX 
-  {"hnsw",       _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (base Model)"},
-  {"hnsw2",      _V, FIELDTYPE::db_hnsw2, "Hierarchical Navigable Small Worlds (HNSW) (2nd Model)"},
-  {"hnsw3,       _V, FIELDTYPE::db_hnsw3, "Hierarchical Navigable Small Worlds (HNSW) (3rd Model)"},
+  {"hnsw_raw",  _V, FIELDTYPE::db_hnsw_raw, "Encoded Vectors for HNSW"},
+  {"hnsw",      _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (base Model)"},
+  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, "Hierarchical Navigable Small Worlds (HNSW) (2nd Model)"},
+  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, "Hierarchical Navigable Small Worlds (HNSW) (3rd Model)"},
 #else
-  {"hnsw",      _s, FIELDTYPE::db_hnsw,   "Hierarchical Navigable Small Worlds (HNSW) // NOT ENABLED"},
+  {"hnsw_raw",  _V, FIELDTYPE::db_hnsw_raw, _V},
+  {"hnsw",      _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (NOT ENABLED)"},
+  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, _V},
+  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, _V},
 #endif
   {"nsg",        g, FIELDTYPE::db_nsg,    "Spread Out Graph ANNS algorithms (NSG) // NOT YET"}, 
   {"ivfflat",    f, FIELDTYPE::db_IVFFlat,"IVFFlat Vectors // NOT YET"},
@@ -162,8 +166,10 @@ static struct DataType {
 void FIELDTYPE::AvailableTypesList(STRLIST *Strlist) const
 {
   Strlist->Clear();
-  for (size_t i = 0; i < MAX_DATATYPE; i++)
-    Strlist->AddEntry (DataTypes[i].Name);
+  for (size_t i = 0; i < MAX_DATATYPE; i++) {
+    if ((DataTypes[i].Description)[0])
+      Strlist->AddEntry (DataTypes[i].Name);
+  }
 }
 
 void FIELDTYPE::AvailableTypesHelp(ostream& os) const
@@ -174,8 +180,10 @@ void FIELDTYPE::AvailableTypesHelp(ostream& os) const
   
   os << "The following fundamental data types are currently supported (v." <<  FIELDTYPE::special
 	<< "." <<  ((sizeof(DataTypes)/sizeof(DataType ))-FIELDTYPE::special)/3 << "):" << endl;
-  for (; i <= MAX_DATATYPE; i++)
-    os << "   " << DataTypes[i].Name << "  \t// " << DataTypes[i].Description << endl;
+  for (; i <= MAX_DATATYPE; i++) {
+    if ((DataTypes[i].Description)[0])
+      os << "   " << DataTypes[i].Name << "  \t// " << DataTypes[i].Description << endl;
+  }
   os << "They are also available via the following alternative 'compatibility' names:" << endl;
   for (; i < sizeof(DataTypes)/sizeof(DataTypes[0]); i++) {
    if (!IsExternal(DataTypes[i].Type))

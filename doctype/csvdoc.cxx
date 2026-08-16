@@ -194,6 +194,134 @@ void CSVDOC::ParseRecords(const RECORD& FileRecord)
   unsigned char  ci = 0;
   const unsigned char *ptr = FileMap.Ptr(); // NOTE: This is a memory mapped file!
 
+  if (ptr == nullptr) return; // Can't continue like this
+
+#if 1
+if (RecStart == 0)
+  {
+    bool textfile =
+      (FileName.Right((size_t)4) ^= ".txt") ||
+      (FileName.Right((size_t)5) ^= ".text");
+
+    if (textfile)
+      {
+        const unsigned char *end = ptr + RecEnd;
+        const unsigned char *line = ptr;
+
+        size_t expected = 0;
+        size_t lines = 0;
+        bool plaintext = false;
+
+        while (line < end && lines < 5)
+          {
+            const unsigned char *eol =
+              (const unsigned char *)memchr(line, '\n', end - line);
+
+            if (eol == 0)
+              eol = end;
+
+            size_t commas = 0;
+            const unsigned char *p = line;
+
+            while ((p = (const unsigned char *)
+                       memchr(p, ',', eol - p)) != 0)
+              {
+                ++commas;
+                ++p;
+              }
+
+            if (lines == 0)
+              {
+                expected = commas;
+
+                if (expected == 0)
+                  plaintext = true;
+              }
+            else if (commas != expected)
+              {
+                plaintext = true;
+              }
+
+            if (plaintext)
+              break;
+
+            ++lines;
+
+            if (eol == end)
+              break;
+
+            line = eol + 1;
+          }
+
+        if (plaintext)
+          {
+	    message_log(LOG_INFO, "%s is not %s, using PLAINTEXT",
+		FileName.c_str(), Doctype.c_str());
+            Record.SetDocumentType ("PLAINTEXT");
+            Db->ParseRecords (Record);
+            return;
+          }
+      }
+  }
+#else
+  if (RecStart == 0)
+    {
+      const unsigned char *end = ptr + RecEnd;
+      bool textfile = (FileName.Right((size_t)4) ^= ".txt") || (FileName.Right((size_t)5) ^= ".text");
+      bool plaintext = false;
+
+cerr << "textfile = " << (int)textfile << endl;
+
+      if (textfile)
+        {
+          const unsigned char *eol1 = (const unsigned char *)memchr(ptr, '\n', end - ptr);
+
+              const unsigned char *line2 = eol1 + 1;
+
+              const unsigned char *eol2 = (const unsigned char *)memchr(line2, '\n', end - line2);
+
+              if (eol2 == 0)
+                eol2 = end;
+
+              size_t commas1 = 0;
+              size_t commas2 = 0;
+
+              const unsigned char *p = ptr;
+
+              while (p < eol1)
+                {
+                  p = (const unsigned char *)memchr(p, ',', eol1 - p);
+                  if (p == 0)
+                    break;
+
+                  ++commas1;
+                  ++p;
+                }
+
+              p = line2;
+
+              while (p < eol2)
+                {
+                  p = (const unsigned char *)memchr(p, ',', eol2 - p);
+                  if (p == 0)
+                    break;
+
+                  ++commas2;
+                  ++p;
+                }
+
+cerr << "COMMA1 = " << commas1 << " and 2 " << commas2 << endl;
+              plaintext = (commas1 == 0 || commas1 != commas2);
+        }
+
+      if (plaintext)
+        {
+          Record.SetDocumentType ("PLAINTEXT");
+          Db->ParseRecords (Record);
+          return;
+        }
+    }
+#endif
   // Is first character a ' ?
   if (*ptr == '\'') quoteChar = '\''; // if starts with 'xxx then use '
 
