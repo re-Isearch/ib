@@ -1432,7 +1432,8 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
         {
           if (DebugMode) message_log (LOG_DEBUG, "Dumping %s FCs to %s",
                                  FieldName.c_str(), FileName.c_str());
-          if ((fp = fopen (FileName.c_str(), "ab")) == NULL)
+
+	  if ((fp = OpenForAppend(FieldName, FIELDTYPE::text)) == NULL) // Was if ((fp = fopen (FileName.c_str(), "ab")) == NULL)
             {
               message_log (LOG_ERRNO, "Can't append '%s' field data to '%s'!",
                     FieldName.c_str(), FileName.c_str());
@@ -1455,7 +1456,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
           message_log (LOG_ERRNO, "Can't unlock %s", FieldName.c_str());
         }
 #endif
-      fclose (fp);
+      // fclose (fp); // Since OpenForAppend don't !!
 
       if (DocTypePtr == NULL)
         {

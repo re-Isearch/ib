@@ -4560,8 +4560,6 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
     {
       for (size_t i = 0; i < TotalEntries; i++)
 	{
-	  FC Fc;
-	  FC oldFc;
 	  int min_dist = INT_MAX; // was 1000;
 
 	  if (Table[i].GetAuxCount() <= 1)
@@ -4570,12 +4568,12 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
 	  const auto Hits = Table[i].GetHitTable();
 	  auto it = Hits.begin();
 
+          FC oldFc = *it++;
 	  for (; it != Hits.end(); ++it)
 	    {
-              const FC Fc = *it;
-
               int distance;
-
+	      
+	      const FC Fc = *it;
               if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
                 distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
               else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
@@ -4967,7 +4965,7 @@ OPOBJ *atomicIRSET::ComputeScoresMaxNormalization (const float TermWeight)
       MinScore=MAXFLOAT;
       MaxScore=0.0;
 #pragma omp parallel for reduction(+:MinScore, MaxScore)
-      {for (size_t i = 0; i < TotalEntries; i++)
+      for (size_t i = 0; i < TotalEntries; i++)
 	{
 	  DOUBLE Score = Table[i].GetHitCount () * InvDocFreq;
 #if USE_GEOSCORE
@@ -4979,7 +4977,6 @@ OPOBJ *atomicIRSET::ComputeScoresMaxNormalization (const float TermWeight)
 	  if ((Score - MaxScore) > 0.0) MaxScore=Score;
 	  if ((Score - MinScore) < 0.0) MinScore=Score;
 	}
-      }
       if (MaxScore == 0.0 && TotalEntries)
 	{
 	  // Should never happen when we have at least one hit!
