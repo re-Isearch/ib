@@ -216,6 +216,9 @@ override the command line arguments!" << endl;
   RemovePath (&DBFileName);
   RemoveFileName (&DBPathName);
 
+  if (DirectoryExists(DBName))
+    DBPathName << "/" << DBFileName ;
+
 #if 0
   // Check if database exits
   STRING DbInfo = DBPathName + DBFileName + ".dbi";
