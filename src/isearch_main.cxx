@@ -489,6 +489,7 @@ static void HelpUsage(const char *progname)
 	"          " << prog << " -d BILLS -rpn vendor/BSn price<100 AND" << endl << 
 	"          " << prog << " -d NEWS  -rpn unix WITHIN:2006" << endl <<
 	"          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -rpn out spot PEER" << endl <<
+        "          " << prog << " -d SHAKESPEARE  -P speech/speaker -P line/line  war court AND SIBLING
 	"Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short." << endl <<
         "Additional \"Special\" elements: R for Raw, H for Highlight/Hits; and if they exist," << endl <<
         "L for location/redirect and M for metadata." << endl << endl <<
@@ -3353,6 +3354,11 @@ static void HelpUsageText( const char *progname, std::ostream& out)
     }
 
   out << "\n"
+      << "Special in-term characters: ";
+       for (int i = 10; i < 127; i++) {
+	 if (_ib_isdot((char)i )) out << (char)i;
+       };
+   out  << "\n   These may appear inside words (tokens) to be considered term characters. see ctype.c\n\n"
       << "date ranges:\n"
       << "  YYYY[MM[DD]][-YYYY[MM[DD]]]\n"
       << "  YYYY[MM[DD]]/[[YYYY]MM]DD\n"
