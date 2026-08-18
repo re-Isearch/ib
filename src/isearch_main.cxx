@@ -828,6 +828,11 @@ int _Isearch_main (int argc, char **argv)
 	      Method = NormalizationS2;
 	      LastUsed = x;
 	    }
+          else if (Flag.Equals("-BM25_norm") || Flag.Equals("-norm=BM25"))
+            {
+              Method = NormalizationBM25;
+              LastUsed = x;
+            }
 	  else if (Flag.Equals("-E2_norm") || Flag.Equals("-norm=E2"))
 	    {
 	      Method = E2Normalization ;
@@ -2641,6 +2646,12 @@ namespace
       "-S2_norm | -norm=S2", 
       NULL, 
       "Use cosine S2 normalization. Similar to L2 but with saturation.."
+    },  
+   {          
+      "normalization",
+      "-BM25_norm | -norm=BM25", 
+      NULL, 
+      "Use BM25 variant normalization."
     },  
     {
       "normalization",

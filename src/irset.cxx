@@ -4486,6 +4486,8 @@ OPOBJ *atomicIRSET::ComputeScores (const float TermWeight, enum NormalizationMet
 	    return ComputeScoresNoNormalization (TermWeight);
 	  case NormalizationS2:
 	    return ComputeScoresNormalizationS2 (TermWeight);
+	  case NormalizationBM25:
+            return ComputeScoresNormalizationBM25 (TermWeight);
 	  case NormalizationL2:
 	    return ComputeScoresNormalizationL2 (TermWeight);
 	  case NormalizationL1:
@@ -4764,6 +4766,94 @@ static inline DOUBLE TermIdf(off_t totalDocs, size_t docFreq)
 
     return 1.0 + log((DOUBLE)totalDocs / (DOUBLE)docFreq);
 }
+
+
+OPOBJ *atomicIRSET::ComputeScoresNormalizationBM25(const float TermWeight)
+{
+  if (TotalEntries && ComputedS != NormalizationBM25 && Parent)
+   {
+      // Set constants (at first run)
+      static double k1 = -1.0, b = -1.0, powA = -1.0, recS = 0.0;
+      static int pivotY = 0;
+      if (k1 < 0.0) {
+	// TODO: Make these configurable!
+	k1 = 1.2; // "IB_BM25_K1"
+	b  = 0.75; // "IB_BM25_B"
+	powA = 0.0; // "IB_BM25_A"
+	recS = 0.0; // "IB_BM25_RECENCY"
+	pivotY = 0; // "IB_BM25_PIVOT"
+	// Alignment
+	if (recS < 0.0) recS = 0.0;
+	if (k1 <= 0.0) k1 = 1.2;
+	if (b < 0.0 || b > 1.0) b = 0.75;
+	if (powA < 0.0) powA = 0.0;
+      }
+
+      MDT *mdt = Parent->GetMainMdt ();
+      if (mdt == nullptr) return this; // Can't continue like this
+
+      // Reset Scores
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+
+      // Since we have TotalEntries > 0 we never have avg == 0.0
+      const double N   = (double) Parent->GetTotalRecords ();
+      const double df  = (double) TotalEntries;
+      const double idf = (double) TermWeight * log (1.0 + (N - df + 0.5) / (df + 0.5));
+      const double avgdl = mdt->GetAvgRecordSize();
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+	  MDTREC mdtrec;
+          const double len = (double)(GetMdtrec(i + 1, &mdtrec) ? mdtrec.GetLength () : 1);
+	  const double lenRatio = len / avgdl;
+
+          const double tf = Table[i].GetHitCount();
+          const double dl = 1.0 - b + b * lenRatio;
+
+	  double Score;
+	  if (powA > 0.0)
+            {
+              // power saturation: idf * tf^a / length-norm
+              Score = (dl > 0.0) ? idf * pow (tf, powA) / dl : 0.0;
+            }
+          else
+            {
+              const double denom = tf + k1 * dl;
+              Score = (denom > 0.0) ? idf * (tf * (k1 + 1.0)) / denom : 0.0;
+            }
+
+          // Multiplicative recency prior, decaying by document age.
+	  if (recS > 0.0 && pivotY > 0)
+            {
+              const int yr = mdtrec.GetDate ().Year ();
+              if (yr > 1000 && yr < 3000)
+                {
+                  double age = (double) (pivotY - yr);
+                  if (age < 0.0) age = 0.0;
+                  if (age > 40.0) age = 40.0;
+                  Score *= pow (1.0 + recS, -age / 10.0);
+                }
+            }
+
+#if USE_GEOSCORE
+          if (Table[i].HaveGscore())
+            Score += Table[i].GetGscore().Potenz();
+#endif
+          Score *= TermWeight;
+
+	  Table[i].SetScore (Score);
+	  if ((Score - MaxScore) > 0.0) MaxScore = Score;
+	  if ((Score - MinScore) < 0.0) MinScore = Score;
+        }
+
+      ComputedS = NormalizationBM25;
+    }
+
+  return this;
+}
+
+
 
 OPOBJ *atomicIRSET::ComputeScoresNormalizationS2(const float TermWeight)
 {

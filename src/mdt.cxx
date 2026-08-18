@@ -2305,7 +2305,6 @@ void MDT::FlushMDTIndexes()
 }
 
 
-
 MDT::~MDT ()
 {
   WriteTimestamp();

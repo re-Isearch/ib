@@ -53,9 +53,10 @@ struct EVIDENCE_COVER {
 ///
 ////
 extern enum NormalizationMethods {
-  Unnormalized = 0, NoNormalization, NormalizationL2, NormalizationL1, NormalizationS2, MaxNormalization,
-  LogNormalization, BytesNormalization, preCosineMetricNormalization, CosineMetricNormalization,
-  EuclideanNormalization, AuxNormalization1, AuxNormalization2, AuxNormalization3, NormalizationAF,
+  Unnormalized = 0, NoNormalization, NormalizationL2, NormalizationL1, NormalizationS2,
+  NormalizationBM25, MaxNormalization, LogNormalization, BytesNormalization,
+  preCosineMetricNormalization, CosineMetricNormalization, EuclideanNormalization,
+  AuxNormalization1, AuxNormalization2, AuxNormalization3, NormalizationAF,
   HybridNormalization, E2Normalization,  UndefinedNormalization
 } defaultNormalization;
 const int CosineNormalization=NormalizationL2;
@@ -147,6 +148,7 @@ public:
   OPOBJ *ComputeScoresNormalizationAF (const float TermWeight);
   OPOBJ *ComputeScoresNormalizationL2 (const float TermWeight);
   OPOBJ *ComputeScoresNormalizationL1 (const float TermWeight);
+  OPOBJ *ComputeScoresNormalizationBM25(const float TermWeight);
   OPOBJ *ComputeScoresNormalizationS2 (const float TermWeight);
   OPOBJ *ComputeScoresMaxNormalization (const float TermWeight);
   OPOBJ *ComputeScoresLogNormalization (const float TermWeight);

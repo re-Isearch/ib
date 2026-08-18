@@ -49,6 +49,11 @@ friend class MDTREC;
   // Special to get Key
   STRING     GetKey (const size_t Index, int *Hash = NULL) const;
 
+  // Special function for average record size
+  DOUBLE     GetAvgRecordSize() const {
+    return TotalEntries ? (DOUBLE)(NextGlobalGp - 1) / TotalEntries : 0.0;
+  };
+
   // Special to just read date
   SRCH_DATE   GetDate (const size_t Index) const {
     return Index == 0 ? GetTimestamp() : tmpMdtrec.GetDate(MdtFp, Index); }
