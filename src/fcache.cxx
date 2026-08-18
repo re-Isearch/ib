@@ -100,7 +100,11 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
                   FieldTotal = Sessions.Size(Fn) / sizeof(FC);
                 }
               else
-                message_log(LOG_ERRNO, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
+		{
+		  if (FileExists(Fn))
+                    message_log(LOG_ERROR, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
+		  return 0;
+	       }
             }
 
           if (Disk)

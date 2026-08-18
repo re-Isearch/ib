@@ -25,6 +25,26 @@ Comments:       May need a newer version of OpenSSL library than often shipped w
 
 		btfs://QmSnAFu4to9G6VpKSzsc7cQ7cg9TMQYVLbsgsowaPWgxkB
 
+input
+   |
+   +-- local path ----------------------+
+   |                                    |
+   +-- URL / IPFS / remote              |
+          |                             |
+       AUTOREMOTE                       |
+          | fetch/materialize           |
+          +-----------------------------+
+                        |
+                 explicit doctype?
+                   /          \
+                 yes           no
+                  |             |
+             chosen parser   AUTODETECT
+                                |
+                           chosen parser
+                                |
+                              index
+
 @@@*/
 
 
@@ -138,15 +158,27 @@ NOTE: For remote file://host/path it assumes AFS under /afs/host/path",
       return desc.c_str();
    }
 
+
+//  DOCTYPE can be FOO:AUTOREMOTE
    void ParseRecords(const RECORD& FileRecord) {
+     const char DocDefine = ':'; // See dtreg.cxx
      // const STRING s (FileRecord.GetFileName());
      STRING s (FileRecord.GetFullFileName());
+     STRING doctype;
+     FileRecord.GetDocumentType(&doctype);
+     STRINGINDEX  i = doctype.SearchReverse(DocDefine);
+     if (i) doctype.EraseAfter(i-1);
+     if (ThisDoctype == doctype)
+	doctype = "AUTODETECT"; // Pass it on
+
+     RECORD newRecord (FileRecord);
+     newRecord.SetDocumentType(doctype);
 
      message_log(LOG_DEBUG, "AUTOREMOTE::ParseRecords got \"%s\"", s.c_str());
 
      if (s.Search("://") == 0) {
-	// Not URL
-	AUTODETECT::ParseRecords(FileRecord);
+	// Not URL so local
+	Db->ParseRecords(newRecord);
 	return;
      }
 
@@ -154,16 +186,13 @@ NOTE: For remote file://host/path it assumes AFS under /afs/host/path",
      if (s.Last() == '.' && s.Last(1) == '/')
 	s.RemoveLast(2);
 
-
      // Now we need to fetch and push into queue 
      int depth = 0;
-     RECORD r(FileRecord);
 
-     if (fetch(s.c_str(), r, &depth))
+     if (fetch(s.c_str(), newRecord, &depth))
        {
-        // Got it
-	r.SetDocumentType(DocParent);
-	AUTODETECT::ParseRecords(r);
+         // Got it
+	 Db->ParseRecords(newRecord);
        }
      }
 

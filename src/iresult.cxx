@@ -352,25 +352,28 @@ bool IRESULT::Read(FILE *fp)
 bool IRESULT::SetVectorTermHits (const UINT count)
 {
 //cerr << "AuxCount = " << AuxCount << "  hits=" << count << endl;
-  if (AuxCount >= maxTermHitsVector)
+  if (AuxCount > maxTermHitsVector)
     {
       void *ptr;
-      maxTermHitsVector += 64; // Expand for 64 more terms
+      size_t newMax = maxTermHitsVector;
+      while (newMax < AuxCount) newMax += 64;
+
       if (TermHitsVector == NULL)
-	ptr = calloc(maxTermHitsVector + 1, sizeof(UINT4));
+	ptr = calloc(newMax, sizeof(UINT4));
       else
-        ptr = realloc(TermHitsVector, (maxTermHitsVector + 1)*sizeof(UINT4));
-      if (ptr)
-	TermHitsVector = (UINT4 *)ptr;
-      else if (maxTermHitsVector)
+        ptr = realloc(TermHitsVector, newMax*sizeof(UINT4));
+
+      if (ptr == NULL)
 	{
 	  free(TermHitsVector);
 	  TermHitsVector = NULL;
 	  maxTermHitsVector = 0;
 	  return false; // Can't, no memory
 	}
+	TermHitsVector = (UINT4 *)ptr;
+        maxTermHitsVector = newMax;
     }
-  else if (AuxCount) // We con't want to count more than 0xFFFFFFFF hits
+  if (AuxCount) // We con't want to count more than 0xFFFFFFFF hits
     TermHitsVector[AuxCount-1] = (count <= 0xFFFFFFFF ? (UINT4)count :  0xFFFFFFFF);
   else
     return false; // AuxCount can't be zero.. 

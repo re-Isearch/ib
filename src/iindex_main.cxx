@@ -1144,19 +1144,19 @@ limitations under the License.  " << endl;
 		  if ( strncmp(argv[x+1], "options", len) == 0)
 		    {
 		      IniUsage();
-		      LastUsed = x;
+		      LastUsed = ++x;
 		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "lang", len) == 0)
 		    {
 		      HelpLanguage();
-		      LastUsed = x;
+		      LastUsed = ++x;
 		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "types", len) == 0)
 		    {
 		      HelpTypes();
-		      LastUsed = x;
+		      LastUsed = ++x;
 		      if (x + 1 == argc) return 0;
 		    }
 		  if (strncmp(argv[x+1], "locale", len) == 0)
@@ -1164,8 +1164,21 @@ limitations under the License.  " << endl;
 		      if (LastUsed)
 			cout << endl;
 		      HelpLocale();
-		      LastUsed = x;
+		      LastUsed = ++x;
 		      if (x + 1 == argc) return 0;
+		    }
+		   if (strncmp(argv[x+1], "special_chars", len) == 0)
+		    {
+		      if (LastUsed) cout << endl;
+		       cout << "Special Characters: ";
+		       for (int i = 10; i < 127; i++)
+			{
+			  if (_ib_isdot((char)i ))
+			    cout << (char)i;
+			}
+		       cout << endl;
+		       LastUsed = ++x;
+		       if (x + 1 == argc) return 0;
 		    }
 		}
 	      if (LastUsed == 0)
@@ -1875,6 +1888,7 @@ static void Usage()
   << " -help l[ocale]     // Print the locale list (same as -locale help)" << endl
   << " -help o[ptions]    // Print the options (db.ini) help." << endl
   << " -help t[types]     // Print the currently supported data types." << endl
+  << " -help s[special]   // Print the compiled in (see ctype.c) special in-term characters" << endl
   << " -thelp             // Show available doctype base classes." << endl
   << " -thelp XX          // Show Help for doctype class XX." << endl
 #ifndef _WIN32
