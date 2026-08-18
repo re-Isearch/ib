@@ -22,11 +22,11 @@ static int _global_otherOpens = 0; // Count of things opened without tracking...
 static int _global_streams_count = 0; 
 static int _global_opens_count  = 0;
 
-#if defined(_WIN32) || defined(__i386)
-#define	_DEFAULT_SLOTS	55	/* Intel x86 ABI */
-#else
-#define	_DEFAULT_SLOTS	15	/* SPARC ABI and default */
-#endif
+
+static constexpr size_t FPT_MAX_SLOTS = 256;
+static constexpr size_t FPT_MIN_SLOTS = 10;
+static constexpr int    FD_RESERVE    = 10;
+static constexpr int    _DEFAULT_SLOTS = 64;
 
 #ifndef ENFILE
 # define ENFILE EMFILE
@@ -95,11 +95,15 @@ void FPT::Init (size_t TableSize)
   const int kernel_max_streams = _IB_kernel_max_streams();
   TotalEntries = 0;
 
+  // Max the max!
+  if (TableSize > FPT_MAX_SLOTS)
+    TableSize = FPT_MAX_SLOTS;
+
   // Init the mutex lock
   pthread_mutex_init(&mutex, NULL);
 
   if ( (_global_streams_count > (3*TableSize)) &&
-	( (int)((_global_streams_count + TableSize+10)) >= kernel_max_streams) &&
+	( (int)((_global_streams_count + TableSize+FD_RESERVE)) >= kernel_max_streams) &&
 	(_global_opens_count == 0 || _global_opens_count > (_global_streams_count/2)) )
     {
       message_log(LOG_NOTICE, "You MUST increase kernel soft/hard file stream limits (%d). Contact your sysadmin!!",
@@ -110,13 +114,13 @@ void FPT::Init (size_t TableSize)
   else
     {
       // Test for the total table sizes and their usage (50% average)
-      if (((kernel_max_streams - _global_streams_count) < (int)(3*TableSize+10)) &&
+      if (((kernel_max_streams - _global_streams_count) < (int)(3*TableSize+FD_RESERVE)) &&
 		_global_opens_count > (_global_streams_count/2))
 	{
 	  message_log (LOG_WARN, "You should increase kernel soft/hard file stream limits (%d).", kernel_max_streams);
-	  if (TableSize > 10) TableSize /= 2;
-	  if (TableSize > 20) TableSize = 16;
-	  if (TableSize < 10) TableSize = 10;
+	  const int available = kernel_max_streams - _global_streams_count - FD_RESERVE;
+	  size_t allowed = available > 0 ? available/ 3 : 3;
+          TableSize = allowed > FPT_MAX_SLOTS ? FPT_MAX_SLOTS : allowed;
 	}
       try {
 	Table = new FPREC[TableSize];

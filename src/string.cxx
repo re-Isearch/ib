@@ -1628,13 +1628,22 @@ STRING& STRING::operator=(float val)
     // Normalize both +0.0 and -0.0 to "0".
     if (val == 0.0f)
         return Assign("0");
+#if defined(_LIBCPP_VERSION)
+    // libc++ does not provide the floating-point chars_format/precision
+    // overload of std::to_chars. snprintf is equivalent for fixed/6.
+    const int n = std::snprintf(s, sizeof(s), "%.6f", static_cast<double>(val));
+    if (n < 0 || n >= static_cast<int>(sizeof(s)))
+        return Assign("");
+    char* end = s + n;
+#else
     const auto result = std::to_chars( s, s + sizeof(s) - 1, val, std::chars_format::fixed, 6);
 
     if (result.ec != std::errc{}) {
-        return Assign("");  // ERROR  
+        return Assign("");  // ERROR
     }
 
     char* end = result.ptr;
+#endif
 
     // Remove trailing fractional zeros.
     while (end > s && end[-1] == '0')
@@ -1655,6 +1664,15 @@ STRING& STRING::operator=(double val)
 
     char s[64];
 
+#if defined(_LIBCPP_VERSION)
+    // Shortest round-trip representation, matching to_chars(value) semantics.
+    for (int prec = 15; prec <= 17; ++prec) {
+        std::snprintf(s, sizeof(s), "%.*g", prec, val);
+        if (std::strtod(s, nullptr) == val)
+            break;
+    }
+    return Assign(s);
+#else
     const auto result = std::to_chars(s, s + sizeof(s) - 1, val);
 
     if (result.ec != std::errc{})
@@ -1662,6 +1680,7 @@ STRING& STRING::operator=(double val)
 
     *result.ptr = '\0';
     return Assign(s);
+#endif
 }
 
 STRING& STRING::operator=(const long double val)
@@ -1669,13 +1688,23 @@ STRING& STRING::operator=(const long double val)
     // Significant digits, sign, decimal point, exponent, and '\0'.
     char s[std::numeric_limits<long double>::max_digits10 + 16];
 
+#if defined(_LIBCPP_VERSION)
+    // libc++ deletes the long double overload of std::to_chars entirely.
+    for (int prec = 18; prec <= 21; ++prec) {
+        std::snprintf(s, sizeof(s), "%.*Lg", prec, val);
+        if (std::strtold(s, nullptr) == val)
+            break;
+    }
+    return Assign(s);
+#else
     const auto result = std::to_chars( s, s + sizeof(s) - 1, val);
 
     if (result.ec != std::errc{}) {
-        return Assign(""); // ERROR 
+        return Assign(""); // ERROR
     }
     *result.ptr = '\0';
     return Assign(s);
+#endif
 }
 
 
