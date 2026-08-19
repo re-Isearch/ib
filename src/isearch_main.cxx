@@ -2977,7 +2977,7 @@ namespace
     },
     {
       "*searchterm",
-      "Perform left truncation."
+      "Perform left truncation. (Limited to indexedSIS block length)"
     },
     {
       "* and ?",

@@ -29,7 +29,7 @@ void FCHITS::Write(FILE* fp) const
   ::Write(static_cast<UCHR>(objHITS), fp);
   ::Write(static_cast<UINT4>(total), fp);
 
-  for (const FC& hit : *this)
+  for (const hit_type& hit : *this)
     hit.Write(fp);
 }
 
@@ -59,7 +59,7 @@ bool FCHITS::Read(FILE* fp)
 
   for (UINT4 i = 0; i < newTotal; ++i)
     {
-      FC fc;
+      hit_type fc;
 
       if (!fc.Read(fp))
         return false;
@@ -110,11 +110,11 @@ void FCHITS::Assign(const FCLIST& list)
   bool unique = true;
   const FcLess less;
 
-  for (const FC& fc : list)
+  for (const hit_type& fc : list)
     {
       if (!replacement.empty())
         {
-          const FC& previous = replacement.back();
+          const hit_type& previous = replacement.back();
 
           if (unique && previous == fc)
 	    unique = false;
@@ -153,7 +153,7 @@ void FCHITS::Append(const FCHITS& other)
     {
       const container_type copy(Buffer);
 
-      for (const FC& fc : copy)
+      for (const hit_type& fc : copy)
         AddEntryFast(fc);
 
       return;
@@ -161,7 +161,7 @@ void FCHITS::Append(const FCHITS& other)
 
   Reserve(Buffer.size() + other.Buffer.size());
 
-  for (const FC& fc : other.Buffer)
+  for (const hit_type& fc : other.Buffer)
     AddEntryFast(fc);
 }
 
@@ -187,8 +187,8 @@ void FCHITS::RecalculateState()
 
   for (size_t i = 1; i < Buffer.size(); ++i)
     {
-      const FC& previous = Buffer[i - 1];
-      const FC& current  = Buffer[i];
+      const hit_type& previous = Buffer[i - 1];
+      const hit_type& current  = Buffer[i];
 
       if (previous == current || less(current, previous))
         {
@@ -213,7 +213,7 @@ void FCHITS::Assign(const FCT& table)
   }   
 
 
-FCHITS& FCHITS::operator=(const FC& fc)
+FCHITS& FCHITS::operator=(const hit_type& fc)
 {
   Buffer.clear();       // Retain existing capacity
   Buffer.push_back(fc);

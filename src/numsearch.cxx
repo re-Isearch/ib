@@ -617,8 +617,10 @@ PIRSET INDEX::NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Rel
     }
     // Yes..
     iresult.SetMdtIndex ( w );
-    if (Relation != ZRelNE)
-      iresult.SetHitTable ( FieldCache->FcInField(Value, fp) );
+    if (Relation != ZRelNE) {
+      IRESULT::hit_type Fc = FieldCache->FcInField(Value, fp);
+      iresult.SetHitTable ( Fc ); // Don't have a lexical source of truth
+    }
     pirset->FastAddEntry(iresult);
   }
   if (fp) ffclose(fp);

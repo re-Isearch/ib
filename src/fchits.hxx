@@ -12,7 +12,18 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #include "ib_defs.hxx"
 #include "fct.hxx"
 
+/*
+
+FCLIST / FCT    -> FC      field coordinates, no term identity
+FCHITS/HITTABLE -> FCHIT   actual search hits, carries SourceId
+
+*/
+
 class FCLIST;
+
+#ifndef _TRACK_TERM_IDENTITY
+# define _TRACK_TERM_IDENTITY 1
+#endif
 
 typedef UINT8 FCSOURCE;
 
@@ -30,7 +41,7 @@ struct FcLess
   }
 };
 
-#if 0
+#if _TRACK_TERM_IDENTITY
 
 // FCHIT to extend to support source ID
 //
@@ -59,6 +70,17 @@ public:
     SourceId = sourceId;
   }
 
+  // Serialize as FC,SourceId
+  void Write(PFILE fp) const {
+    FC::Write(fp);
+    ::Write(SourceId, fp);
+  }; 
+  bool Read(PFILE fp) {
+    if (!FC::Read(fp)) return false;
+    ::Read(&SourceId, fp);
+    return true;
+  };
+
 private:
   FCSOURCE SourceId;
 };
@@ -69,16 +91,17 @@ private:
 class FCHITS
 {
 public:
-#if 0
-  using container_type = std::vector<FCHIT>;
+#if _TRACK_TERM_IDENTITY
+    using hit_type       = FCHIT;
 #else
-  using container_type = std::vector<FC>;
+    using hit_type       = FC;
 #endif
+  using container_type = std::vector<hit_type>;
   using const_iterator = container_type::const_iterator;
 
   FCHITS() = default;
 
-  explicit FCHITS(const FC& fc)
+  explicit FCHITS(const hit_type& fc)
     : Buffer(1, fc), Unique(true), Sorted(true)
   {
   }
@@ -87,7 +110,7 @@ public:
   explicit FCHITS(const FCLIST& list);
 
   FCHITS& operator=(const FCLIST& list);
-  FCHITS& operator=(const FC& fc);
+  FCHITS& operator=(const hit_type& fc);
 
   FCHITS& operator-=(GPTYPE offset)
   {
@@ -139,11 +162,11 @@ public:
     Sorted = true;
   }
 
-  void AddEntryFast(const FC& hit)
+  void AddEntryFast(const hit_type& hit)
   {
     if (!Buffer.empty())
     {
-      const FC& previous = Buffer.back();
+      const hit_type& previous = Buffer.back();
 
       if (previous == hit)
         return;
@@ -170,11 +193,11 @@ public:
   // hits[0] / hits.At(0)            modern 0-based
 
   // Coventional C/C++ style 0-based
-  const FC& operator[](size_t index) const { return Buffer[index];    }
-  const FC& At(size_t index) const         { return Buffer.at(index); }
+  const  hit_type& operator[](size_t index) const { return Buffer[index];    }
+  const  hit_type& At(size_t index) const         { return Buffer.at(index); }
 
   // These are 1-based!
-  bool GetEntry(const size_t Index, FC* FcRecord) const
+  bool GetEntry(const size_t Index, hit_type* FcRecord) const
   {
     if (FcRecord == NULL || Index == 0 || Index > Buffer.size())
       return false;
@@ -182,17 +205,17 @@ public:
     *FcRecord = Buffer[Index - 1];
     return true;
   }
-  const FC& GetEntry(const size_t Index) const
+  const hit_type& GetEntry(const size_t Index) const
   {
     if (Index != 0 && Index <= Buffer.size())
       return Buffer[Index - 1];
 
     // Legacy invalid-entry sentinel.
-    static const FC EmptyFc;
+    static const hit_type EmptyFc;
     return EmptyFc;
   }
 
-  bool SetEntry(size_t Index, const FC& fc)
+  bool SetEntry(size_t Index, const hit_type& fc)
   {
     if (Index == 0 || Index > Buffer.size())
       return false;
@@ -249,7 +272,7 @@ public:
 
     while (left < Buffer.size() || right < other.Buffer.size())
       {
-        const FC* candidate;
+        const hit_type* candidate;
 
         if (right == other.Buffer.size() ||
             (left < Buffer.size() &&
@@ -312,6 +335,7 @@ private:
 class HITTABLE
 {
 public:
+  using hit_type       = FCHITS::hit_type;
   using const_iterator = FCHITS::const_iterator;
 
   // Append-only adapter for external hit producers.
@@ -323,17 +347,17 @@ public:
     {
     }
 
-    void AddEntry(const FC& hit)
+    void AddEntry(const hit_type& hit)
     {
       Table.AddEntryFast(hit);
     }
 
-    void operator()(const FC& hit)
+    void operator()(const hit_type& hit)
     {
       Table.AddEntryFast(hit);
     }
 
-    SINK& operator<<(const FC& hit)
+    SINK& operator<<(const hit_type& hit)
     {
       Table.AddEntryFast(hit);
       return *this;
@@ -348,7 +372,7 @@ public:
   {
   }
 
-  HITTABLE(const FC& hit)
+  HITTABLE(const hit_type& hit)
     : p_(std::make_shared<FCHITS>(hit))
   {
   }
@@ -369,7 +393,7 @@ public:
     p_ = std::make_shared<FCHITS>(list);
     return *this;
   }
-  HITTABLE& operator=(const FC& fc)
+  HITTABLE& operator=(const hit_type& fc)
   {
     FCHITS& hits = Writable();
     hits = fc;
@@ -393,13 +417,13 @@ public:
     return *this;
   }
 
-  bool GetEntry(const size_t Index, FC* FcRecord) const
+  bool GetEntry(const size_t Index, hit_type* FcRecord) const
   {
     return Readable().GetEntry(Index, FcRecord);
   }
 
 
-  const FC& GetEntry(const size_t Index) const
+  const hit_type& GetEntry(const size_t Index) const
   {
     return Readable().GetEntry(Index);
   }
@@ -479,13 +503,13 @@ public:
       }
   }
 
-  void AddEntryFast(const FC& hit)
+  void AddEntryFast(const hit_type& hit)
   {
     Writable().AddEntryFast(hit);
   }
 
   // For backwards compatability
-  void AddEntry(const FC& hit)
+  void AddEntry(const hit_type& hit)
   {
     AddEntryFast(hit);
   }

@@ -362,7 +362,11 @@ PIRSET INDEX::DateSearch(const SRCH_DATE& Key, const STRING& FieldName, INT4 Rel
     iresult.SetMdtIndex ( w );
 
     if (Relation != ZRelNE) // If NOT we can save looking for the zones
-      iresult.SetHitTable ( FieldCache->FcInField(Value, fp) );
+      {
+	IRESULT::hit_type Fc = FieldCache->FcInField(Value, fp) ;
+	// No lexcal source truth
+        iresult.SetHitTable ( Fc );
+      }
     pirset->FastAddEntry(iresult);
   }
   if (fp) ffclose(fp); }

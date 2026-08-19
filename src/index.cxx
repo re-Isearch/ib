@@ -4656,6 +4656,7 @@ static int gpcomp(const void* x, const void* y)
 
 PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName, bool useCase)
 {
+  FCSOURCE sourceId = 0;
   int num_hits = 0;
   PGPTYPE  gplist = NULL;
   size_t   gplist_siz = 0;
@@ -4679,7 +4680,8 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
   INT NumberOfIndexes =  GetIndexNum();
   FILE *fpi = NULL;
 
-  FC Fc;
+  IRESULT::hit_type Fc;
+
   IRESULT iresult;
   MDTREC mdtrec;
   size_t old_w = 0;
@@ -4869,6 +4871,9 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
                       // Code to mark "hit" coordinates
                       Fc.SetFieldStart(gplist[j]);
                       Fc.SetFieldEnd(gplist[j] + ((unsigned char)tp[0] - 1)); // Need to handle this differently
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+		      Fc.SetSourceId(sourceId);
+#endif
                       iresult.SetHitTable (Fc);
                       // Add entry
 #if AWWW
@@ -4899,6 +4904,7 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
 
 PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, bool useCase)
 {
+  FCSOURCE sourceId = 0; 
   int num_hits = 0;
   PGPTYPE  gplist = NULL;
   size_t   gplist_siz = 0;
@@ -4924,7 +4930,7 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
   INT NumberOfIndexes =  GetIndexNum();
   FILE *fpi = NULL;
 
-  FC Fc;
+  IRESULT::hit_type Fc;
   IRESULT iresult;
   MDTREC mdtrec;
   size_t old_w = 0;
@@ -5109,6 +5115,9 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
                       // Code to mark "hit" coordinates
                       Fc.SetFieldStart(gplist[j]);
                       Fc.SetFieldEnd(gplist[j] + ((unsigned char)tp[0] - 1)); // Need to handle this differently
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+		      Fc.SetSourceId(sourceId);
+#endif
                       iresult.SetHitTable (Fc);
                       // Add entry
 #if AWWW
@@ -5142,6 +5151,7 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
 // To handle the phrase *"ubular bicycle wheels" --> *"ubular" "bicycle wheels" PRECEDES
 PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldName, bool useCase)
 {
+  FCSOURCE        sourceId = 0;
   int             num_hits = 0;
   PGPTYPE         gplist = NULL;
   size_t          gplist_siz = 0;
@@ -5152,7 +5162,7 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
 
   const bool CheckField= (FieldName.GetLength() != 0);
 
-  FC              Fc;
+  IRESULT::hit_type Fc;
   IRESULT         iresult;
   MDTREC          mdtrec;
   size_t          old_w = 0;
@@ -5309,6 +5319,9 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
                   // Code to mark "hit" coordinates
                   Fc.SetFieldStart(gplist[j] + ((unsigned char) *tp - TermLength));
                   Fc.SetFieldEnd(gplist[j] + ((unsigned char) *tp - 1));	// Need to handle this differently
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+		  Fc.SetSourceId(SourceId);
+#endif
                   iresult.SetHitTable(Fc);
 
                   // Add entry
@@ -5348,7 +5361,6 @@ void INDEX::CPU_ResourcesExhausted()
 }
 
 
-#if 1
 PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool useCase)
 {
   if ( QueryTerm.IsWild () == 0)
@@ -5412,7 +5424,8 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
 
   const bool CheckField= (FieldName.GetLength() != 0);
 
-  FC              Fc;
+  FCSOURCE        sourceId = 0;
+  IRESULT::hit_type Fc;
   IRESULT         iresult;
   MDTREC          mdtrec;
   size_t          old_w = 0;
@@ -5577,6 +5590,9 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
                   // Code to mark "hit" coordinates
                   Fc.SetFieldStart(gplist[j]);
                   Fc.SetFieldEnd(gplist[j] + ((unsigned char) tp[0] - 1));	// Need to handle this differently
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+		  Fc.SetSourceId(sourceId);
+#endif
                   iresult.SetHitTable(Fc);
 
                   // Add entry
@@ -5604,201 +5620,6 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
 
   return pirset;
 }
-
-#else
-
-PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& FieldName, bool useCase)
-{
-  int             num_hits = 0;
-  PGPTYPE         gplist = NULL;
-  size_t          gplist_siz = 0;
-  PIRSET          pirset = new IRSET(Parent);
-
-  INT             NumberOfIndexes = GetIndexNum();
-  FILE           *fpi = NULL;
-
-  const bool CheckField= (FieldName.GetLength() != 0);
-
-  FC              Fc;
-  IRESULT         iresult;
-  MDTREC          mdtrec;
-  size_t          old_w = 0;
-
-  STRING          Pattern;
-
-  Pattern = QueryTerm;
-  Pattern.ToLower();
-
-  iresult.SetVirtualIndex((UCHR) (Parent->GetVolume(NULL)));
-  iresult.SetMdt (Parent->GetMainMdt() );
-  iresult.SetHitCount (1);
-  iresult.SetAuxCount (1);
-  iresult.SetScore (0);
-
-// bool      Disk = true;
-  bool      FirstTime = true;
-
-  // Loop through all sub-indexes
-  MMAP MemoryMap;
-  for (INT jj = 1; (jj <= NumberOfIndexes) || (NumberOfIndexes == 0); jj++)
-    {
-
-      if (NumberOfIndexes == 0)
-        {
-          if ((fpi = ffopen(IndexFileName, "rb")) == NULL)
-            continue; // Err next
-          NumberOfIndexes = -1;
-          MemoryMap.CreateMap(SisFileName);
-        }
-      else
-        {
-          if (fpi) ffclose(fpi);	// Close old handle
-          STRING          s;
-          s.form("%s.%d", IndexFileName.c_str(), jj);
-          if ((fpi = ffopen(s, "rb")) == NULL)
-            continue; // Err next
-          s.form("%s.%d", SisFileName.c_str(), jj);
-          MemoryMap.CreateMap(s);
-        }
-
-      if (!MemoryMap.Ok())
-        continue;
-
-      int fpi_d = IndexFd(fpi); // get file number 
-
-      // Advise the memory manager that we want random access for binary search..
-      MemoryMap.Advise(MapRandom); // Randon access
-      const char *Map = (char *)MemoryMap.Ptr();
-      const size_t size = MemoryMap.Size();
-
-#if 1
-                         // New edition indexes?
-      const int    off = (( ( size % (sizeof(GPTYPE) + Map[0] + 1) ) == 2) ? 2  :
-                         // old edition?
-                          ( size % (sizeof(GPTYPE) + StringCompLength + 1) == 0 ? 0 : 2) );
-#else /* was */
-      const int  off = (size % (sizeof(GPTYPE)+StringCompLength+1) == 0 ? 0 : 2);
-#endif
-      const char *Buffer = Map + off;
-      const size_t compLength = off ? (unsigned char)Map[0] : StringCompLength;
-      const size_t dsiz = compLength + sizeof(GPTYPE)+1;
-
-      if (off) SetGlobalCharset( (BYTE)Map[1] );
-
-      // We now have the range...
-      // Determine the size of the index
-      const off_t      Size = GetFileSize(fpi);
-      // const INT    Off = Size % sizeof(GPTYPE);
-      char            tmp[StringCompLength+10];
-
-      num_hits = 0;
-      for (const char *tp = Buffer; tp < &Map[size-sizeof(GPTYPE)]; tp += dsiz)
-        {
-          memcpy(tmp, &tp[1], (unsigned char)(*tp));
-          tmp[(unsigned char)tp[0]] = '\0';
-          if (Pattern.MatchWild(tmp))
-            {
-              // Glob Matched..
-              const GPTYPE end = GP((unsigned char *)tp, compLength+1);
-              // Make sure not the first element...
-              const GPTYPE start = ((long)tp - (long)Buffer) ? GP((unsigned char *)tp, -sizeof(GPTYPE)) + 1 : 0;
-
-              int             nhits = end - start + 1;
-              if (nhits <= 0)
-                {
-                  continue;	// Paranoia
-                }
-              if ((size_t)(num_hits+nhits) > gplist_siz)
-                {
-                  // Reallocate space..
-                  PGPTYPE  old_gplist = gplist;
-                  gplist_siz += gplist_siz + nhits + 100;
-                  gplist = new GPTYPE[gplist_siz];
-                  if (old_gplist)
-                    {
-                      memcpy(gplist, old_gplist, sizeof(GPTYPE)*num_hits);
-                      delete[] old_gplist;
-                    }
-                }
-              // Read the GPs..
-              num_hits += GpFread(gplist+num_hits, nhits, start, fpi_d);	/* @@ */
-            }
-        } /* for */
-      // Now sort..
-      if ((size_t)num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
-
-      if (CheckField && FirstTime)
-        {
-          FieldCache->SetFieldName(FieldName); // Note: Here we can adise we Disk
-
-          FirstTime = false;
-        }
-
-      for (INT j = 0; j < num_hits; j++)
-        {
-
-          bool     ok = true;
-          if (CheckField)
-            ok = FieldCache->ValidateInField(gplist[j]);
-          if (!ok)
-            continue;	// Nope not in field..
-
-          size_t          w = Parent->GetMainMdt()->LookupByGp(gplist[j]);
-          if (w == 0)
-            continue;	// Could not find GP
-
-          if (DateRange.Defined())
-            {
-              if (w != old_w)
-                {
-                  if (Parent->GetMainMdt()->GetEntry(w, &mdtrec))
-                    old_w = w;
-                  else
-                    continue; // Skip
-                }
-              if (mdtrec.GetDeleted())
-                continue; // Is deleted
-              // Check date range
-              const SRCH_DATE rec_date = mdtrec.GetDate();
-              if (rec_date.Ok() && !DateRange.Contains(rec_date))
-                continue;	// Not in range
-#if 1
-              iresult.SetDate(rec_date);	// Set Date
-#endif
-            }		// date range check
-          if (useCase)
-            {
-              // Need to get the Source..
-              if (GetIndirectBuffer(gplist[j], (UCHR *)tmp) <= 0)
-                continue;	// Error, but be gracefull
-              tmp[(unsigned char)tp[0]] = '\0';
-              if (!QueryTerm.MatchWild(tmp))
-                continue;
-            }
-          // Bump up the count
-          iresult.SetMdtIndex(w);
-          // Code to mark "hit" coordinates
-          Fc.SetFieldStart(gplist[j]);
-          Fc.SetFieldEnd(gplist[j] + ((unsigned char) tp[0]) - 1); // Need to handle this differently
-          iresult.SetHitTable(Fc);
-
-          // Add entry
-          pirset->FastAddEntry(iresult);
-          if (ClippingThreshold > 0 && pirset->GetTotalEntries() > ClippingThreshold)
-            goto done;
-        }			// for()
-    }				/* for */
-done:
-  pirset->MergeEntries(true);
-  // Close dangling handles..
-  if (fpi) ffclose(fpi);
-
-  // Clean up
-  if (gplist) delete[] gplist;	// Clean-up
-
-  return pirset;
-}
-#endif
 
 
 // Right Truncated match
@@ -6154,7 +5975,7 @@ not be combined with live IRSETs using source-aware E3/E4 normalization.  */
 static inline FCSOURCE MakeSourceId(const INT slot, const GPTYPE sisSlot)
 {
   const FCSOURCE id = (FCSOURCE)sisSlot + 1;
-  if (slot == 0) return 0;
+  if (sisSlot == 0) return 0;
 
   // Low 56 bits belong to the SIS slot.
   if (id > 0x00FFFFFFFFFFFFFFULL)
@@ -6395,6 +6216,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
   float           Cost = 1.0; // Cost of this caculation
   const UCHR     *FullTerm = ( const UCHR * ) QueryTerm.c_str ();
   STRING          FieldName(fieldName);
+  FCSOURCE        sourceId = 0;
 
  if (DebugMode)
     message_log (LOG_DEBUG, "TermSearch(%s, %s, %d)", QueryTerm.c_str(), fieldName.c_str(), (int)Typ);
@@ -6824,7 +6646,6 @@ for (size_t i = 0; i < x; )
         if (DebugMode)
 	  message_log (LOG_DEBUG, "Find '%s' in %s", Word.c_str(), SisFn.c_str());
         // New SIS code
-	FCSOURCE sourceId = 0;
         ip = find( SisFn, jj, Word, (Typ == LeftAlwaysMatches || Typ == LeftMatch)
                    && (FullTerm_length == Term_length) /* Added  Fri Jul 23 00:31:08 MET DST 1999 */
                    , &first, &overflow, &sourceId );
@@ -7384,7 +7205,11 @@ for (size_t i = 0; i < x; )
         {
 	  // iresult.ReserveHitTable(next - k);
 	  for (size_t n = k; n < next; ++n) {
-            iresult.AddToHitTable(HitList.Fc(n, Offset));
+	    IRESULT::hit_type Fc(HitList.Fc(n, Offset));
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+	    Fc.SetSourceId(sourceId);
+#endif
+	    iresult.AddToHitTable(Fc);
 	    // const GPTYPE start = gp - Offset;
 	    // const short  length= HitList(k);
             // iresult.AddToHitTable ( FC(start, start + length) );
@@ -8264,7 +8089,7 @@ PIRSET INDEX::DoctypeSearch (const STRING& DoctypeSpec)
     }
 
   IRESULT          iresult;
-  FC               Fc;
+  IRESULT::hit_type Fc;
   MDTREC           mdtrec;
 
   iresult.SetMdt (MdtPtr);
@@ -8288,6 +8113,9 @@ PIRSET INDEX::DoctypeSearch (const STRING& DoctypeSpec)
               iresult.SetDate(date);
               Fc.SetFieldStart( mdtrec.GetLocalRecordStart() );
               Fc.SetFieldEnd  ( mdtrec.GetLocalRecordEnd()   );
+#if _USE_HITTABLE && _TRACK_TERM_IDENTITY
+	      // Fc.SetSourceId(0); // We don't have a source!
+#endif
               iresult.SetHitTable(Fc);
               pirset->FastAddEntry (iresult);
             }
@@ -8327,7 +8155,7 @@ PIRSET INDEX::KeySearch(const STRING& KeySpec)
     }
 
   IRESULT          iresult;
-  FC               Fc;
+  IRESULT::hit_type Fc;
   MDTREC           mdtrec;
   size_t           count = 0;
 
@@ -8344,6 +8172,7 @@ PIRSET INDEX::KeySearch(const STRING& KeySpec)
       iresult.SetDate( mdtrec.GetDate() );
       Fc.SetFieldStart( mdtrec.GetLocalRecordStart() );
       Fc.SetFieldEnd  ( mdtrec.GetLocalRecordEnd()   );
+      // Keys don't have sourceId !!
       iresult.SetHitTable(Fc);
       pirset->FastAddEntry (iresult);
       count++;
@@ -8452,7 +8281,7 @@ PIRSET INDEX::FileSearch(const STRING& FileSpec)
 
   MDTREC           mdtrec;
   IRESULT          iresult;
-  FC               Fc;
+  IRESULT::hit_type Fc;
   bool      isWild = FileSpec.IsWild();
   bool      noPath = !ContainsPathSep(FileSpec);
 
@@ -8483,6 +8312,7 @@ PIRSET INDEX::FileSearch(const STRING& FileSpec)
               iresult.SetDate(date);
               Fc.SetFieldStart( mdtrec.GetLocalRecordStart() );
               Fc.SetFieldEnd  ( mdtrec.GetLocalRecordEnd()   );
+	      // No sourceId to bother with
               iresult.SetHitTable(Fc);
               pirset->FastAddEntry (iresult);
             }

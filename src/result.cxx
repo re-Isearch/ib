@@ -318,7 +318,7 @@ bool RESULT::PresentBestContextHit(STRING *StringBuffer, STRING *Term,
 bool RESULT::PresentNthHit(size_t N, STRING *StringBuffer, STRING *Term,
         const STRING& BeforeTerm, const STRING& AfterTerm, DOCTYPE *DoctypePtr, STRING *TagPtr) const
 {
-  FC Fc;
+  IRESULT::hit_type hit;
   if (StringBuffer)
     StringBuffer->Clear();
   if (Term)
@@ -326,8 +326,9 @@ bool RESULT::PresentNthHit(size_t N, STRING *StringBuffer, STRING *Term,
   if (TagPtr)
     TagPtr->Clear();
 
-  if (HitTable.GetEntry(N, &Fc))
+  if (HitTable.GetEntry(N, &hit))
     {
+      const FC& Fc = hit; 
       return PresentHit(Fc, StringBuffer, Term, BeforeTerm, AfterTerm, DoctypePtr, TagPtr);
     }
   return false;
@@ -660,7 +661,7 @@ StringBuffer->form("ERROR (%ld,%ld) not inside Record (%ld,%ld)",  start, end, R
 bool RESULT::XMLPresentNthHit(size_t N, STRING *StringBuffer, const STRING& Tag,
    STRING *Term, DOCTYPE *DoctypePtr) const
 {
-  FC      Fc;
+  IRESULT::hit_type Fc;
 
   if (StringBuffer)
     StringBuffer->Clear();

@@ -155,26 +155,31 @@ public:
   void Clear()                             { ClearHitTable(); Score = 0; }
   void ClearHitTable()                     { HitTable.Clear();           }
 
-  void SetHitTable(const FC& Fc)                { HitTable = Fc;                    }
-  void SetHitTable(const FCLIST& newHitTable)   { HitTable = newHitTable;           }
-  void SetHitTable(const IRESULT& ResultRecord) { HitTable = ResultRecord.HitTable; }
-  void SetHitTable(const FCT& newHitTable)      { HitTable = newHitTable;           }
   bool HitTableIsSorted() const                 { return HitTable.IsSorted();       }
 
-
 #if _USE_HITTABLE
+  using hit_type = HITTABLE::hit_type;
+
   HITTABLE  GetHitTable() const                         {  return HitTable; }
   void     AddToHitTable(const HITTABLE& otherHitTable) { HitTable.AddEntry(otherHitTable); }
   void     MergeHitTableEntries()                       { HitTable.MergeEntries();          }
   void     SetHitTable(const HITTABLE& newHitTable)     { HitTable = newHitTable;           }
 
 #else
+  using hit_type = FC;
+
   FCT  GetHitTable() const                         {  return HitTable; } 
   void AddToHitTable(const FCT& OtherHitTable)    { HitTable.AddEntry( OtherHitTable );         }
 #endif
 
+  void SetHitTable(const hit_type& Fc)          { HitTable = Fc;                    }
+  void SetHitTable(const FCLIST& newHitTable)   { HitTable = newHitTable;           }
+  void SetHitTable(const IRESULT& ResultRecord) { HitTable = ResultRecord.HitTable; }
+  void SetHitTable(const FCT& newHitTable)      { HitTable = newHitTable;           }
+
+
   void AddToHitTable(const IRESULT& ResultRecord) { HitTable.AddEntry( ResultRecord.HitTable ); }
-  void AddToHitTable(const FC& Fc)                { HitTable.AddEntry(Fc);                      }
+  void AddToHitTable(const hit_type& Fc)          { HitTable.AddEntry(Fc);                      }
 
   void SetAuxCount(const UINT newAuxCount) { AuxCount = newAuxCount;     }
   UINT IncAuxCount()                       { return ++AuxCount;          }
