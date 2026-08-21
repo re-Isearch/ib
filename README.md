@@ -4,6 +4,21 @@
 
 IB (re-Isearch) no longer will compile with nearly "any" C++ compiler ever made but increasingly uses C++17+ constructs. The decision was motivated by the observation that platforms that don't have a modern C++ compiler are quite rarethese days and anyway highly unlikely to be used in 2026 for enterprize search. Given that Schmate (the vector extensions) exploits modern C++ and SIMD instructions it made no longer any sense to continue to be language constrained.  For those that need to run on archaic platforms the re-Isearch distribution still exists albeit now frozen.. 
 
+The increasing focus is for the next generation of LLM and RL agents.  Agents need more than keyword matching. They need to express relationships: this term occurs inside that field, these concepts appear near each other, this phrase comes before that phrase, these facts belong to the same structural element. Positional and structural operators let an agent ask about the shape of information, not merely its presence.
+
+LLMs, by contrast, tend to see retrieved text as relatively flat. Once content is turned into tokens, chunks, or embeddings, much of the original document structure—fields, containment, adjacency, order, hierarchy—can become weak or implicit. An LLM may infer those relationships, but inference is not the same as querying them precisely.
+
+Structural and positional search gives the agent a way to preserve that information before generation: retrieve the right relationship, not just the right words. For agentic search, operators such as NEAR, BEFORE, PEER, WITHIN, and field constraints are therefore not syntactic luxuries; they are tools for turning a flat language model into a much more precise information-seeking system.
+
+This is what we call "Agentic RAG 2.0”
+- RAG 1.0: retrieve chunks, then ask the LLM to reason over them.
+- Agentic RAG 2.0: let the agent actively construct and refine expressive retrieval plans using Boolean, structural, positional, scoring, and relaxation operators.
+
+The key idea is that the agent is no longer just consuming retrieved context. It is programming the retrieval process:
+"RAG gave LLMs documents. Agentic RAG 2.0 gives agents a retrieval algebra."
+
+
+
 ### NEWS
 
 August 21 2026
@@ -24,7 +39,7 @@ That distinction is deliberate. PROMOTE and DEMOTE operate on the ranking plane,
 
 Most search syntaxes were designed for humans typing short queries into a box. AI agents have a different problem: they can construct structured query expressions and need precise ways to express intent.
 
-An agent often wants to say:i<PRE>
+An agent often wants to say:<PRE>
 These concepts define relevance.
 These concepts are preferences.
 These concepts are negative preferences.
