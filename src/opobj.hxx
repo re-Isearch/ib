@@ -77,6 +77,9 @@ typedef enum {
   OperatorAfterPeer,
   OperatorXPeer,
   OperatorAncestor,
+  OperatorMaybe,
+  OperatorPromote,
+  OperatorDemote
 } t_Operator;
 
 inline bool IsBinaryOperator(t_Operator Op) { return Op >= OperatorOr ; }
@@ -110,6 +113,10 @@ public:
   virtual OPOBJ *Or (const OPOBJ&)        { return NULL; }
   virtual OPOBJ *Nor (const OPOBJ&)       { return NULL; }
   virtual OPOBJ *And (const OPOBJ&)       { return NULL; }
+  virtual OPOBJ *Maybe(const OPOBJ&)      { return NULL; }
+  virtual OPOBJ *Promote(const OPOBJ&)    { return NULL; }
+  virtual OPOBJ *Demote(const OPOBJ&)     { return NULL; }
+
   virtual OPOBJ *Join (const OPOBJ&)      { return NULL; }
   virtual OPOBJ *Join (OPOBJ *)           { return NULL; }
   virtual OPOBJ *Nand (const OPOBJ&)      { return NULL; }

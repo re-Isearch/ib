@@ -39,6 +39,7 @@ using hit_table_type =
 
 #include <algorithm>
 #include <vector>
+#include <set>
 
 #if 1
 # define SORT QSORT
@@ -2152,6 +2153,107 @@ void atomicIRSET::GC()
   else for (size_t i=TotalEntries; i < MaxEntries; i++)
     Table[i].Clear();
 }
+
+
+// Symmetric
+OPOBJ *atomicIRSET::Maybe (const OPOBJ& OtherIrset)
+{
+  /*
+    A B MAYBE
+
+    if |A ∩ B| > 0:
+        return A ∩ B
+    else:
+        return |A| >= |B| ? A : B
+
+    Later MAYBE:n:
+        require a minimum size for the INTERSECTION,
+        otherwise choose the larger result set.
+  */
+
+  const size_t MyTotal    = TotalEntries;
+  const size_t OtherTotal = OtherIrset.GetTotalEntries();
+
+  atomicIRSET Intersection(Parent);
+  Intersection = *this;
+  Intersection.And(OtherIrset);
+
+  if (Intersection.GetTotalEntries() > 0) {
+cerr << "Intersection" << endl;
+    *this = Intersection;
+  } else if (OtherTotal > MyTotal ||
+	( OtherTotal == MyTotal && OtherIrset.GetMaxScore() > MaxScore)) {
+cerr << "Set to other set" << endl;
+    *this = OtherIrset;
+  }
+
+  // else *this is already A
+
+  return this;
+}
+
+// These are non-symetric
+OPOBJ *atomicIRSET::Demote (const OPOBJ& OtherIrset)
+{
+ return Promote(OtherIrset, -1); 
+}
+OPOBJ *atomicIRSET::Promote (const OPOBJ& OtherIrset)
+{
+ return Promote(OtherIrset, 1);
+}
+
+
+OPOBJ *atomicIRSET::Promote (const OPOBJ& OtherIrset, int weight)
+{
+  if (Parent && Parent != OtherIrset.GetParent())
+    {
+      Parent->SetErrorCode(0); // No error 
+      return this; // Can't cross indexes
+    }
+  const size_t OtherTotal = OtherIrset.GetTotalEntries();
+  if (OtherTotal == 0)
+    {
+      // Nothing to change 
+      return this; 
+    }
+  SortByIndex();
+  if (OtherIrset.GetSort() != ByIndex)
+	message_log(LOG_ERROR, "Op %s got a set not ordered by index!", weight > 0 ? "Promote" : "Demote");
+  _index_id_t idx1=0, idx2=0;
+  size_t      pos1 = 1, opos1 = 0;
+  size_t      pos2 = 1, opos2 = 0;
+
+  IRESULT *OtherTable = ((const atomicIRSET *)&OtherIrset)->Table;
+  IRESULT *OtherIresultPtr = NULL;
+
+  while (pos1 <= TotalEntries && pos2 <= OtherTotal)
+    {
+      if (pos1 != opos1)
+	{
+	  opos1 = pos1;
+	  idx1 = (Table + pos1 - 1)->GetIndex();
+	}
+      if (pos2 != opos2)
+	{
+	  opos2 = pos2;
+	  OtherIresultPtr = OtherTable + pos2 - 1;
+	  idx2 = OtherIresultPtr->GetIndex();
+	}
+      if (idx2 == idx1)
+	{
+	  // Only score gets added, not evidence!
+	  const DOUBLE score = Table[pos1-1].IncScore (weight * OtherIresultPtr->GetScore ());
+	  if (score < MinScore) MinScore = score;
+	  if (score > MaxScore) MaxScore = score;
+	}
+      if (idx1 <= idx2)
+	pos1++;
+      if (idx2 <= idx1)
+	pos2++;
+    }
+  return this;
+}
+
 
 // Limit is experimental!
   
@@ -4570,6 +4672,7 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
   return this;
 }
 
+#if 0
 
 OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
 {
@@ -4705,6 +4808,198 @@ for (const auto& hit : Hits) {
   return this;
 }
 
+#else
+
+// This will become E3 or BM25TP
+OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
+{
+  if (ComputedS == E2Normalization)
+    return this;
+
+  //
+  // E2 uses the same L2 preparation as the cosine metric.
+  //
+  if (ComputedS != preCosineMetricNormalization && ComputedS != NormalizationL2)
+    {
+      ComputeScoresNormalizationL2 (1) ;
+      ComputedS = preCosineMetricNormalization;
+    }
+
+  if (TotalEntries == 0)
+    {
+      ComputedS = E2Normalization;
+      return this;
+    }
+
+
+  if ((ComputedS == preCosineMetricNormalization || ComputedS == NormalizationL2) && Parent)
+    {
+      UINT MaxAuxCount = 1;
+
+      //
+      // Determine the strongest term coverage present
+      // in this result set.
+      //
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          const UINT aux = Table[i].GetAuxCount();
+
+          if (aux > MaxAuxCount)
+            MaxAuxCount = aux;
+        }
+
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          DOUBLE Score = Table[i].GetScore();
+
+          const UINT AuxCount = Table[i].GetAuxCount();
+
+          const DOUBLE Coverage = MaxAuxCount ?  (DOUBLE)AuxCount / (DOUBLE)MaxAuxCount : 1.0;
+
+          //
+          // Full query coverage = 1.0
+          // Partial coverage approaches 0.5.
+          //
+          const DOUBLE CoverageWeight = 0.5 + 0.5 * Coverage;
+
+          DOUBLE ProximityWeight = 1.0;
+
+          //
+          // Proximity only has meaning when more than
+          // one distinct search term contributed.
+          //
+          if (AuxCount > 1)
+            {
+              const auto Hits = Table[i].GetHitTable();
+
+#if 1 /* DEBUG New Source ID */
+
+using SourcePair = std::pair<FCSOURCE, FCSOURCE>;
+
+std::map<SourcePair, INT> MinDistances;
+
+for (auto a = Hits.begin(); a != Hits.end(); ++a) {
+  for (auto b = std::next(a); b != Hits.end(); ++b) {
+
+    FCSOURCE sa = a->GetSourceId();
+    FCSOURCE sb = b->GetSourceId();
+
+    if (sa == sb || sa == 0 || sb == 0)
+      continue;
+
+    if (sa > sb)
+      std::swap(sa, sb);
+
+    const FC& fa = *a;
+    const FC& fb = *b;
+
+    int distance;
+
+    if (fa.GetFieldStart() > fb.GetFieldEnd()) distance = fa.GetFieldStart() - fb.GetFieldEnd();
+    else if (fb.GetFieldStart() > fa.GetFieldEnd()) distance = fb.GetFieldStart() - fa.GetFieldEnd();
+    else distance = 0;
+
+    const SourcePair pair(sa, sb);
+
+    auto found = MinDistances.find(pair);
+
+    if (found == MinDistances.end() ||
+        distance < found->second)
+      MinDistances[pair] = distance;
+  }
+}
+
+for (const auto& entry : MinDistances)
+{
+  cerr << entry.first.first
+       << " <-> "
+       << entry.first.second
+       << "  MinDistance = "
+       << entry.second
+       << endl;
+}
+
+
+std::set<FCSOURCE> Sources;
+
+for (const auto& hit : Hits)
+{
+  const FCSOURCE source = hit.GetSourceId();
+  if (source)
+    Sources.insert(source);
+}
+
+cerr << "Sources=" << Sources.size()
+     << " Pairs=" << MinDistances.size()
+     << " Expected="
+     << (Sources.size() * (Sources.size() - 1)) / 2
+     << endl;
+
+#endif
+
+              if (Hits.Size() > 1)
+                {
+                  int MinDistance = INT_MAX;
+
+                  auto it = Hits.begin();
+
+                  FC oldFc = *it++;
+
+                  for (; it != Hits.end(); ++it)
+                    {
+                      const FC Fc = *it;
+
+                      int Distance;
+
+                      if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
+                        Distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
+
+                      else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
+                        Distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
+
+                      else
+                        Distance = 0;
+
+                      if (Distance < MinDistance)
+                        MinDistance = Distance;
+
+                      oldFc = Fc;
+                    }
+
+                  if (MinDistance != INT_MAX)
+                    {
+                      const DOUBLE DistanceWeight = _ib_Distrank_weight_factor( MinDistance);
+
+                      //
+                      // A partial query match gets only
+                      // part of the proximity bonus.
+                      //
+                      ProximityWeight = 1.0 + (DistanceWeight - 1.0) * Coverage;
+                    }
+                }
+            }
+
+          Score *= CoverageWeight * ProximityWeight * TermWeight;
+
+          Table[i].SetScore(Score);
+
+          if (Score > MaxScore)
+            MaxScore = Score;
+
+          if (Score < MinScore)
+            MinScore = Score;
+        }
+
+      ComputedS = E2Normalization;
+    }
+
+  return this;
+}
+#endif
+
 /*
  Dave Hawking's AF1:
 https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=470327208be6f5b46978cbf1445a2120baa988e3
@@ -4749,26 +5044,39 @@ static inline DOUBLE TermIdf(off_t totalDocs, size_t docFreq)
     return 1.0 + log((DOUBLE)totalDocs / (DOUBLE)docFreq);
 }
 
+/*
+For K1, B, A, Regency and Pivot tuning variables
+we read from the [BM25] profile
+*/
 
 OPOBJ *atomicIRSET::ComputeScoresNormalizationBM25(const float TermWeight)
 {
   if (TotalEntries && ComputedS != NormalizationBM25 && Parent)
    {
+      const STRING section ("BM25");
       // Set constants (at first run)
       static double k1 = -1.0, b = -1.0, powA = -1.0, recS = 0.0;
       static int pivotY = 0;
       if (k1 < 0.0) {
+	STRING val;
 	// TODO: Make these configurable!
-	k1 = 1.2; // "IB_BM25_K1"
-	b  = 0.75; // "IB_BM25_B"
-	powA = 0.0; // "IB_BM25_A"
-	recS = 0.0; // "IB_BM25_RECENCY"
-	pivotY = 0; // "IB_BM25_PIVOT"
+	val = Parent->ProfileGetString(section, "K1");
+        k1 = val.GetDouble();
+        val = Parent->ProfileGetString(section, "B");
+	b = val.GetDouble();
+	val = Parent->ProfileGetString(section, "A");
+        powA = val.GetDouble();
+	val = Parent->ProfileGetString(section, "Regency");
+	recS = val.GetDouble(); 
+	val = Parent->ProfileGetString(section, "Pivot");
+	pivotY = val.GetInt(); 
 	// Alignment
 	if (recS < 0.0) recS = 0.0;
 	if (k1 <= 0.0) k1 = 1.2;
 	if (b < 0.0 || b > 1.0) b = 0.75;
 	if (powA < 0.0) powA = 0.0;
+	message_log(LOG_DEBUG, "[BM25] K1=%.2f, B=%.2f, A=%.2f, Regency=%.2f, Pivot=%d",
+		k1, b, powA, recS, pivotY); 
       }
 
       MDT *mdt = Parent->GetMainMdt ();
@@ -4822,8 +5130,6 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationBM25(const float TermWeight)
           if (Table[i].HaveGscore())
             Score += Table[i].GetGscore().Potenz();
 #endif
-          Score *= TermWeight;
-
 	  Table[i].SetScore (Score);
 	  if ((Score - MaxScore) > 0.0) MaxScore = Score;
 	  if ((Score - MinScore) < 0.0) MinScore = Score;

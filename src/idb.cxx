@@ -4071,7 +4071,8 @@ bool IDB::AddRecord (const RECORD& NewRecord)
 void IDB::SetMaximumRecordSize(INT value)
 {
   INT oldMaximumRecordSize = MaximumRecordSize;
-  if (value < 0)
+  // Don't want to set Max too large (< 2 GB)
+  if (value > 2147483647 || value < 0)
     MaximumRecordSize = INT_MAX;
   else if (value < 1024)
     MaximumRecordSize = value*1024L*1024L; // MB
@@ -4107,17 +4108,20 @@ void IDB::DocTypeAddRecord (const RECORD& NewRecord)
   const UINT4 Start = NewRecord.GetRecordStart ();
   UINT4       End   = NewRecord.GetRecordEnd ();
 
-  if (End > 0 && ((INT)(End-Start) >= MaximumRecordSize))
+  if (End > 0)
     {
-      message_log (LOG_NOTICE, "Record '%s'[%u-%u] is larger than MaxRecordSize (%u). Skipping!",
-	  NewRecord.GetFullFileName ().c_str(), (unsigned)Start, (unsigned)End, MaximumRecordSize);
-      return;
-    }
-  else if (End > 0 && End <= Start)
-    {
-      message_log (LOG_NOTICE, "Record '%s' End(%u)<=Start(%u). Skipping!",
-	NewRecord.GetFullFileName ().c_str(), (unsigned)End, (unsigned)Start);
-      return;
+      if (((UINT4)(End-Start) >= MaximumRecordSize))
+        {
+	  message_log (LOG_NOTICE, "Record '%s'[%u-%u] is larger than MaxRecordSize (%u). Skipping!",
+	    NewRecord.GetFullFileName ().c_str(), (unsigned)Start, (unsigned)End, MaximumRecordSize);
+	  return;
+	}
+      else if (End <= Start)
+	{
+	  message_log (LOG_NOTICE, "Record '%s' End(%u)<=Start(%u). Skipping!",
+	    NewRecord.GetFullFileName ().c_str(), (unsigned)End, (unsigned)Start);
+	  return;
+	}
     }
 
 // cerr << "OPEN QUEUE" << endl;
@@ -4177,7 +4181,7 @@ void IDB::DocTypeAddRecord (const RECORD& NewRecord)
       if (Ok)
 	{
 	  TotalRecordsQueued++;
-	  const UINT4 IndexingSize = (End - Start +
+	  const UINT8 IndexingSize = (UINT8)(End - Start +
 		StringCompLength + 1)*(3 + sizeof(GPTYPE))/3; // See index.cxx
 	  if (IndexingSize > IndexingMemory && End > 0)
 	    {

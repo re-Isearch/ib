@@ -6,6 +6,44 @@ IB (re-Isearch) no longer will compile with nearly "any" C++ compiler ever made 
 
 ### NEWS
 
+August 21 2026
+
+Beyond many significant lexical speed-ups (some quite dramatic), new normalization algorithms (like BM25 to keep BEIR happy) we've added for agents several new binary operators to the CoreQuarry/IB query algebra: MAYBE, PROMOTE and DEMOTE
+
+They are designed to express something conventional Boolean search does poorly: the difference between what must match, what should influence ranking, and how a query should gracefully relax when the corpus cannot satisfy its strongest interpretation.
+
+* A B MAYBE is a symmetric, corpus-aware relaxation operator. It returns records matching both A and B when possible. If there are no common matches, it returns whichever operand has the larger result set, with score used to break ties.  In other words: try the conjunction; if the corpus cannot support it, choose the stronger fallback automatically.
+
+* A B PROMOTE is directional: A B PROMOTE reads as “A promotes B.” The result set remains B, but records that also match A receive a score increase using A’s score. Importantly, A contributes no hit evidence.
+
+* A B DEMOTE is its inverse: reads as “A demotes B.” The result set remains B, while records also matching A are down-scored. Again, A does not become search evidence.
+
+That distinction is deliberate. PROMOTE and DEMOTE operate on the ranking plane, not the evidence plane. They can influence ordering without manufacturing hits, increasing term counts, satisfying REDUCE, affecting proximity calculations, or otherwise pretending that a preference was part of the original match.
+
+#### Why agents love these operators
+
+Most search syntaxes were designed for humans typing short queries into a box. AI agents have a different problem: they can construct structured query expressions and need precise ways to express intent.
+
+An agent often wants to say:i<PRE>
+These concepts define relevance.
+These concepts are preferences.
+These concepts are negative preferences.
+Try this stricter interpretation first,
+but relax intelligently if the collection cannot satisfy it.</PRE>
+
+With ordinary AND, OR, and NOT, those distinctions are difficult to express without expanding the query into increasingly complicated Boolean expressions or contaminating the evidence used by downstream ranking models.
+
+With the new operators, an agent can express them directly.<PRE>wolf dog PROMOTE</PRE> or <PRE>spam dog DEMOTE</PRE>
+
+And: <PRE>distributed "search engine" MAYBE</PRE> means "Use the joint interpretation if the collection supports it; otherwise retain the broader interpretation with the strongest corpus support."
+
+This makes the query language more than a Boolean filter. It becomes a small retrieval algebra in which membership, evidence, ranking preference, structure, and relaxation can all be represented explicitly.
+
+That is particularly useful for agent-generated search: the agent can build a query AST that says not only what to search for, but also how strongly each idea should participate in the search and what to do when the ideal interpretation fails.
+
+MAYBE, PROMOTE, and DEMOTE are small operators, but they open up a much richer vocabulary for machine-generated queries.
+
+
 Jul 26 2026
 
 Loads of optimizations. New: extended the capacity.

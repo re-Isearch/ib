@@ -310,6 +310,9 @@ const struct
       { "XAND",    OperatorXnor }, // Seems some people even if it makes no sense!
       { "NXOR",    OperatorXnor}, // Another one (MathWorks) read NOT XOR 
       { "ANCESTOR", OperatorAncestor},
+      { "MAYBE",   OperatorMaybe},
+      { "PROMOTE", OperatorPromote},
+      { "DEMOTE",  OperatorDemote},
 // Special Cases for the Infix Processor
       { "!&&",     OperatorNand }, // Added
       { "!||",     OperatorNor  }, // Added
@@ -434,6 +437,10 @@ if (arg_pos)
           }
         break;
       case 6:
+       if (Operator.Compare("MAYBE", 5) == 0)
+	  {
+            return OperatorMaybe;
+	  }
        if (Operator.Compare("BOOST", 5) == 0)
           {
             const char   *ptr = Operator.c_str() + 6;
@@ -495,6 +502,10 @@ if (arg_pos)
         break;
 
       case 7:
+	if (Operator.Compare("DEMOTE",  6) == 0)
+	  {
+	    return OperatorDemote;
+	  }
         if (Operator.Compare("BEFORE",  6) == 0)
           {
             if (StringArgs)
@@ -561,6 +572,10 @@ if (arg_pos)
           }
         break;
       case 8:
+	if (Operator.Compare("PROMOTE", 7) == 0)
+	  {
+	     return OperatorPromote;
+	  }
 	if (Operator.Compare("SIBLING",  7) == 0)
 	  {
 	    if (StringArgs) *StringArgs = Operator.c_str() + 8;
@@ -1917,8 +1932,9 @@ bool SQUERY::isIntersectionQuery() const
           {
 	    const t_Operator Operator = OpPtr->GetOperatorType ();
 	    if (Operator == OperatorOr || Operator == OperatorNOT || Operator == OperatorNotWithin ||
-		Operator == OperatorXWithin || Operator == OperatorXor || Operator ==  OperatorXnor ||
-		Operator == OperatorNotAnd  || Operator ==  OperatorNor || Operator ==  OperatorNand )
+		Operator == OperatorMaybe || Operator == OperatorXWithin || Operator == OperatorXor ||
+		Operator ==  OperatorXnor || Operator == OperatorNotAnd  || Operator ==  OperatorNor ||
+		Operator ==  OperatorNand || Operator == OperatorPromote || Operator == OperatorDemote )
               operatorCount++;
           }
         delete OpPtr;
@@ -2151,6 +2167,9 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                   case OperatorNoop:	S = SOperatorNoop;	break;
                   case OperatorNOT:	S = SOperatorNOT;	break;
 		  case OperatorSibling: S = "SIBLING";          break;
+		  case OperatorMaybe:   S = "MAYBE";            break;
+		  case OperatorPromote: S = "PROMOTE";          break;
+		  case OperatorDemote:  S = "DEMOTE";           break;
                   case OperatorOr:	S = SOperatorOr;	break;
                   case OperatorAnd:	S = SOperatorAnd;	break;
                   case OperatorAndNot:	S = SOperatorAndNot;	break;
@@ -2755,6 +2774,7 @@ int QUERY::Run()
             case OperatorBeforePeer:
             case OperatorXPeer:
             case OperatorAncestor:
+	    case OperatorMaybe:
               TempStack >> Op1;
               TempStack >> Op2;
 
@@ -2967,6 +2987,7 @@ int QUERY::Run ()
                     case OperatorBeforePeer:
                     case OperatorXPeer:
 		    case OperatorAncestor:
+		    case OperatorMaybe:
 		      TempStack << Foo;
                       break;
                     default:
@@ -3592,12 +3613,33 @@ static const SQUERY::OPERATOR_DOC OperatorDocs[] =
     "A B AND",
     "Intersection: returns records matching both operands."
   },
+  {               
+    OperatorMaybe,
+    "MAYBE",    
+    2,            
+    "A B MAYBE",
+    "Return records matching both A and B when possible; if there are no common matches, return the operand with the larger result set. Ties are broken by score."
+  },  
+  {
+    OperatorPromote,
+    "PROMOTE",
+    2,
+    "A B PROMOTE",
+    "A promotes B: Return records matching B; where a record also matches A, increase its score using A’s score. A does not contribute hit evidence"
+  },
+  {               
+    OperatorDemote,
+    "DEMOTE",
+    2,            
+    "A B DEMOTE",
+    "A demotes B: Return records matching B; where a record also matches A, decrease its score using A’s score. A does not contribute hit evidence."
+  },
   {
     OperatorAndNot,
     "ANDNOT",
     2,
     "A B ANDNOT",
-    "Difference: returns records matching A but not B."
+    "A and not B (Difference): returns records matching A but not B."
   },
   {
     OperatorNotAnd,
@@ -4110,7 +4152,7 @@ void SQUERY::WriteOperatorHelpJSON(std::ostream& out)
 
 void SQUERY::WriteOperatorHelp(std::ostream& out)
 {
-  char *terms[] = {"Identity", "Unary", "Binary"}; 
+  const char * const terms[] = {"Identity", "Unary", "Binary"}; 
   size_t count = 0;
   const SQUERY::OPERATOR_DOC *docs =
   SQUERY::GetOperatorDocs(&count);

@@ -26,6 +26,9 @@ enum operators {
    ,BoolPEERa
    ,BoolPEERb
    ,BoolAncestor
+   ,BoolMaybe
+   ,BoolPromote
+   ,BoolDemote
    ,BoolXXXX
    ,BoolFRAC = BoolXXXX + 100
    ,BoolPROXIMITY = 32767 + BoolFRAC + 100 
@@ -284,6 +287,9 @@ static const struct {
  { "PEERa",   BoolPEERa},
  { "PEERb",   BoolPEERb},
  { "ANCESTOR", BoolAncestor},
+ { "MAYBE",   BoolMaybe},
+ { "PROMOTE", BoolPromote},
+ { "DEMOTE",  BoolDemote},
 
 // Expand this table as more operators are added
  { "or",      BoolOR   },

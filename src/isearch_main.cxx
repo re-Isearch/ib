@@ -829,7 +829,8 @@ int _Isearch_main (int argc, char **argv)
 	      Method = NormalizationS2;
 	      LastUsed = x;
 	    }
-          else if (Flag.Equals("-BM25_norm") || Flag.Equals("-norm=BM25"))
+          else if (Flag.Equals("-BM25_norm") || Flag.Equals("-norm=BM25") ||
+		Flag.Equals("-norm=bm25"))
             {
               Method = NormalizationBM25;
               LastUsed = x;
@@ -2652,7 +2653,7 @@ namespace
       "normalization",
       "-BM25_norm | -norm=BM25", 
       NULL, 
-      "Use BM25 variant normalization."
+      "Use BM25. Hyperparameters (K1,B,A,Regency,Pivot) set in [BM25] of datebase ini"
     },  
     {
       "normalization",

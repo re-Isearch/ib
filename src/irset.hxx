@@ -67,6 +67,16 @@ public:
   atomicIRSET(const PIDBOBJ DbParent = NULL, size_t Reserve = 0);
   atomicIRSET(const OPOBJ& OtherIrset);
 
+  atomicIRSET(const atomicIRSET& OtherIrset)
+    : atomicIRSET(OtherIrset.Parent, OtherIrset.Increment)
+   {
+    Set(&OtherIrset);
+   }
+
+  // For now we disable move semantics
+  atomicIRSET(atomicIRSET&&) = delete;
+  atomicIRSET& operator=(atomicIRSET&&) = delete;
+
   atomicIRSET& operator = (const atomicIRSET& OtherIrset);
   OPOBJ& operator =(const OPOBJ& OtherIrset) override;
 
@@ -169,6 +179,10 @@ public:
   virtual OPOBJ *Nor (const OPOBJ& OtherIrset) override;
   virtual OPOBJ *And (const OPOBJ& OtherIrset) override;
   virtual OPOBJ *And (const OPOBJ& OtherIrset, size_t Limit);
+
+  virtual OPOBJ *Maybe(const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Promote(const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Demote(const OPOBJ& OtherIrset) override;
 
   virtual OPOBJ *Nand (const OPOBJ& OtherIrset) override;
   virtual OPOBJ *AndNot (const OPOBJ& OtherIrset) override;
@@ -311,6 +325,7 @@ private:
   typedef  bool (*peer_t) (const FC&, const FC&);
   OPOBJ   *Peer (const OPOBJ& OtherIrset, peer_t Func, const STRING& Fieldname = NulString);
   OPOBJ   *Within(const OPOBJ& OtherIrset, const STRING& Fieldname,  peer_t Func);
+  OPOBJ   *Promote (const OPOBJ& OtherIrset, int weight);
   bool FieldExists(const STRING& FieldName);
 //  void     Clear();
   PIRESULT StealTable();
@@ -900,6 +915,20 @@ public:
   OPOBJ* Nor(const _IRSET& Other)
   {
     return node()->Nor(*Other.cnode());
+  }
+
+  OPOBJ* Maybe(const _IRSET& Other)
+  {  
+    return node()->Maybe(*Other.cnode());
+  }
+
+  OPOBJ* Promote(const _IRSET& Other) 
+  {  
+    return node()->Promote(*Other.cnode());
+  }
+ OPOBJ* Demote(const _IRSET& Other) 
+  {  
+    return node()->Demote(*Other.cnode());
   }
 
   OPOBJ* And(const _IRSET& Other)

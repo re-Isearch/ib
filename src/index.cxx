@@ -692,8 +692,10 @@ void INDEX::SetCacheSize(size_t newCacheSize)
 
 void INDEX::SetSisLimit(size_t NewLimit)
 {
-  if (NewLimit > 2 && NewLimit < StringCompLength)
+  if (NewLimit > 2 && NewLimit <= StringCompLength)
     SisLimit = NewLimit;
+  else message_log (LOG_WARN, "SetSisLimit(%d): %d>%d. Max %d",
+	NewLimit, NewLimit , StringCompLength, StringCompLength);
   message_log (LOG_INFO, "SISLimit is %zu", SisLimit);
 }
 
@@ -3895,8 +3897,8 @@ PIRSET INDEX::Search (const QUERY& Query)
                     case OperatorAnd:
 		      SwapOp(Op1,Op2);
 		      { OPOBJ* Result = Op1->And(*Op2);
-if (Result == NULL) cerr << "Result is NULL" << endl;
-else cerr << "Got " <<  Result->GetTotalEntries() << endl;
+//if (Result == NULL) cerr << "Result is NULL" << endl;
+//else cerr << "Got " <<  Result->GetTotalEntries() << endl;
 
 			if (Query.CanTerminateOnEmpty() && Result != NULL && Result->GetTotalEntries() == 0) {
 			/* Normally Result would be pushed onto Stack and processed on the
@@ -4013,6 +4015,29 @@ else cerr << "Got " <<  Result->GetTotalEntries() << endl;
 		      SwapOp(Op1,Op2);
                       Stack << (Op1->XPeer (*Op2));
                       break;
+		    case OperatorMaybe:
+		      Stack << (Op1->Maybe (*Op2));
+		      break;
+		    case OperatorPromote:
+		      if (Op1->GetTotalEntries() > 0 && Op2->GetTotalEntries()) {
+                        // SwapOp(Op1,Op2);
+			Stack << (Op1->Promote(*Op2));
+		      } else {
+			Stack << Op2;
+			Op2 = NULL;
+			delete Op1; 
+		      }
+		      break;
+                    case OperatorDemote:
+                      if (Op1->GetTotalEntries() > 0 && Op2->GetTotalEntries()) {
+                        // SwapOp(Op1,Op2);
+                        Stack << (Op1->Demote(*Op2));
+                      } else { 
+                        Stack << Op2;
+                        Op2 = NULL;
+                        delete Op1;
+                      }
+                      break;            
 		    case OperatorAncestor:
 		      // Fall into .. Not yet supported
                     default:
