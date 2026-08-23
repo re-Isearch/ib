@@ -2773,8 +2773,14 @@ INT IDB::GetLocks() const
 #endif
 }
 
+
+// This is the main search with the modern interface
+// SQUERY has all the information about how we want to
+// search rather than the loooong list of arguments...
 PRSET IDB::VSearch(const QUERY& Query)
 {
+  // QUERY newQuery(Query);
+
   IRSET *irset = Search (Query);
   if (irset == NULL)
     {

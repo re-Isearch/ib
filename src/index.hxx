@@ -38,6 +38,8 @@ class Dictionary;
 extern NUMERICOBJ (*_IB_smiles_hash)(const char *);
 
 
+void GpSort(GPTYPE *gplist, size_t n);
+
 class INDEX /* : public IDBOBJ */ {
 friend class IDB;
 public:

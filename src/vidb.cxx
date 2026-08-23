@@ -1208,7 +1208,8 @@ PRSET VIDB::VSearchSmart(const STRING& Sentence, const STRING& DefaultField,
         enum SortBy Sort, size_t Total, size_t *TotalFound,
         enum NormalizationMethods Method, SQUERY* Query)
 {
-  IRSET *pIrset = SearchSmart(Sentence, DefaultField, Sort, Method, Query);
+
+  IRSET *pIrset = SearchSmart(Sentence, DefaultField, Sort, Method, Query, Total);
   RSET  *pRset  = NULL;
   if (pIrset)
     {
@@ -1241,7 +1242,7 @@ PRSET VIDB::VSearchSmart(const SQUERY& Query, const STRING& DefaultField,
         enum SortBy Sort, size_t Total, size_t *TotalFound,
         enum NormalizationMethods Method, SQUERY* QueryPtr)
 {
-  IRSET *pIrset = SearchSmart(Query, DefaultField, Sort, Method, QueryPtr);
+  IRSET *pIrset = SearchSmart(Query, DefaultField, Sort, Method, QueryPtr, Total);
   RSET  *pRset  = NULL;
   if (pIrset)
     {
@@ -1264,7 +1265,7 @@ PRSET VIDB::VSearch (const QUERY& Query)
   QUERY SearchQuery(Query);
   const enum SortBy Sort = Query.Sort;
   size_t            TotalFound = 0;
-  size_t            Total = Query.GetMaximumResults();
+  size_t            Total = Query.GetMaximumResults(); // TopK
 
   if (c_dbcount > 1)
      SearchQuery.Sort = Unsorted; // Unsorted for now
@@ -1441,13 +1442,14 @@ PRSET VIDB::VSearch (const QUERY& Query)
 
 
 PIRSET VIDB::Search(const SQUERY& SearchQuery, enum SortBy Sort, enum NormalizationMethods Method,
-  VIDB_STATS *Stats)
+  VIDB_STATS *Stats, int TopK)
 {
   QUERY Query;
 
   Query.Squery = SearchQuery;
   Query.Sort   = Sort;
   Query.Method = Method;
+  Query.MaxResults = TopK;
   return Search(Query, Stats);
 }
 
@@ -1471,6 +1473,7 @@ PIRSET VIDB::Search(const QUERY& Query, VIDB_STATS *Stats)
 
   if (c_irsetlist == NULL) c_irsetlist = new PIRSET[c_dbcount];
   if (c_rsetlist  == NULL) c_rsetlist  = new PRSET[c_dbcount];
+
 
   //
   // Search each database
@@ -1561,6 +1564,8 @@ PIRSET VIDB::Search(const QUERY& Query, VIDB_STATS *Stats)
 	    }
 	}
       PIRSET newIrset = c_irsetlist[ hit_set-1 ];
+
+      // INSERT HERE THE CODE FOR TOP-K
       newIrset->SortBy(Query.Sort);
 
       if (Stats) {
@@ -1607,7 +1612,7 @@ PIRSET VIDB::Search(const QUERY& Query, VIDB_STATS *Stats)
   return NewIrset;
 }
 
-PIRSET  VIDB::SearchRpn(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method)
+PIRSET  VIDB::SearchRpn(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method, int TopK)
 {
   SQUERY squery;
   if (!squery.SetRpnTerm (QueryString))
@@ -1615,10 +1620,10 @@ PIRSET  VIDB::SearchRpn(const STRING& QueryString, enum SortBy Sort, enum Normal
      message_log (LOG_NOTICE|LOG_ERROR, "Bad RPN Query: %s", squery.LastErrorMessage().c_str());
      return NULL;
    }
-  return Search(squery, Sort, Method);
+  return Search(squery, Sort, Method, TopK);
 }
 
-PIRSET  VIDB::SearchInfix(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method)
+PIRSET  VIDB::SearchInfix(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method, int TopK)
 {
   SQUERY squery;
   if (!squery.SetInfixTerm (QueryString))
@@ -1626,15 +1631,15 @@ PIRSET  VIDB::SearchInfix(const STRING& QueryString, enum SortBy Sort, enum Norm
      message_log (LOG_NOTICE|LOG_ERROR, "Bad Infix Query: %s", squery.LastErrorMessage().c_str());
      return NULL;
    }
-  return Search(squery, Sort, Method);
+  return Search(squery, Sort, Method, TopK);
 }
 
 
-PIRSET  VIDB::SearchWords(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method)
+PIRSET  VIDB::SearchWords(const STRING& QueryString, enum SortBy Sort, enum NormalizationMethods Method, int TopK)
 {
   SQUERY squery;
   squery.SetWords (QueryString);
-  return Search(squery, Sort, Method);
+  return Search(squery, Sort, Method, TopK);
 }
 
 
@@ -2507,24 +2512,24 @@ PIRSET VIDB::SearchSmart(const QUERY& Query, SQUERY *SqueryPtr)
   return SearchSmart(Query.Squery, Query.Sort, Query.Method, SqueryPtr);
 
 }
-PIRSET VIDB::SearchSmart(const QUERY& Query, const STRING& DefaultField, SQUERY *SqueryPtr)
+PIRSET VIDB::SearchSmart(const QUERY& Query, const STRING& DefaultField, SQUERY *SqueryPtr, int TopK)
 {
-  return SearchSmart(Query.Squery, DefaultField, Query.Sort, Query.Method, SqueryPtr);
+  return SearchSmart(Query.Squery, DefaultField, Query.Sort, Query.Method, SqueryPtr, TopK);
 }
 
 
 PIRSET VIDB::SearchSmart(const STRING& QueryString, const STRING& DefaultField,
-         enum SortBy Sort, enum NormalizationMethods Method, SQUERY *SqueryPtr)
+         enum SortBy Sort, enum NormalizationMethods Method, SQUERY *SqueryPtr, int TopK)
 {
   SQUERY squery;
   
   if (squery.SetQueryTerm (QueryString) != 0)
-    return SearchSmart(squery, DefaultField, Sort, Method, SqueryPtr);
+    return SearchSmart(squery, DefaultField, Sort, Method, SqueryPtr, TopK);
   return NULL;
 }
 
 PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
-	 enum SortBy Sort, enum NormalizationMethods Method, SQUERY *SqueryPtr)
+	 enum SortBy Sort, enum NormalizationMethods Method, SQUERY *SqueryPtr, int TopK)
 {
   PIRSET pIrset = NULL;
 
@@ -2536,14 +2541,14 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
   if (Squery.isPlainQuery(&QueryString) == false)
     {
       if (SqueryPtr) *SqueryPtr = Squery; 
-      return Search(Squery, Sort, Method);
+      return Search(Squery, Sort, Method, TopK);
     }
 
   SQUERY squery(Squery);
   const size_t terms = squery.GetTotalTerms();
 
   if (terms == 1)
-    return Search(squery, Sort, Method);
+    return Search(squery, Sort, Method, TopK);
 
    // Search as literal phrase?
    if (terms >= 2)
@@ -2552,7 +2557,7 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
 
       SQUERY newQuery; 
       newQuery.SetLiteralPhrase(QueryString);
-      if ((pIrset = Search(newQuery, Sort, Method)) != NULL)
+      if ((pIrset = Search(newQuery, Sort, Method, TopK)) != NULL)
 	{
 	  if (pIrset->GetTotalEntries() == 0)
 	    {
@@ -2580,7 +2585,7 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
 
       if (res)
 	{
-	  if ((pIrset = Search(squery, Sort, Method)) != NULL)
+	  if ((pIrset = Search(squery, Sort, Method, TopK)) != NULL)
 	    {
 	      if (pIrset->GetTotalEntries() == 0)
 		{
@@ -2594,7 +2599,7 @@ PIRSET VIDB::SearchSmart(const SQUERY& Squery, const STRING& DefaultField,
 	    {
 // clock_t t2 = clock();
 	      squery.SetOperatorOr();
-	      if ((pIrset = Search(squery, Sort, Method)) != NULL)
+	      if ((pIrset = Search(squery, Sort, Method, TopK)) != NULL)
 		{
 // message_log(LOG_INFO, "SearchSmart: OR took %ld ms", (long)((clock() - t2) * 1000 / CLOCKS_PER_SEC));
 

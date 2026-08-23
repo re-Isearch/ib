@@ -288,18 +288,29 @@ public:
 
   // Obsolete
   PIRSET Search(const SQUERY& SearchQuery, SortBy Sort = Unsorted,
-        enum NormalizationMethods Method = defaultNormalization, VIDB_STATS *Stats = NULL);
+        enum NormalizationMethods Method = defaultNormalization, VIDB_STATS *Stats = NULL, int TopK=-1);
+  PIRSET Search(const SQUERY& SearchQuery, SortBy Sort = Unsorted,
+        enum NormalizationMethods Method = defaultNormalization, int TopK=-1) {
+     return Search(SearchQuery, Sort, Method, nullptr, TopK);
+   }
+
   // Convienience methods
   PIRSET SearchWords(const STRING& Words, SortBy Sort = Unsorted,
-	enum NormalizationMethods Method = defaultNormalization);
+	enum NormalizationMethods Method = defaultNormalization, int TopK=-1);
   PIRSET SearchRpn(const STRING& RpnQuery, SortBy Sort = Unsorted,
-	enum NormalizationMethods Method = defaultNormalization);
+	enum NormalizationMethods Method = defaultNormalization, int TopK=-1);
   PIRSET SearchInfix(const STRING& InfixQuery, SortBy Sort = Unsorted,
-	enum NormalizationMethods Method = defaultNormalization);
+	enum NormalizationMethods Method = defaultNormalization, int TopK=-1);
 
   PIRSET SearchSmart(QUERY *Query, const STRING& DefaultField=NulString);
   PIRSET SearchSmart(const QUERY& Query, SQUERY *SqueryPtr = NULL);
-  PIRSET SearchSmart(const QUERY& Query, const STRING& DefaultField, SQUERY *SqueryPtr = NULL);
+  PIRSET SearchSmart(const QUERY& Query, const STRING& DefaultField, SQUERY *SqueryPtr = NULL, int TopK=-1);
+
+  PIRSET SearchSmart(const SQUERY& SearchQuery, SortBy Sort = Unsorted,
+        enum NormalizationMethods Method = defaultNormalization, int TopK=-1) {
+    return SearchSmart(SearchQuery, NulString, Sort, Method, nullptr, TopK);
+  }
+
   // Obsolete
   PIRSET SearchSmart(const SQUERY& SearchQuery, SortBy Sort = Unsorted,
         enum NormalizationMethods Method = defaultNormalization, SQUERY *SqueryPtr = NULL) {
@@ -307,14 +318,14 @@ public:
   }
   PIRSET SearchSmart(const SQUERY& Query, const STRING& DefaultField,
         SortBy Sort = Unsorted, enum NormalizationMethods Method =defaultNormalization,
-        SQUERY *SqueryPtr = NULL) ;
+        SQUERY *SqueryPtr = NULL, int TopN = -1) ;
   // Convienience
   PIRSET SearchSmart(const STRING& QueryString, const STRING& DefaultField,
         SortBy Sort = Unsorted, enum NormalizationMethods Method =defaultNormalization,
-	SQUERY *SqueryPtr = NULL) ;
+	SQUERY *SqueryPtr = NULL, int TopN = -1) ;
   PIRSET SearchSmart(const STRING& QueryString, SortBy Sort = Unsorted,
-        enum NormalizationMethods Method = defaultNormalization, SQUERY *SqueryPtr = NULL) {
-    return SearchSmart(QueryString, NulString, Sort, Method, SqueryPtr);
+        enum NormalizationMethods Method = defaultNormalization, SQUERY *SqueryPtr = NULL, int TopK=-1) {
+    return SearchSmart(QueryString, NulString, Sort, Method, SqueryPtr, TopK);
   } 
 
   PIRSET  FileSearch(const STRING& FileSpec);

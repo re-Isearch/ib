@@ -339,7 +339,7 @@ static void HelpUsage(const char *progname)
 	"  -syn             // Do synonym expansion." << endl <<
 	"  -priority (NN.NN)// Over-ride priority factor with NN.NN" << endl <<
 	"  -scale (NN)      // Normalize score to 0-(NN) (scale)." << endl <<
-	"  -max (NN)        // Max. NN hits" << endl <<
+	"  -top (NN)        // Max. NN hits" << endl <<
         "  -negative        // Show results with negative scores." << endl <<
 	"  -positive        // Show only results with positive scores." << endl <<
 	"  -clip (NN)       // Clip at NN." << endl <<
@@ -562,6 +562,7 @@ int _Isearch_main (int argc, char **argv)
   bool Reduce = false;
   bool DebugFlag = false;
   bool ShowRusage = false;
+  bool ShowRating = false;
   bool QuitFlag = false;
   bool VerboseFlag = false;
   bool ShellFlag = false;
@@ -579,7 +580,7 @@ int _Isearch_main (int argc, char **argv)
   bool PlainQuery = false;
   bool ExpandSynonyms = false;
   bool PresentHtml = false;
-  INT MaxHits = 300;
+  INT  TopK = 300;
   INT Fuel = 0;
   bool ShowHits = false;
   bool ShowAux = false;
@@ -899,14 +900,14 @@ int _Isearch_main (int argc, char **argv)
 		AncestorElementList.AddEntry(argv[x]);
 	      LastUsed = x;
 	    }
-          else if (Flag.Equals ("-max"))
+          else if (Flag.Equals ("-max") || (Flag.Equals("-top")))
             {
               if (++x >= argc)
                 {
-                  message_log (LOG_FATAL, "Usage: No number specified after -max.");
+                  message_log (LOG_FATAL, "Usage: No number specified after -top.");
                   return 0;
                 }
-              MaxHits = atoi(argv[x]);
+              TopK = atoi(argv[x]);
               LastUsed = x;
             }
           else if (Flag.Equals ("-negative"))
@@ -1009,11 +1010,17 @@ int _Isearch_main (int argc, char **argv)
                   message_log (LOG_FATAL, "Usage: No value specified after -range.");
                   return 0;
                 }
-	      if (sscanf(argv[x], "%d-%d", &first, &last) == 0)
+	      if (strncasecmp(argv[x], "all", strlen(argv[x])) == 0) // 
+		{
+		  first = last = 0;
+		}
+	      else if (sscanf(argv[x], "%d-%d", &first, &last) == 0)
 		{
 		  message_log (LOG_FATAL, "Usage: Bad range specified.");
 		  return 0;
 		}
+	      if (last == 0) TopK = -1;
+	      else if (last > TopK) TopK = last; 
               LastUsed = x;
 	    }
 	  else if (Flag.Equals("-syn"))
@@ -1075,6 +1082,12 @@ int _Isearch_main (int argc, char **argv)
               ShowAbsoluteScore = true;
               LastUsed = x;
            }
+	  else if (Flag.Equals("-rating"))
+	   {
+	      ShowRating = true;
+	      base_score = 5;
+  	      LastUsed = x;
+	   }
           else if (Flag.Equals ("-daterange"))
             {
              if (++x >= argc)
@@ -1093,6 +1106,7 @@ int _Isearch_main (int argc, char **argv)
 		  return 0;
 		}
 	      startDoc = atoi(argv[x]);
+	      if (startDoc > TopK) TopK = startDoc + 300;
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals ("-enddoc"))
@@ -1103,6 +1117,7 @@ int _Isearch_main (int argc, char **argv)
 		  return 0;
 		}
 	      endDoc = atoi(argv[x]);
+	      if (endDoc > TopK) endDoc = TopK;
 	      LastUsed = x;
 	    }
 	  else if (Flag.Equals ("-table"))
@@ -1582,7 +1597,7 @@ again:
 	}
       if (Clip == 0 && Reduce && termCount == 1) 
 	{
-	  pdb->SetDbSearchCutoff(MaxHits);
+	  pdb->SetDbSearchCutoff(TopK);
 	}
       size_t match = 0;
       if (ScanSearch)
@@ -1592,12 +1607,14 @@ again:
       else if (SmartQuery && !(AndWordsQuery || WordsQuery))
         {
 	  if (SmartField == "--" ) SmartField.Clear();
-  	  prset = pdb->VSearchSmart(originalQueryString, SmartField, Sort, MaxHits, &match, Method, &squery);
+  	  prset = pdb->VSearchSmart(originalQueryString, SmartField, Sort, TopK, &match, Method, &squery);
 	  termCount = squery.GetRpnTerm (&QueryString);
 	  message_log (LOG_DEBUG, "Query: %s", QueryString.c_str());
         }
        else
-	  prset = pdb->VSearch (squery, Sort, MaxHits, &match, Method);
+        {
+	  prset = pdb->VSearch (squery, Sort, TopK, &match, Method);
+        }
       matches = match;
       if (prset == NULL && !ScanSearch)
         message_log (LOG_ERROR, "Search ERROR: %s", (const char *)( pdb->ErrorMessage()) );
@@ -1747,8 +1764,10 @@ again:
       if (!QueryString.IsEmpty())
 	{
 	  cout << "Query: " << QueryString << endl;
-	  if ( base_score != 100)
-	    cout << "Score Scale: " << base_score << endl; 
+	  if ( base_score != 100) {
+	    if (ShowRating) cout << "Rating Scale 1-" << base_score << " stars" << endl;
+	    else cout << "Score Scale: 1-" << base_score << endl; 
+	  }
 
 	  if (VerboseFlag) cout << "Number of Term-Hits: " << (INT)(prset->GetHitTotal()) << endl;
 	  if (matches) cout << endl << matches << " record" << ((matches != 1) ? "s" : "")
@@ -1764,6 +1783,16 @@ again:
 	}
     }
 
+    static const char *Rating[] = {
+      "☆☆☆☆☆",
+      "★☆☆☆☆",
+      "★★☆☆☆",
+      "★★★☆☆",
+      "★★★★☆",
+      "★★★★★"
+    };
+
+
   // Process Loop
   do {
       if (TabFormat && !Terse)
@@ -1775,7 +1804,7 @@ again:
 	  cout << "       ";
 	  if (ShowAbsoluteScore)
 	  cout << "Absolute ";
-	  cout << "Score";
+	  cout << (ShowRating ? "Rating" : "Score");
 	  if (ShowHits)
 	    cout << "  Hits  ";
 	  if (ShowAux)
@@ -1831,7 +1860,10 @@ again:
 	      cout << t << ".\t";
               if (ShowAbsoluteScore)
                 cout << score << "\t";
-              cout << prset->GetScaledScore (score, base_score) << "\t";
+	      int N = prset->GetScaledScore (score, base_score);
+	      if (ShowRating) cout << Rating[N];
+	      else cout << N;
+	      cout << "\t";
               if (ShowHits)
                 cout << result.GetHitTotal() << "\t";
 	      if (ShowAux)
@@ -1842,8 +1874,11 @@ again:
 	      cout << setw (4) << t << ".";
 	      if (ShowAbsoluteScore)
 		cout << "  " << setw(8) << score;
-	      cout << "  " << setw ( (int)(log10((double)base_score)+0.5) + 2)
-		<< prset->GetScaledScore (score, base_score);
+
+	      int N = prset->GetScaledScore (score, base_score); 
+	      cout << "  ";
+	      if (ShowRating) cout << Rating[N];
+	      else cout << setw ( (int)(log10((double)base_score)+0.5) + 2) << N;
 	      if (ShowHits)
                 cout << " " << setw(4) << result.GetHitTotal() << "   ";
 	      if (ShowAux)
@@ -2750,7 +2785,7 @@ namespace
     },
     {
       "scoring",
-      "-max",
+      "-top",
       "count",
       "Return at most the specified number of results."
     },
@@ -2830,6 +2865,12 @@ namespace
       NULL,
       "Display unnormalized scores."
     },
+   { 
+      "metadata",
+      "-rating",
+      NULL,
+      "Scale scores over the retrieved set and display as 1-5 star ratings."
+    },
     {
       "metadata",
       "-date",
@@ -2867,8 +2908,8 @@ namespace
     {
       "range",
       "-range",
-      "first[-last]",
-      "Display results from the first position through the optional last position."
+      "first[-last] | all",
+      "Display results from the first position through the optional last position (or all)."
     },
     {
       "range",

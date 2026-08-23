@@ -50,6 +50,21 @@ using hit_table_type =
 #endif
 
 
+template <typename Compare>
+inline void CoreQuarryIrsetSort(IRESULT *table, size_t count, Compare compare)
+{
+// const auto start = std::chrono::steady_clock::now();
+
+  std::sort(table, table + count, compare);
+
+// const auto stop = std::chrono::steady_clock::now();
+// cerr << "Sort " << count << " IRESULTs: "
+//      << std::chrono::duration_cast<std::chrono::microseconds>( stop - start).count()
+//      << " us"
+//     << endl;
+}
+
+
 #ifndef FIELD_WILD_MATCH
 #define FIELD_WILD_MATCH(_x, _y)  (_x).FieldMatch(_y)
 #endif
@@ -174,6 +189,7 @@ atomicIRSET::atomicIRSET (const PIDBOBJ DbParent, size_t Reserve)
   Parent = DbParent;
 
   MinScore=MAXFLOAT;
+  MinScoreValid = true;
   MaxScore=0.0;
   Sort= ByIndex;
   SortRequest = Unsorted;
@@ -252,6 +268,7 @@ void atomicIRSET::Set(const atomicIRSET *OtherPtr)
   Parent           = OtherPtr->Parent;
   MaxScore         = OtherPtr->MaxScore;
   MinScore         = OtherPtr->MinScore;
+  MinScoreValid    = OtherPtr->MinScoreValid;
   Sort             = OtherPtr->Sort;
   SortRequest      = OtherPtr->SortRequest;
   ComputedS        = OtherPtr->ComputedS;
@@ -394,7 +411,10 @@ void atomicIRSET::MergeEntries(const bool AddHitCounts)
 		{
 		  score = Table[CurrentItem].IncScore(Table[x].GetScore());
 		  if (score > MaxScore) MaxScore = score;
-		  if (score < MinScore) MinScore = score;
+		  if (score < MinScore) {
+		    MinScore = score;
+		    MinScoreValid = false;
+		  }
 		}
 	    }
 	}
@@ -848,10 +868,11 @@ PRSET atomicIRSET::Fill(size_t Start, size_t End, PRSET set) const
 
   message_log (LOG_DEBUG, "Filling RSET %d-%d", Start, End);
 
-  const DOUBLE pFactor = ((MaxScore && (MaxScore != MinScore)) ?
-	(Parent->GetPriorityFactor()*(MaxScore - MinScore))/MaxScore :
+  DOUBLE minScore = GetMinScore();
+  const DOUBLE pFactor = ((MaxScore && (MaxScore != minScore)) ?
+	(Parent->GetPriorityFactor()*(MaxScore - minScore))/MaxScore :
 	Parent->GetPriorityFactor());
-  DOUBLE newMinScore = MinScore;
+  DOUBLE newMinScore = minScore;
   DOUBLE newMaxScore = MaxScore;
   enum SortBy newSort = Sort;
 
@@ -4875,7 +4896,7 @@ OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
             {
               const auto Hits = Table[i].GetHitTable();
 
-#if 1 /* DEBUG New Source ID */
+#if 0 /* DEBUG New Source ID */
 
 using SourcePair = std::pair<FCSOURCE, FCSOURCE>;
 
@@ -4938,7 +4959,7 @@ cerr << "Sources=" << Sources.size()
      << (Sources.size() * (Sources.size() - 1)) / 2
      << endl;
 
-#endif
+#endif /* DEBUG */
 
               if (Hits.Size() > 1)
                 {
@@ -5527,7 +5548,17 @@ void atomicIRSET::SortByScore ()
       if (TotalEntries > 1 && ComputedS > NoNormalization)
 	{
 	  message_log (LOG_DEBUG, "Sorting IRSET by Score.");
+#if 1
+	  CoreQuarryIrsetSort( Table, TotalEntries,
+	     [](const IRESULT& x, const IRESULT& y)
+		{
+		  if (x.GetScore() != y.GetScore())
+		    return x.GetScore() > y.GetScore();
+		  return x.GetIndex() > y.GetIndex();
+		});
+#else
 	  SORT (Table, TotalEntries, sizeof (IRESULT), IrsetScoreCompare);
+#endif
 	}
       Sort = ByScore;
     }
@@ -5555,7 +5586,7 @@ void atomicIRSET::SortByFunction(int (*func)(const void *, const void *))
 	  if (func)
 	    {
 	      message_log (LOG_DEBUG, "Sorting IRSET by Function"); 
-	      QSORT(Table, TotalEntries, sizeof(IRESULT), func);
+	      SORT(Table, TotalEntries, sizeof(IRESULT), func);
 	    }
 	  else message_log (LOG_WARN, "Application Error: Request to sort IRSET by undefined Function");
 	}
@@ -5899,4 +5930,172 @@ OPOBJ *atomicIRSET::Reduce(const float Level)
     }
 
   return this;
+}
+
+
+size_t atomicIRSET::ReduceToTop(size_t Total, enum SortBy sortBy)
+{
+  if (TotalEntries == 0)
+    return 0;
+
+  auto cmp = GetSortComparator(sortBy);
+
+  if (cmp == NULL)
+    return TotalEntries; // whatever existing fallback semantics are
+
+  if (Total == 0 || Total >= TotalEntries)
+  {
+    SORT(Table, TotalEntries, sizeof(IRESULT), cmp);
+    return TotalEntries;
+  }
+
+#if 1
+DOUBLE best = -DBL_MAX;
+
+const auto start = std::chrono::steady_clock::now();
+
+for (size_t i = 0; i < TotalEntries; ++i)
+{
+  const DOUBLE score = Table[i].GetScore();
+
+  if (score > best)
+    best = score;
+}
+
+const auto stop = std::chrono::steady_clock::now();
+
+cerr << "Score scan "
+     << std::chrono::duration_cast<std::chrono::microseconds>(
+          stop - start).count()
+     << " us; best=" << best << endl;
+
+#endif
+
+  //
+  // Keep indices, not IRESULTs.
+  //
+  std::vector<size_t> top;
+  top.reserve(Total);
+
+  auto Better = [&](size_t a, size_t b)
+  {
+    const int result = cmp(&Table[a], &Table[b]);
+    return result < 0;
+  };
+
+  auto BetterScore = [&](size_t a, size_t b)
+  {
+    const IRESULT& x = Table[a];
+    const IRESULT& y = Table[b];
+
+    if (x.GetScore() > y.GetScore()) return true;
+    if (x.GetScore() < y.GetScore()) return false;
+
+    return x.GetMdtIndex() < y.GetMdtIndex(); // match exact existing tie rule
+  };
+
+
+  // We handle ByScore a bit differently since its expensive with
+  // potentially a lot of recursions so saving the call.. 
+  if (sortBy == ByScore) 
+    for (size_t i = 0; i < TotalEntries; ++i) {
+    if (top.size() < Total)
+    {
+      top.push_back(i);
+      std::push_heap(top.begin(), top.end(), BetterScore);
+    }
+    else if (BetterScore(i, top.front()))
+    {
+      std::pop_heap(top.begin(), top.end(), BetterScore);
+      top.back() = i;
+      std::push_heap(top.begin(), top.end(), BetterScore);
+    }
+  } else   for (size_t i = 0; i < TotalEntries; ++i)
+  {
+    if (top.size() < Total)
+    {
+      top.push_back(i);
+      std::push_heap(top.begin(), top.end(), Better);
+    }
+    else if (Better(i, top.front()))
+    {
+      std::pop_heap(top.begin(), top.end(), Better);
+      top.back() = i;
+      std::push_heap(top.begin(), top.end(), Better);
+    }
+  }
+
+  //
+  // top.front() was maintained as the worst member of
+  // the current top-N set.
+  //
+  if (sortBy == ByScore)
+    std::sort(top.begin(), top.end(), BetterScore);
+  else
+    std::sort(top.begin(), top.end(), Better);
+
+
+  const size_t NewTotal = top.size();
+
+  IRESULT *NewTable = new IRESULT[NewTotal];
+
+  for (size_t i = 0; i < NewTotal; ++i)
+    NewTable[i] = std::move(Table[top[i]]);
+
+  delete [] Table;
+
+  Table        = NewTable;
+  TotalEntries = NewTotal;
+  MaxEntries   = NewTotal;   // assuming this is the allocation-size member
+
+  return TotalEntries;
+}
+
+
+atomicIRSET::cmp_t atomicIRSET::GetSortComparator(enum SortBy sortBy)
+{
+  switch (sortBy)
+  {
+    case ByScore: return IrsetScoreCompare;
+    case ByIndex: return IrsetIndexCompare;
+    case ByHits: return IrsetHitsCompare;
+    case ByReverseHits: return IrsetHitsCompareReverse;
+    case ByAuxCount: return IrsetAuxCountCompare;
+    case ByDate: return IrsetDateCompare;
+    case ByReverseDate: return  IrsetReverseDateCompare;
+    case ByKey: return  IrsetKeyCompare;
+    case ByNewsrank: return IrsetCompareNewsrank ;
+    case ByFunction: return IrsetCompar;
+    default: return nullptr;
+  }
+}
+
+
+
+DOUBLE atomicIRSET::GetMinScore() const
+{
+    if (!MinScoreValid)
+    {
+        if (TotalEntries == 0)
+        {
+            MinScore = 0;
+        }
+        else
+        {
+            DOUBLE minimum = Table[0].GetScore();
+
+            for (size_t i = 1; i < TotalEntries; ++i)
+            {
+                const DOUBLE score = Table[i].GetScore();
+                if (score < minimum)
+                    minimum = score;
+            }
+
+            MinScore = minimum;
+        }
+
+        MinScoreValid = true;
+    }
+
+    return MinScore;
 }

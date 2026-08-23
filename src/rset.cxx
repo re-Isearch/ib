@@ -319,8 +319,9 @@ int RSET::GetScaledScore(const double UnscaledScore, const int scale)
 {
 //cerr << "@@@@@@@@ GetScaledSCORE  ( " << UnscaledScore << " with scale " << scale << endl;
   // @@@ edz: use double and add 0.5 to correctly normalize results
-  // HighScore := ScaleFactor
-  // LowScore  := 0
+  // HighScore maps to ScaleFactor
+  // LowScore  maps to 1
+  // Scores below LowScore map to 0
   const int    ScaleFactor = scale ? scale : 100; 
   const double Delta = HighScore - LowScore;
   int   result = 0;

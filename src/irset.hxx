@@ -64,6 +64,9 @@ const int CosineNormalization=NormalizationL2;
 
 class atomicIRSET : public OPERAND {
 public:
+
+  using cmp_t = int (*)(const void *, const void *);
+
   atomicIRSET(const PIDBOBJ DbParent = NULL, size_t Reserve = 0);
   atomicIRSET(const OPOBJ& OtherIrset);
 
@@ -281,6 +284,10 @@ public:
 	IrsetCompar = func;
       }
   }
+  bool SetSortComparator(enum SortBy sortBy);
+
+
+  size_t ReduceToTop(size_t Total = 10, enum SortBy sortBy = ByScore);
 
   void SortBy(enum SortBy SortBy) {
     if      (SortBy == ByScore)       SortByScore();
@@ -306,7 +313,7 @@ public:
   PIDBOBJ GetParent () const override               { return Parent;      }
 
   DOUBLE GetMaxScore() const override { return MaxScore; }
-  DOUBLE GetMinScore() const override { return MinScore; }
+  DOUBLE GetMinScore() const override; 
 
   void   SetMaxEntriesAdvice (size_t nMax) { MaxEntriesAdvice=nMax; }
   size_t GetMaxEntriesAdvice () const      { return MaxEntriesAdvice; }
@@ -349,6 +356,8 @@ private:
   OPOBJ   *_CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T dir = BEFOREorAFTER);
   void     Set(const atomicIRSET *OtherPtr);
 
+  cmp_t    GetSortComparator(enum SortBy sortBy);
+
   IRESULT *Table;
   size_t   TotalEntries;
   size_t   MaxEntries;
@@ -358,7 +367,11 @@ private:
   long     allocs;
   enum NormalizationMethods ComputedS;
 
-  DOUBLE   MaxScore, MinScore;
+  DOUBLE   MaxScore;
+
+  mutable DOUBLE MinScore;
+  mutable bool MinScoreValid;
+
   enum SortBy Sort, SortRequest;
   PIDBOBJ  Parent;
   int     (*IrsetCompar)(const void *, const void *);
@@ -1265,6 +1278,11 @@ public:
   /////////////////////////////////////////////////////////////////
   // Parent and limits
   /////////////////////////////////////////////////////////////////
+
+  size_t ReduceToTop(size_t Total = 10, enum SortBy sortBy = ByScore)
+   {
+     return node()->ReduceToTop(Total, sortBy);
+   }
 
   void SetParent(PIDBOBJ const NewParent) override
   {

@@ -733,3 +733,5 @@ IRESULT_TABLE::~IRESULT_TABLE()
 {
   GetIRESULTData()->Unlock();
 }
+
+

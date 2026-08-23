@@ -29,6 +29,8 @@ TODO:
 # define DEFAULT_TOO_MANY_RECORDS_THRESHOLD  10000
 #endif
 
+
+
 extern int _ib_defaultMaxCPU_ticks;
 extern int _ib_defaultMaxQueryCPU_ticks;
 
@@ -127,6 +129,8 @@ extern bool _is_globalUTF8;
 #define __Low32(_x)  (UINT4)((_x) &   0x000000FFFFFFFFLL)
 #define __High32(_x) (UINT4)((((_x) & 0xFFFFFFFF000000LL) >> 32) & 0xFFFF)
 
+
+static constexpr size_t GP_RADIX_THRESHOLD = 2048;
 
 #define __DEBUG__ 0
 
@@ -3716,14 +3720,6 @@ PIRSET INDEX::Search (const QUERY& Query)
   enum NormalizationMethods Method = Query.GetNormalizationMethod();
   SQUERY                    sQuery (Query.GetSQUERY());
 
-
-#if 0
-  if (sQuery.isOpQuery(OperatorAnd))
-    {
-      cerr << "Its an AND Query..." << endl;
-    }
-#endif
-
   // Flip OPSTACK upside-down to convert so we can
   // pop from it in RPN order.
   OPSTACK Stack;
@@ -3825,22 +3821,11 @@ PIRSET INDEX::Search (const QUERY& Query)
 		  fieldName = "*." + OpPtr->GetOperatorString(); 
                 case OperatorWithinFile:
                   // Very special case!
-#if 1
 		  Op1->WithinFile (fieldName);
-#else
-                  Stack << *Op1; Op2 = Op1->WithinFile( fieldName);
-                  if (Op2) { Stack << Op2; Op2 = NULL;} // was here (also below): *Op2; delete Op2 // 2008 MEMO
-#endif
                   break;
                 case OperatorWithKey:
                   // Very special case!
-#if 1
 		  Op1->WithKey(fieldName);
-#else
-                  Stack << *Op1; Op2 = Op1->WithinKey(fieldName);
-		  if (Op2) { Stack << Op2; Op2 = NULL;}
-		  // if (Op2) { Stack << Op1->And(*Op2) /* was Stack << Op2 */; Op2 = NULL;}
-#endif
 		  break;
 		case OperatorWithinDoctype:
 		  // Very special case!
@@ -4059,7 +4044,7 @@ PIRSET INDEX::Search (const QUERY& Query)
 	      // "Resources exhausted - unpredictable partial results available";
 	      Parent->SetErrorCode(error);
 	      StopEvaluation = true;
-	      break;
+	      // break;
 	    }
 	  delete OpPtr; // ADDED: 2008 March 
         }
@@ -4194,7 +4179,7 @@ PIRSET INDEX::Search (const QUERY& Query)
 
 	      // Here is where we search.......................
 
-              if (FieldName.IsEmpty() && Term.SearchAny("RECT{") /*}*/ == 1)
+              if (FieldName.IsEmpty() && Term.SearchAny("RECT" "\x7B") /* Looking for RECT{..} */ == 1)
                 {
                   // Pass {c1,c2,c3,c4} to the routine
                   NewIrset=BoundingRectangle( Term.c_str() + 4);
@@ -4475,18 +4460,6 @@ error:
 
   TempStack >> NewIrset;
 
-#if 0 /* XXXXXX DEBUG CODE */
-// Add these:
-cerr << "NewIrset ptr = " << (void*)NewIrset << endl;
-for (size_t i = 1; i <= NewIrset->GetTotalEntries(); i++)
-{
-    const IRESULT& r = NewIrset->GetEntry(i);  // by const ref, no copy
-    cerr << "  direct Table[" << i << "] score=" << r.GetScore() 
-         << " index=" << r.GetIndex() << endl;
-}
-#endif
-
-#if 1
   if (!StopEvaluation) {
     if (!Stack.IsEmpty())
       {
@@ -4498,16 +4471,27 @@ for (size_t i = 1; i <= NewIrset->GetTotalEntries(); i++)
         message_log (LOG_INFO, "Search stack was not empty. Malformed RPN.");
         Parent->SetErrorCode(108); // "Malformed query";
       }
-   }
-#endif
+   } else if (NewIrset == nullptr) return  new IRSET (Parent);
 
   // Do we want to clip the set?
   if (!Query.isUnlimited())
     {
-      const size_t clip = Query.GetMaximumResults();
+      const int clip = Query.GetMaximumResults();
       if (NewIrset->GetTotalEntries() > clip) {
+#if 1
+// const auto start = std::chrono::steady_clock::now();
+
+	NewIrset->ReduceToTop(clip, Query.GetSortBy());
+
+// const auto stop = std::chrono::steady_clock::now();
+// cerr << "Reduce to Top " << clip 
+//       << "   =" << std::chrono::duration_cast<std::chrono::microseconds>( stop - start).count()
+ //      << " us\n" ;
+
+#else
 	NewIrset->SortBy(Query.GetSortBy()); // Added 2024
 	NewIrset->SetTotalEntries(clip);
+#endif
       }
     }
 
@@ -4679,6 +4663,97 @@ static int gpcomp(const void* x, const void* y)
   return(*((GPTYPE *)x)-*((GPTYPE *)y));
 }
 
+static void GpRadixSort(GPTYPE *data, size_t n, GPTYPE *tmp)
+{
+    if (n < 2)
+        return;
+
+    GPTYPE variation = 0;
+    const GPTYPE first = data[0];
+
+    for (size_t i = 1; i < n; ++i)
+        variation |= data[i] ^ first;
+
+    if (variation == 0)
+        return;
+
+    GPTYPE *src = data;
+    GPTYPE *dst = tmp;
+
+    for (unsigned shift = 0;
+         shift < sizeof(GPTYPE) * 8;
+         shift += 8)
+    {
+        /*
+         * If every GP has the same value in this byte,
+         * there is no reason to perform this radix pass.
+         */
+        if (((variation >> shift) & 0xff) == 0)
+            continue;
+
+        size_t count[256] = {};
+
+        for (size_t i = 0; i < n; ++i)
+            ++count[(src[i] >> shift) & 0xff];
+
+        size_t pos[256];
+        pos[0] = 0;
+
+        for (size_t i = 1; i < 256; ++i)
+            pos[i] = pos[i - 1] + count[i - 1];
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const unsigned key =
+                (src[i] >> shift) & 0xff;
+
+            dst[pos[key]++] = src[i];
+        }
+
+        std::swap(src, dst);
+    }
+
+    if (src != data)
+        memcpy(data, src, n * sizeof(GPTYPE));
+}
+
+#if 1
+# define QSORT_GP(_gplist, _n, _x, _y) GpSort(_gplist, _n) 
+#else
+# define QSORT_GP QSORT
+#endif
+
+inline bool GpIsSorted(const GPTYPE *p, size_t n)
+{
+    for (size_t i = 1; i < n; ++i)
+        if (p[i] < p[i - 1])
+            return false;
+
+    return true;
+}
+
+void GpSort(GPTYPE *gplist, size_t n)
+{
+    if (n < 2 || gplist == nullptr)
+        return;
+#if 0
+    if (GpIsSorted(gplist, n)) cerr << "Was Sorted!!!" << endl;
+    else cerr << "Not sorted" << endl;
+#endif
+
+    if (n < GP_RADIX_THRESHOLD)
+    {
+        std::sort(gplist, gplist + n);
+        return;
+    }
+
+    // Reusable scratch buffer eventually.
+    std::vector<GPTYPE> tmp(n);
+
+    GpRadixSort(gplist, n, tmp.data());
+}
+
+
 PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName, bool useCase)
 {
   FCSOURCE sourceId = 0;
@@ -4838,7 +4913,7 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
                     num_hits = GpFread(gplist, nhits, start, fpi_d); /* @@ */
 
                   // Now sort..
-                  // if (num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
+                  // if (num_hits > 1) QSORT_GP(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
 
                   if (CheckField && FirstTime)
                     {
@@ -5084,7 +5159,7 @@ PIRSET INDEX::SoundexSearch (const STRING& QueryTerm, const STRING& FieldName, b
                     num_hits = GpFread(gplist, nhits, start, fpi_d); /* @@ */
 
                   // Now sort..
-                  // if (num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
+                  // if (num_hits > 1) QSORT_GP(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
 
                   if (CheckField && FirstTime)
                     {
@@ -5290,7 +5365,7 @@ PIRSET INDEX::LeftTruncatedSearch(const STRING& QueryTerm, const STRING& FieldNa
               // Read the GPs..
               num_hits = GpFread(gplist, nhits, start, fpi_d);	/* @@ */
               // Now sort..
-              // if ((size_t)num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
+              // if ((size_t)num_hits > 1) QSORT_GP(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
 
               if (CheckField && FirstTime)
                 {
@@ -5554,7 +5629,7 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
               // Read the GPs..
               num_hits = GpFread(gplist, nhits, start, fpi_d);	/* @@ */
               // Now sort..
-              // if ((size_t)num_hits > 1) QSORT(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
+              // if ((size_t)num_hits > 1) QSORT_GP(gplist, num_hits, sizeof(GPTYPE), gpcomp);	// Speed up looking
 
               if (CheckField && FirstTime)
                 {
@@ -6768,8 +6843,8 @@ for (size_t i = 0; i < x; )
                           {
                             STRING S;
                             query.GetRpnTerm (&S);
-                            message_log (LOG_INFO, "Phrase \"%s\" uses all common words (%ld > %ld : %ld) [%d]. \
-                                  Using alternative search heuristic: %s",
+                            message_log (LOG_INFO, "Phrase \"%s\" uses all common words (%ld > %ld : %ld) [%d]. " 
+                                  "Using alternative search heuristic: %s",
                                   FullTerm, (long)ip,  (long)PhraseWaterlimit, (long)CommonWordsThreshold, jj, S.c_str());
                             return Search(query);
                           }
@@ -7025,7 +7100,7 @@ for (size_t i = 0; i < x; )
 // clock_t xx = clock();
         // sort gplist
         if ( x > 1 && (Typ == LeftMatch || Typ == LeftAlwaysMatches) ) /* See XXXX Below */
-          QSORT ( gplist, x, sizeof ( GPTYPE ), gpcomp ); // Speed up looking
+          QSORT_GP ( gplist, x, sizeof ( GPTYPE ), gpcomp ); // Speed up looking
 // xx = clock() - xx;
 // cerr << "Clock = " << xx << endl;
 
