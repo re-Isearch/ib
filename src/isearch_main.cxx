@@ -248,6 +248,17 @@ static void dumpJsonHitTable(FCLIST *HitTable, VIDB *vidb, const RESULT& Result)
 #endif /* Obsolete */
 
 
+static inline void IniUsage(std::ostream& out = std::cout)
+{
+  VIDB  db;
+  STRING code = db.Description();
+  if (!code.IsEmpty())
+    {
+      out << code << endl;
+    }
+}
+
+
 #if 0
 PRSET LoadResultSet(SQUERY *QueryPtr, const STRING& LoadTable)
 {
@@ -804,6 +815,12 @@ int _Isearch_main (int argc, char **argv)
 	      else
 		SQUERY::WriteOperatorHelpJSON(std::cout);
 	      LastUsed = x;
+	    }
+	  else if (Flag.Equals("-ohelp"))
+	    {
+	     IniUsage(std::cerr);
+	     // if (x + 1 == argc) return 0;
+	     LastUsed = x;
 	    }
 	  else if (Flag.Equals("-h"))
 	    {
@@ -2664,7 +2681,8 @@ namespace
       "normalization",
       "-E2_norm | -norm=E2", 
       NULL, 
-      "Use experimental E2 normalization."
+      "Use E2 normalization (pairwise term coherence and collective span). "
+      "Hyperparameters (CoverageFloor, ProximityGain) set in [E2] of datebase ini"
     },    
     {
       "normalization",
@@ -2997,6 +3015,12 @@ namespace
       "-qhelp[=json|txt]",
       NULL,
       "Display available query operators, optionally as JSON."
+    },
+    {
+      "diagnostics",
+      "-ohelp",
+      NULL,   
+      "Display ini options.."
     }
   };
 

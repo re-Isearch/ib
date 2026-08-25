@@ -1740,14 +1740,10 @@ static void HelpTypes()
 
 static void IniUsage()
 {
-#if 0
-  IDB  *db = new IDB();
-#else
-  VIDB  *db = new VIDB();
-#endif
+  VIDB  db;
   cout << "Ini file (<database>.ini) options:" << endl;
 
-  cout << db->Description();
+  cout << db.Description();
 
   cout << "Doctype.ini options may also be embeded into database.ini files as:" << endl;
   cout << "[<Doctype>]  # Doctype, e.g. [TEXT]" << endl;
@@ -1760,7 +1756,7 @@ static void IniUsage()
   cout << "Note: If the software has NOT been installed in /opt/nonmonotonic please confirm that" << endl <<
           "you have created either a user \"asfadmin\" (if you are running ASF) or \"ibadmin\"" << endl <<
           "whose HOME directory points to where the software has been installed." << endl << endl;
-  delete db; // Don't delete on WIN32 ( WIN32 WORKAROUND!!!!!!)
+//  delete db; // Don't delete on WIN32 ( WIN32 WORKAROUND!!!!!!)
 #endif
 }
 

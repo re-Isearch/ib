@@ -3917,6 +3917,7 @@ STRING IDB::Description() const
 # specified in " << DateModifiedEntry << " [" << DbInfoSection <<  "] (Minutes resolution)\n";
   result << LongevityBoostEntry << "=fff.fff # Boost score by difference in days between\n\
 # the date created and date modified of the records.\n";
+  result << "\n" << IRSET::Description();
   result << "\n[HTTP]\nPages=<Path to root of htdoc tree>\n\
 IP-Name=<ip address of server>\n\
 Server=<Server Name, e.g. www.nonmonotonic.com>\n";

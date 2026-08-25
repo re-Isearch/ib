@@ -327,6 +327,8 @@ public:
 
   void     Clear();
 
+  static STRING Description();
+
   ~atomicIRSET();
 private:
   typedef  bool (*peer_t) (const FC&, const FC&);

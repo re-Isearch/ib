@@ -50,6 +50,24 @@ using hit_table_type =
 #endif
 
 
+STRING atomicIRSET::Description()
+{
+  return "IRSET Hyperparamters for normalization (scoring):\n"
+  "[BM25]\n"
+  "K1=<float>\n"
+  "B=<float>\n"
+  "A=<float>\n"
+  "Regency=<float>\n"
+  "Pivot=<int>\n"
+  "# The above are the well documented paramters in BM25\n"
+  "[E2]\n"
+  "CoverageFloor = <float>  # how important completeness is (e.g. 0.5)\n"
+  "ProximityGain = <float>  # how important compactness is (e.g. 1.0)\n"
+  "ProximityScale := what \"close\" means (see ranking.c)\n\n";
+} 
+
+
+
 template <typename Compare>
 inline void CoreQuarryIrsetSort(IRESULT *table, size_t count, Compare compare)
 {
@@ -4693,312 +4711,199 @@ OPOBJ *atomicIRSET::ComputeScoresCosineMetricNormalization (const float TermWeig
   return this;
 }
 
-#if 0
+// First experimental E3 
+
+// CoverageFloor     how important completeness is
+// ProximityGain     how important compactness is
+// ProximityScale    what "close" means
 
 OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
 {
-  if (ComputedS == E2Normalization)
-    return this;
+  const double def_CoverageFloor = 0.5;
+  const double def_ProximityGain = 1.0;
 
-  //
-  // E2 uses the same L2 preparation as the cosine metric.
-  //
-  if (ComputedS != preCosineMetricNormalization && ComputedS != NormalizationL2)
-    {
-      ComputeScoresNormalizationL2 (1) ;
-      ComputedS = preCosineMetricNormalization;
-    }
+  double CoverageFloor = def_CoverageFloor;
+  double ProximityGain  = def_ProximityGain;
 
-  if (TotalEntries == 0)
-    {
-      ComputedS = E2Normalization;
-      return this;
-    }
+  // Set hyperparamters
+  { 
+    STRING val;
+    const STRING section("E2");
 
+    val = Parent->ProfileGetString(section, "CoverageFloor");
+    if (!val.IsEmpty()) CoverageFloor = val.GetDouble();
 
-  if ((ComputedS == preCosineMetricNormalization || ComputedS == NormalizationL2) && Parent)
-    {
-      UINT MaxAuxCount = 1;
+    val = Parent->ProfileGetString(section, "ProximityGain");
+    if (!val.IsEmpty())  ProximityGain = val.GetDouble();
 
-      //
-      // Determine the strongest term coverage present
-      // in this result set.
-      //
-      for (size_t i = 0; i < TotalEntries; i++)
-        {
-          const UINT aux = Table[i].GetAuxCount();
+    //
+    // Sanity.
+    //
+    // CoverageFloor is a fraction.
+    //
+    if (CoverageFloor < 0.0 || CoverageFloor > 1.0)
+      CoverageFloor = def_CoverageFloor;
+    //
+    // Zero is meaningful: disable proximity.
+    //
+    if (ProximityGain < 0.0) ProximityGain = def_ProximityGain;
 
-          if (aux > MaxAuxCount)
-            MaxAuxCount = aux;
-        }
-
-      MinScore = MAXFLOAT;
-      MaxScore = 0.0;
-
-      for (size_t i = 0; i < TotalEntries; i++)
-        {
-          DOUBLE Score = Table[i].GetScore();
-
-          const UINT AuxCount = Table[i].GetAuxCount();
-
-          const DOUBLE Coverage = MaxAuxCount ?  (DOUBLE)AuxCount / (DOUBLE)MaxAuxCount : 1.0;
-
-          //
-          // Full query coverage = 1.0
-          // Partial coverage approaches 0.5.
-          //
-          const DOUBLE CoverageWeight = 0.5 + 0.5 * Coverage;
-
-          DOUBLE ProximityWeight = 1.0;
-
-          //
-          // Proximity only has meaning when more than
-          // one distinct search term contributed.
-          //
-          if (AuxCount > 1)
-            {
-              const auto Hits = Table[i].GetHitTable();
-
-#if 0 /* DEBUG New Source ID */
-for (const auto& hit : Hits) {
-  cerr << "Source=" << hit.GetSourceId()
-       << " [" << hit.GetFieldStart()
-       << "," << hit.GetFieldEnd()
-       << "]"
-       << endl;
-}
-
-#endif
-
-              if (Hits.Size() > 1)
-                {
-                  int MinDistance = INT_MAX;
-
-                  auto it = Hits.begin();
-
-                  FC oldFc = *it++;
-
-                  for (; it != Hits.end(); ++it)
-                    {
-                      const FC Fc = *it;
-
-                      int Distance;
-
-                      if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
-                        Distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
-
-                      else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
-                        Distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
-
-                      else
-                        Distance = 0;
-
-                      if (Distance < MinDistance)
-                        MinDistance = Distance;
-
-                      oldFc = Fc;
-                    }
-
-                  if (MinDistance != INT_MAX)
-                    {
-                      const DOUBLE DistanceWeight = _ib_Distrank_weight_factor( MinDistance);
-
-                      //
-                      // A partial query match gets only
-                      // part of the proximity bonus.
-                      //
-                      ProximityWeight = 1.0 + (DistanceWeight - 1.0) * Coverage;
-                    }
-                }
-            }
-
-          Score *= CoverageWeight * ProximityWeight * TermWeight;
-
-          Table[i].SetScore(Score);
-
-          if (Score > MaxScore)
-            MaxScore = Score;
-
-          if (Score < MinScore)
-            MinScore = Score;
-        }
-
-      ComputedS = E2Normalization;
-    }
-
-  return this;
-}
-
-#else
-
-// This will become E3 or BM25TP
-OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
-{
-  if (ComputedS == E2Normalization)
-    return this;
-
-  //
-  // E2 uses the same L2 preparation as the cosine metric.
-  //
-  if (ComputedS != preCosineMetricNormalization && ComputedS != NormalizationL2)
-    {
-      ComputeScoresNormalizationL2 (1) ;
-      ComputedS = preCosineMetricNormalization;
-    }
-
-  if (TotalEntries == 0)
-    {
-      ComputedS = E2Normalization;
-      return this;
-    }
-
-
-  if ((ComputedS == preCosineMetricNormalization || ComputedS == NormalizationL2) && Parent)
-    {
-      UINT MaxAuxCount = 1;
-
-      //
-      // Determine the strongest term coverage present
-      // in this result set.
-      //
-      for (size_t i = 0; i < TotalEntries; i++)
-        {
-          const UINT aux = Table[i].GetAuxCount();
-
-          if (aux > MaxAuxCount)
-            MaxAuxCount = aux;
-        }
-
-      MinScore = MAXFLOAT;
-      MaxScore = 0.0;
-
-      for (size_t i = 0; i < TotalEntries; i++)
-        {
-          DOUBLE Score = Table[i].GetScore();
-
-          const UINT AuxCount = Table[i].GetAuxCount();
-
-          const DOUBLE Coverage = MaxAuxCount ?  (DOUBLE)AuxCount / (DOUBLE)MaxAuxCount : 1.0;
-
-          //
-          // Full query coverage = 1.0
-          // Partial coverage approaches 0.5.
-          //
-          const DOUBLE CoverageWeight = 0.5 + 0.5 * Coverage;
-
-          DOUBLE ProximityWeight = 1.0;
-
-          //
-          // Proximity only has meaning when more than
-          // one distinct search term contributed.
-          //
-          if (AuxCount > 1)
-            {
-              const auto Hits = Table[i].GetHitTable();
-
-#if 0 /* DEBUG New Source ID */
-
-using SourcePair = std::pair<FCSOURCE, FCSOURCE>;
-
-std::map<SourcePair, INT> MinDistances;
-
-for (auto a = Hits.begin(); a != Hits.end(); ++a) {
-  for (auto b = std::next(a); b != Hits.end(); ++b) {
-
-    FCSOURCE sa = a->GetSourceId();
-    FCSOURCE sb = b->GetSourceId();
-
-    if (sa == sb || sa == 0 || sb == 0)
-      continue;
-
-    if (sa > sb)
-      std::swap(sa, sb);
-
-    const FC& fa = *a;
-    const FC& fb = *b;
-
-    int distance;
-
-    if (fa.GetFieldStart() > fb.GetFieldEnd()) distance = fa.GetFieldStart() - fb.GetFieldEnd();
-    else if (fb.GetFieldStart() > fa.GetFieldEnd()) distance = fb.GetFieldStart() - fa.GetFieldEnd();
-    else distance = 0;
-
-    const SourcePair pair(sa, sb);
-
-    auto found = MinDistances.find(pair);
-
-    if (found == MinDistances.end() ||
-        distance < found->second)
-      MinDistances[pair] = distance;
+    message_log(LOG_DEBUG, "[E2] CoverageFloor=%.2f, ProximityGain=%.2f",
+                CoverageFloor, ProximityGain);
   }
-}
 
-for (const auto& entry : MinDistances)
-{
-  cerr << entry.first.first
-       << " <-> "
-       << entry.first.second
-       << "  MinDistance = "
-       << entry.second
-       << endl;
-}
+  if (ComputedS == E2Normalization)
+    return this;
+
+  //
+  // E3 starts from the same L2 preparation as E2.
+  //
+  if (ComputedS != preCosineMetricNormalization &&
+      ComputedS != NormalizationL2)
+    {
+      ComputeScoresNormalizationL2(1);
+      ComputedS = preCosineMetricNormalization;
+    }
+
+  if (TotalEntries == 0)
+    {
+      ComputedS = E2Normalization;
+      return this;
+    }
+
+  if ((ComputedS == preCosineMetricNormalization ||
+       ComputedS == NormalizationL2) && Parent)
+    {
+      UINT MaxAuxCount = 1;
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          const UINT aux = Table[i].GetAuxCount();
+
+          if (aux > MaxAuxCount)
+            MaxAuxCount = aux;
+        }
+
+      MinScore = MAXFLOAT;
+      MaxScore = 0.0;
+
+      for (size_t i = 0; i < TotalEntries; i++)
+        {
+          DOUBLE Score = Table[i].GetScore();
+
+          const UINT AuxCount = Table[i].GetAuxCount();
+
+          const DOUBLE Coverage = MaxAuxCount ? (DOUBLE)AuxCount / (DOUBLE)MaxAuxCount : 1.0;
+
+          //
+          // Preserve E2's adaptive coverage behaviour.
+          //
+	  const DOUBLE CoverageWeight = CoverageFloor + (1.0 - CoverageFloor) * Coverage;
+	  DOUBLE ProximityWeight = 1.0;
 
 
-std::set<FCSOURCE> Sources;
-
-for (const auto& hit : Hits)
-{
-  const FCSOURCE source = hit.GetSourceId();
-  if (source)
-    Sources.insert(source);
-}
-
-cerr << "Sources=" << Sources.size()
-     << " Pairs=" << MinDistances.size()
-     << " Expected="
-     << (Sources.size() * (Sources.size() - 1)) / 2
-     << endl;
-
-#endif /* DEBUG */
+          if (AuxCount > 1)
+            {
+              const auto Hits = Table[i].GetHitTable();
 
               if (Hits.Size() > 1)
                 {
-                  int MinDistance = INT_MAX;
+                  using SourcePair = std::pair<FCSOURCE, FCSOURCE>;
 
-                  auto it = Hits.begin();
+                  std::map<SourcePair, INT> MinDistances;
 
-                  FC oldFc = *it++;
-
-                  for (; it != Hits.end(); ++it)
+                  //
+                  // Minimum distance for every DISTINCT
+                  // source pair.
+                  //
+                  for (auto a = Hits.begin(); a != Hits.end(); ++a)
                     {
-                      const FC Fc = *it;
+                      for (auto b = std::next(a); b != Hits.end(); ++b)
+                        {
+                          FCSOURCE sa = a->GetSourceId();
+                          FCSOURCE sb = b->GetSourceId();
 
-                      int Distance;
+                          //
+                          // Same query term cannot provide
+                          // proximity evidence with itself.
+                          //
+                          if (sa == sb || sa == 0 || sb == 0)
+                            continue;
 
-                      if (Fc.GetFieldStart() > oldFc.GetFieldEnd())
-                        Distance = Fc.GetFieldStart() - oldFc.GetFieldEnd();
+                          if (sa > sb)
+                            std::swap(sa, sb);
 
-                      else if (oldFc.GetFieldStart() > Fc.GetFieldEnd())
-                        Distance = oldFc.GetFieldStart() - Fc.GetFieldEnd();
+                          const FC& fa = *a;
+                          const FC& fb = *b;
 
-                      else
-                        Distance = 0;
+                          INT Distance;
 
-                      if (Distance < MinDistance)
-                        MinDistance = Distance;
+                          if (fa.GetFieldStart() > fb.GetFieldEnd())
+                            Distance = fa.GetFieldStart() - fb.GetFieldEnd();
 
-                      oldFc = Fc;
+                          else if (fb.GetFieldStart() > fa.GetFieldEnd())
+                            Distance = fb.GetFieldStart() - fa.GetFieldEnd();
+
+                          else
+                            Distance = 0;
+
+                          const SourcePair Pair(sa, sb);
+
+                          auto found =
+                            MinDistances.find(Pair);
+
+                          if (found == MinDistances.end() ||
+                              Distance < found->second)
+                            MinDistances[Pair] = Distance;
+                        }
                     }
 
-                  if (MinDistance != INT_MAX)
+                  if (!MinDistances.empty())
                     {
-                      const DOUBLE DistanceWeight = _ib_Distrank_weight_factor( MinDistance);
+                      DOUBLE LogPairWeight = 0.0;
+                      INT MaxPairDistance = 0;
+                      size_t PairCount = 0;
+
+                      for (const auto& entry : MinDistances)
+                        {
+                          const INT Distance = entry.second;
+
+                          const DOUBLE Weight = _ib_Distrank_weight_factor( Distance);
+
+                          //
+                          // Geometric mean avoids the
+                          // query-length explosion of a
+                          // raw product.
+                          //
+                          LogPairWeight += log(Weight);
+
+                          if (Distance > MaxPairDistance)
+                            MaxPairDistance = Distance;
+
+                          PairCount++;
+                        }
+
+                      const DOUBLE PairWeight = exp(LogPairWeight / (DOUBLE)PairCount);
 
                       //
-                      // A partial query match gets only
-                      // part of the proximity bonus.
+                      // First approximation of collective
+                      // spread. We'll replace this with the
+                      // minimum full-source covering window.
                       //
-                      ProximityWeight = 1.0 + (DistanceWeight - 1.0) * Coverage;
+                      const DOUBLE SpanWeight = _ib_Distrank_weight_factor( MaxPairDistance);
+
+                      //
+                      // Both are 1..4-ish, and their
+                      // geometric mean stays 1..4-ish.
+                      //
+                      const DOUBLE CompactnessWeight = sqrt(PairWeight * SpanWeight);
+
+                      //
+                      // Preserve E2 behaviour: partial
+                      // coverage receives only part of the
+                      // positional bonus.
+                      //
+                      ProximityWeight = 1.0 + (CompactnessWeight - 1.0) * Coverage;
                     }
                 }
             }
@@ -5019,7 +4924,6 @@ cerr << "Sources=" << Sources.size()
 
   return this;
 }
-#endif
 
 /*
  Dave Hawking's AF1:
@@ -5076,21 +4980,20 @@ OPOBJ *atomicIRSET::ComputeScoresNormalizationBM25(const float TermWeight)
    {
       const STRING section ("BM25");
       // Set constants (at first run)
-      static double k1 = -1.0, b = -1.0, powA = -1.0, recS = 0.0;
-      static int pivotY = 0;
-      if (k1 < 0.0) {
+      double k1 = 1.2, b = 0.75, powA = 0.0, recS = 0.0;
+      int pivotY = 0;
+      {
 	STRING val;
-	// TODO: Make these configurable!
 	val = Parent->ProfileGetString(section, "K1");
-        k1 = val.GetDouble();
+	if (!val.IsEmpty()) k1 = val.GetDouble();
         val = Parent->ProfileGetString(section, "B");
-	b = val.GetDouble();
+	if (!val.IsEmpty()) b = val.GetDouble();
 	val = Parent->ProfileGetString(section, "A");
-        powA = val.GetDouble();
+	if (!val.IsEmpty()) powA = val.GetDouble();
 	val = Parent->ProfileGetString(section, "Regency");
-	recS = val.GetDouble(); 
+	if (!val.IsEmpty()) recS = val.GetDouble(); 
 	val = Parent->ProfileGetString(section, "Pivot");
-	pivotY = val.GetInt(); 
+	if (!val.IsEmpty()) pivotY = val.GetInt(); 
 	// Alignment
 	if (recS < 0.0) recS = 0.0;
 	if (k1 <= 0.0) k1 = 1.2;
