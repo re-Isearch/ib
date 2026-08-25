@@ -1130,28 +1130,28 @@ int _Isearch_main (int argc, char **argv)
 	    {
 	      if (++x >= argc)
 		{
-		  message_log (LOG_FATAL, "Usage: No value specified after -enddoc.");
+		  message_log (LOG_FATAL, "Usage: No value specified after %s.", Flag.c_str());
 		  return 0;
 		}
 	      endDoc = atoi(argv[x]);
 	      if (endDoc > TopK) endDoc = TopK;
 	      LastUsed = x;
 	    }
-	  else if (Flag.Equals ("-table"))
+	  else if (Flag.Equals ("-table") || Flag.Equals("-save"))
 	    {
               if (++x >= argc)
                 {
-                  message_log (LOG_FATAL, "Usage: No value specified after -table.");
+                  message_log (LOG_FATAL, "Usage: No value specified after %s.", Flag.c_str());
                   return 0; 
                 }
               ResTable = argv[x];
               LastUsed = x; 
 	    }
-          else if (Flag.Equals ("-D"))
+          else if (Flag.Equals ("-D") || Flag.Equals("-load"))
             {
               if (++x >= argc)
                 {
-                  message_log (LOG_FATAL, "Usage: No value specified after -D.");
+                  message_log (LOG_FATAL, "Usage: No value specified after %s.", Flag.c_str());
                   return 0;
                 }
               LoadTable = argv[x];
@@ -2960,10 +2960,16 @@ namespace
     },
     {
       "storage",
-      "-table",
+      "-save",
       "file",
       "Save the result set into the specified file."
     },
+    {         
+      "storage",
+      "-load",
+      "file", 
+      "Load a result set from the specified file."
+    },   
 
     /*
      * Diagnostics and process control
@@ -3441,18 +3447,17 @@ static void HelpUsageText( const char *progname, std::ostream& out)
         "Examples: " << prog << " -d POETRY truth 'beaut*' urn:2\n" << 
         "          " << prog << " -d FTP -headline L C++\n" <<
         "          " << prog << " -d WEBPAGES title/library\n" << 
-        "          " << prog << " -d WEBPAGE  -rpn library WITHIN:title\n" << 
-        "          " << prog << " -d WEBPAGES library WITHIN:title\n" << 
+        "          " << prog << " -d WEBPAGES  -rpn \"Harvard library\" WITHIN:title\n" << 
         "          " << prog << " -d STORIES -rpn title/cat title/dog OR title/mouse OR\n" << 
         "          " << prog << " -d STORIES -infix title/(cat or dog or mouse)\n" << 
         "          " << prog << " -d POETRY -rpn speaker/hamlet line/love AND:scene\n" << 
         "          " << prog << " -d POETRY -infix (speaker/hamlet and:scene line/love)\n" << 
         "          " << prog << " -d POETRY -infix act/(speaker/hamlet and:scene line/love)\n" << 
-        "          " << prog << " -d MAIL -H -infix from/edz AND 'subject/\"Isearch Doctypes\"'\n" << 
-        "          " << prog << " -d KFILM -XML -show -rpn microsoft NT AND windows NOT\n" << 
-        "          " << prog << " -d BILLS -rpn vendor/BSn price<100 AND\n" << 
-        "          " << prog << " -d NEWS  -rpn unix WITHIN:2006\n" << 
-        "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -rpn out spot PEER" << endl <<
+        "          " << prog << " -d MAIL -H -infix from/edz AND subject/CoreQuarry=\n" << 
+        "          " << prog << " -d BILLS -rpn vendor/NONMONOTONIC price<100 AND\n" << 
+	"          " << prog << " -d NEWS -rpn AMD GPU NVIDIA MAYBE PROMOTE\n" << 
+        "          " << prog << " -d NEWS  -rpn xLSTM WITHIN:2026\n" << 
+        "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -P speech/line  -rpn out spot PEER" << endl <<
         "Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short.\n" << endl <<
         "Additional \"Special\" elements: R for Raw, H for Highlight/Hits; and if they exist," << endl <<
         "L for location/redirect and M for metadata." << endl << endl <<
