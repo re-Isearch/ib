@@ -582,6 +582,9 @@ Low level index <database>.ini Options:\n\
 		 , CommonWordsSection.c_str()
 		 , ThresholdEntry.c_str()
  );
+#ifdef VECTOR_INDEX
+    result << EmbeddingIndexer::Description() << "\n";
+#endif
     result << "\
 Geospatial RECT{North West South East} [Note the canonical order]\n\
 queries need to have their data fields defined via Gpoly-types or:\n\
@@ -1345,15 +1348,13 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	 {
 	   // Init the Embedding Indexer if not already
 	   EmbeddingIndexer *&indexer = EmbeddingIndexerFor((INT)FieldType);
-	   if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
+	   if (indexer == NULL) indexer = new EmbeddingIndexer(Parent, (STRING)FieldType);
 	 }
-#if 0
 	case FIELDTYPE::db_hnsw_raw:
-	/* No internal embedder.  No text-to-vector conversion.
+	/* No internal embedder YET.  No text-to-vector conversion.
 	   Index dimension comes from configuration/index metadata.
 	   Every inserted vector must match that dimension.
 	   Every search vector must match that dimension.  */
-#endif
 #endif
 	  break;
 	case FIELDTYPE::db_nsg:
@@ -1510,6 +1511,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	  case FIELDTYPE::db_hnsw:
 	  case FIELDTYPE::db_hnsw2:
 	  case FIELDTYPE::db_hnsw3:
+          case FIELDTYPE::db_hnsw_raw:
 	    // Don't open any file.. Our append does that
 	    break;
 #endif
@@ -1626,9 +1628,29 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
               break;
             }
 
-            case FIELDTYPE::db_nsg: //
-            case FIELDTYPE::db_IVFFlat:
-              message_log (LOG_ERROR, "NSG and IVFFlat algorithms Not Yet Implemented. Using HSNW.");
+            case FIELDTYPE::db_hnsw_raw:
+	    // For RAW if we don't have a indexer we need to figure out the dimension 
+#ifdef VECTOR_INDEX
+	    if (embeddingIndexer_raw == NULL) {
+	      // determine the dimension of the vector
+	      size_t dim = EmbeddingIndexer::Float32VectorDimension(Buffer);
+	      // Now we can create an index with a given dimension
+	      if (dim == 0) {
+		if (strlen(Buffer) > 200) 
+		  message_log(LOG_ERROR, "Supplied encoded vector \"%s\" has unknown dimension", Buffer.c_str());
+	       } else
+		embeddingIndexer_raw = new EmbeddingIndexer(Parent, dim);
+	    }
+	    if (embeddingIndexer_raw &&
+		embeddingIndexer_raw->Ok() &&
+		embeddingIndexer_raw->Append (Buffer, FieldName, FC(gp, gp+flen-1)))
+	      items++;
+	    break;
+#endif
+	    case FIELDTYPE::db_nsg: //
+	    case FIELDTYPE::db_IVFFlat:
+	      message_log (LOG_ERROR, "NSG and IVFFlat algorithms Not Yet Implemented. Using HSNW.");
+	      type = FIELDTYPE::db_hnsw;
 	    case FIELDTYPE::db_hnsw: /* HNSW */
 	    case FIELDTYPE::db_hnsw2:
 	    case FIELDTYPE::db_hnsw3:
@@ -1640,7 +1662,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
               STRING  text = getCharset().ToUTF(Buffer);
 	      // Create if not yet already created...
 	      EmbeddingIndexer *&indexer = EmbeddingIndexerFor(type);
-	      if (indexer == NULL) indexer = new EmbeddingIndexer(Parent);
+	      if (indexer == NULL) indexer = new EmbeddingIndexer(Parent, (STRING)FieldType);
 
               if (indexer->Ok() && indexer->Append (text, FieldName, FC(gp, gp+flen-1)))
 		 items++; 
@@ -3348,7 +3370,7 @@ STRING INDEX::GetFlushIndexSlot()
 #endif
 
 bool INDEX::FlushIndexFiles(PUCHR MemoryData,
-                                   PGPTYPE NewMemoryIndex, GPTYPE MemoryIndexLength, GPTYPE GlobalStart)
+	PGPTYPE NewMemoryIndex, GPTYPE MemoryIndexLength, GPTYPE GlobalStart)
 {
   Parent->ffGC();
   Parent->IndexingStatus (IndexingStatusFlushing);
@@ -3495,11 +3517,11 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
 
           // We now have the length of the word = len
           IndexingTotalBytesCount += len;
-          IndexingTotalWordsCount++;
+	  IndexingTotalWordsCount++;
 
           // we then can caculate TotalWordBytes/TotalWordCount for the
           // average word length and use it to "estimate" a word metric
-          if (len > SisLimit) IndexingWordsTruncated++;;
+          if (len > SisLimit) IndexingWordsTruncated++;
           if (len > IndexingWordsLongestLength)  IndexingWordsLongestLength = len;
 
           if (includedTerm)
@@ -4199,10 +4221,10 @@ PIRSET INDEX::Search (const QUERY& Query)
 		message_log(LOG_DEBUG, "Vector Search within '%s'", FieldName.c_str());
 		// If not created before we create now as searchOnly
                 EmbeddingIndexer *&indexer = EmbeddingIndexerFor((INT)aFieldType);
-		if (indexer == NULL) indexer = new EmbeddingIndexer (Parent, true);
+		if (indexer == NULL) indexer = new EmbeddingIndexer (Parent, (STRING)aFieldType, true);
 		if (indexer->Ok()) { // HNSW index
 		   Method = HybridNormalization ; // Need to mix/match with Vectors!!  April 2026
-                   NewIrset = indexer->search(FieldName, Term);
+                   NewIrset = indexer->search(FieldName, Term); // This is where we do the Vector Search
 		} else
 		   Parent->SetErrorCode( 3 ); // Temporarily not available
 #else

@@ -135,6 +135,7 @@ static struct DataType {
   {"ipv6",           n,   FIELDTYPE::dotnumber,     NULL},
   {"flat",           f,   FIELDTYPE::db_IVFFlat,    NULL},
   {"sog",            g,   FIELDTYPE::db_nsg,        NULL},
+  {"hnsw1",         _V,   FIELDTYPE::db_hnsw,       NULL},
   {"vector",        _V,   FIELDTYPE::db_hnsw,       NULL},
   {"vector2",       _V,   FIELDTYPE::db_hnsw2,      NULL},
   {"vector3",       _V,   FIELDTYPE::db_hnsw3,      NULL},

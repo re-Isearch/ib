@@ -132,6 +132,8 @@ protected:
   {
     switch (StatusMessage)
       {
+	case IndexingStatusInit:
+	  message_log (LOG_DEBUG, "Init ...");
 	case IndexingStatusReading:
 	  message_log (LOG_INFO, "Reading files...");
 	  break;
@@ -158,6 +160,9 @@ protected:
 	  break;
 	case IndexingStatusMerging:
 	  message_log (LOG_INFO, "Merging indexes (%d indices)...", arg);
+	  break;
+	case IndexingStatusClose:
+	  message_log (LOG_DEBUG, "Finishing ...");
 	  break;
       }
   };
@@ -1129,6 +1134,12 @@ limitations under the License.  " << endl;
 	      LastUsed = x;
               if (x + 1 == argc) return 0;
 	    }
+	  else if (Flag.Equals ("-ohelp"))
+	    {
+	      IniUsage();
+	      LastUsed = ++x;
+	      if (x + 1 == argc) return 0;
+	    }
 	  else if (Flag.Equals ("-help"))
 	    {
 	      LastUsed = 0;
@@ -1882,7 +1893,7 @@ static void Usage()
   << " -help d[octypes]   // Print the doctype classes list (same as -thelp)" << endl
   << " -help l[ang]       // Print the language help (same as -lang help)" << endl
   << " -help l[ocale]     // Print the locale list (same as -locale help)" << endl
-  << " -help o[ptions]    // Print the options (db.ini) help." << endl
+  << " -help o[ptions]    // Print the options (db.ini) help. Same as -ohelp" << endl
   << " -help t[types]     // Print the currently supported data types." << endl
   << " -help s[special]   // Print the compiled in (see ctype.c) special in-term characters" << endl
   << " -thelp             // Show available doctype base classes." << endl

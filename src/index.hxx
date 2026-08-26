@@ -31,6 +31,7 @@ Description:	Class INDEX
 #endif
 
 #include <map>
+#include <atomic>
 
 class FPT;
 class Dictionary;
@@ -413,9 +414,11 @@ private:
   EmbeddingIndexer *embeddingIndexer = nullptr;
   EmbeddingIndexer *embeddingIndexer2 = nullptr;
   EmbeddingIndexer *embeddingIndexer3 = nullptr;
+  EmbeddingIndexer *embeddingIndexer_raw = nullptr;
 
   EmbeddingIndexer *&EmbeddingIndexerFor(int type) {       
     switch (type) {
+    case FIELDTYPE::db_hnsw_raw: return embeddingIndexer_raw;
     case FIELDTYPE::db_hnsw2: return embeddingIndexer2;
     case FIELDTYPE::db_hnsw3: return embeddingIndexer3;
     default:                  return embeddingIndexer;
@@ -442,10 +445,13 @@ private:
 
   std::map<std::pair<const std::string, FIELDTYPE>, FILE*> ActiveFieldStreams;
 
-  volatile GPTYPE IndexingTotalBytesCount;
-  volatile GPTYPE IndexingTotalWordsCount;
-  volatile GPTYPE IndexingWordsTruncated;
-  volatile GPTYPE IndexingWordsLongestLength;
+
+  // Replace with std::atomic<GPTYPE> IndexingTotalWordsCount{0};
+  // for increment IndexingTotalWordsCount.fetch_add(1, std::memory_order_relaxed);
+  GPTYPE IndexingTotalBytesCount{0};
+  GPTYPE IndexingTotalWordsCount{0};
+  GPTYPE IndexingWordsTruncated{0};
+  GPTYPE IndexingWordsLongestLength{0};
 
   volatile bool ActiveIndexing;
 
