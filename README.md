@@ -10,14 +10,24 @@ LLMs, by contrast, tend to see retrieved text as relatively flat. Once content i
 
 Structural and positional search gives the agent a way to preserve that information before generation: retrieve the right relationship, not just the right words. For agentic search, operators such as NEAR, BEFORE, PEER, WITHIN, and field constraints are therefore not syntactic luxuries; they are tools for turning a flat language model into a much more precise information-seeking system.
 
-This is what we call "Agentic RAG 2.0”
-- RAG 1.0: retrieve chunks, then ask the LLM to reason over them.
-- Agentic RAG 2.0: let the agent actively construct and refine expressive retrieval plans using Boolean, structural, positional, scoring, and relaxation operators.
+By examining coverage we can also addresss one of the weakest parts of conventional RAG: the retrieval unit is usually chosen before the query is known. 
 
-The key idea is that the agent is no longer just consuming retrieved context. It is programming the retrieval process:
-"RAG gave LLMs documents. Agentic RAG 2.0 gives agents a retrieval algebra."
+Since we can select any element as unit of retrieval we can also heuristically:
+<PRE>
+document structure
+      +
+query evidence
+      +
+distinct-term coverage
+      +
+compactness
+      ↓
+derive the appropriate passage
+</PRE>
 
+That means the LLM can get a passage whose boundaries have semantic justification rather than just a bunch of 512 byte chunks.
 
+For a play, that might be a speech. For a scientific article, an abstract or paragraph. For legislation, a clause or section. For source code, a function or block. The unit is whatever node in the document hierarchy best concentrates the query evidence.
 
 ### NEWS
 
