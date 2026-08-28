@@ -4,7 +4,9 @@
 
 IB (re-Isearch) no longer will compile with nearly "any" C++ compiler ever made but increasingly uses C++17+ constructs. The decision was motivated by the observation that platforms that don't have a modern C++ compiler are quite rarethese days and anyway highly unlikely to be used in 2026 for enterprize search. Given that Schmate (the vector extensions) exploits modern C++ and SIMD instructions it made no longer any sense to continue to be language constrained.  For those that need to run on archaic platforms the re-Isearch distribution still exists albeit now frozen.. 
 
-The increasing focus is for the next generation of LLM and RL agents.  Agents need more than keyword matching. They need to express relationships: this term occurs inside that field, these concepts appear near each other, this phrase comes before that phrase, these facts belong to the same structural element. Positional and structural operators let an agent ask about the shape of information, not merely its presence.
+### re-Isearch IB Core Focus:
+
+While still wholly suitable for human researchers, an increasing use case is services for the next generation of LLM and RL agents.  Agents need more than keyword matching. They need to express relationships: this term occurs inside that field, these concepts appear near each other, this phrase comes before that phrase, these facts belong to the same structural element. Positional and structural operators let an agent ask about the shape of information, not merely its presence.
 
 LLMs, by contrast, tend to see retrieved text as relatively flat. Once content is turned into tokens, chunks, or embeddings, much of the original document structure—fields, containment, adjacency, order, hierarchy—can become weak or implicit. An LLM may infer those relationships, but inference is not the same as querying them precisely.
 
