@@ -37,10 +37,18 @@ Super-cover utility: policy-level value of returning a larger unit.
 Utility(U)=ContainedEnergy(U)−λDispersion(U)−ρExpansion(U)
 */
 
-struct EVIDENCE_COVER {
-    FC extent;
-    DOUBLE Energy;
-    DOUBLE Dispersion;
+struct CONTEXT
+{
+  FC      EvidenceFc;
+  FC      ContainerFc;
+
+  STRING  Path;
+
+  UINT    Coverage;
+  UINT    PossibleCoverage;
+
+  DOUBLE  Compactness;
+  DOUBLE  Score;
 };
 
 

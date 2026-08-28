@@ -270,6 +270,7 @@ STRING RESULT::GetXMLHighlightRecordFormat(int pageno, off_t offset) const
 // fields (for example not just in a "body"). At this time I'm not sure it would be
 // worth the effort much less if the results would really be "that much" better.
 
+#if 0
 FC RESULT::GetBestContextHit() const
 {
   auto current = HitTable.begin();
@@ -306,6 +307,7 @@ FC RESULT::GetBestContextHit() const
 
   return best;
 }
+#endif
 
 
 bool RESULT::PresentBestContextHit(STRING *StringBuffer, STRING *Term,
@@ -891,3 +893,583 @@ RESULT::~RESULT()
 #endif
 }
 
+
+static GPTYPE EvidenceGap(const FC& a, const FC& b)
+{
+    if (a.GetFieldEnd() < b.GetFieldStart())
+        return b.GetFieldStart() - a.GetFieldEnd();
+
+    if (b.GetFieldEnd() < a.GetFieldStart())
+        return a.GetFieldStart() - b.GetFieldEnd();
+
+    return 0;
+}
+
+
+static bool Contains(const FC& outer, const FC& inner)
+{
+    return outer.GetFieldStart() <= inner.GetFieldStart() &&
+           outer.GetFieldEnd()   >= inner.GetFieldEnd();
+}
+
+static bool Dominates(
+    const EVIDENCE_COVER& a,
+    const EVIDENCE_COVER& b)
+{
+    return Contains(b.extent, a.extent) &&
+           a.Energy     >= b.Energy &&
+           a.Dispersion <= b.Dispersion;
+}
+
+struct EVIDENCE_COVER_PARAMS
+{
+    double EvidenceWeight   = 1.0;
+    double DispersionWeight = 1.0;
+    double DispersionDecay  = 32.0;
+};
+
+
+#if 0
+double EVIDENCE_COVER::Rank(const EVIDENCE_COVER_PARAMS& p) const
+{
+    const double compactness =
+        1.0 / (1.0 + Dispersion / p.DispersionDecay);
+
+    return pow(Energy, p.EvidenceWeight) *
+           pow(compactness, p.DispersionWeight);
+}
+
+
+static COVER_WORK AddOpaqueEvidence(
+    const COVER_WORK& lexical,
+    const HIT& opaque,
+    UINT totalEvidence)
+{
+    COVER_WORK result = lexical;
+
+    const GPTYPE gap =
+        EvidenceGap(lexical.cover.extent, opaque);
+
+    const GPTYPE start =
+        std::min(lexical.cover.extent.GetFieldStart(),
+                 opaque.GetFieldStart());
+
+    const GPTYPE end =
+        std::max(lexical.cover.extent.GetFieldEnd(),
+                 opaque.GetFieldEnd());
+
+    result.cover.extent = FC(start, end);
+
+    //
+    // Existing dispersion represents (N-1) relationships.
+    // Adding another independent evidence item adds one more.
+    //
+    const DOUBLE accumulated =
+        lexical.cover.Dispersion *
+        (lexical.evidence > 1
+            ? lexical.evidence - 1
+            : 0);
+
+    ++result.evidence;
+
+    result.cover.Dispersion =
+        result.evidence > 1
+            ? (accumulated + gap) /
+              (DOUBLE)(result.evidence - 1)
+            : 0.0;
+
+    result.cover.Energy =
+        totalEvidence
+            ? (DOUBLE)result.evidence /
+              (DOUBLE)totalEvidence
+            : 1.0;
+
+    return result;
+}
+#endif
+
+
+
+using HIT = IRESULT::hit_type;
+
+//
+// First experimental parameters.
+//
+// Later these can be moved into the ranking/profile configuration.
+//
+static const DOUBLE EvidenceWeight   = 1.0;
+static const DOUBLE DispersionWeight = 1.0;
+static const DOUBLE DispersionDecay  = 32.0;
+
+
+struct COVER_CANDIDATE
+{
+  EVIDENCE_COVER cover;
+  UINT           evidence;
+};
+
+
+static FCSOURCE HitSource(const HIT& hit)
+{
+#if _TRACK_TERM_IDENTITY
+  return hit.GetSourceId();
+#else
+  return 0;
+#endif
+}
+
+
+static bool HitByStart(const HIT& a, const HIT& b)
+{
+  if (a.GetFieldStart() != b.GetFieldStart())
+    return a.GetFieldStart() < b.GetFieldStart();
+
+  return a.GetFieldEnd() < b.GetFieldEnd();
+}
+
+
+static FC CoverExtent(const FC& a, const FC& b)
+{
+  return FC(
+    std::min(a.GetFieldStart(), b.GetFieldStart()),
+    std::max(a.GetFieldEnd(),   b.GetFieldEnd()));
+}
+
+
+static DOUBLE ExtentWidth(const FC& fc)
+{
+  const GPTYPE start = fc.GetFieldStart();
+  const GPTYPE end   = fc.GetFieldEnd();
+
+  return end >= start
+       ? static_cast<DOUBLE>(end - start + 1)
+       : 0.0;
+}
+
+
+//
+// For this first trial:
+//
+//   Energy     = how much independent evidence participates.
+//
+//   Dispersion = how much address space is required per
+//                participating evidence item.
+//
+// Using extent width here is intentional.  A datatype/vector
+// hit covering an entire paragraph should be less specific than
+// one covering a short field, even when lexical evidence lies
+// entirely inside it.
+//
+static COVER_CANDIDATE MakeCover(
+    const FC& extent,
+    UINT evidence,
+    UINT possibleEvidence)
+{
+  COVER_CANDIDATE candidate;
+
+  candidate.cover.extent = extent;
+  candidate.evidence     = evidence;
+
+  candidate.cover.Energy =
+    possibleEvidence
+      ? static_cast<DOUBLE>(evidence) /
+        static_cast<DOUBLE>(possibleEvidence)
+      : 1.0;
+
+  candidate.cover.Dispersion =
+    evidence
+      ? ExtentWidth(extent) /
+        static_cast<DOUBLE>(evidence)
+      : ExtentWidth(extent);
+
+  return candidate;
+}
+
+
+static DOUBLE CoverRank(const EVIDENCE_COVER& cover)
+{
+  const DOUBLE decay =
+    DispersionDecay > 0.0 ? DispersionDecay : 1.0;
+
+  const DOUBLE compactness =
+    1.0 / (1.0 + cover.Dispersion / decay);
+
+  return
+    std::pow(cover.Energy, EvidenceWeight) *
+    std::pow(compactness, DispersionWeight);
+}
+
+
+
+//
+// Find all minimal windows containing K distinct lexical SourceIds.
+//
+// Hits must be ordered by FieldStart.
+//
+static void FindLexicalCovers(
+    const std::vector<HIT>& hits,
+    UINT K,
+    UINT possibleEvidence,
+    std::vector<COVER_CANDIDATE> *covers)
+{
+  if (covers == NULL || hits.empty() || K == 0)
+    return;
+
+  std::map<FCSOURCE, UINT> counts;
+
+  //
+  // Needed because FCs are intervals: the last hit by start GP
+  // does not necessarily have the greatest FieldEnd.
+  //
+  std::multiset<GPTYPE> ends;
+
+  size_t left = 0;
+  UINT distinct = 0;
+
+  for (size_t right = 0; right < hits.size(); ++right)
+  {
+    const FCSOURCE source = HitSource(hits[right]);
+
+    if (source == 0)
+      continue; // Should not be in lexical vector anyway.
+
+    if (++counts[source] == 1)
+      ++distinct;
+
+    ends.insert(hits[right].GetFieldEnd());
+
+    //
+    // Too many distinct sources.  Move the left boundary.
+    //
+    while (distinct > K && left <= right)
+    {
+      const FCSOURCE leftSource = HitSource(hits[left]);
+
+      auto e = ends.find(hits[left].GetFieldEnd());
+      if (e != ends.end())
+        ends.erase(e);
+
+      auto c = counts.find(leftSource);
+
+      if (c != counts.end())
+      {
+        if (--c->second == 0)
+        {
+          counts.erase(c);
+          --distinct;
+        }
+      }
+
+      ++left;
+    }
+
+    //
+    // Remove redundant occurrences at the left boundary.
+    //
+    while (distinct == K && left <= right)
+    {
+      const FCSOURCE leftSource = HitSource(hits[left]);
+
+      auto c = counts.find(leftSource);
+
+      if (c == counts.end() || c->second <= 1)
+        break;
+
+      auto e = ends.find(hits[left].GetFieldEnd());
+      if (e != ends.end())
+        ends.erase(e);
+
+      --c->second;
+      ++left;
+    }
+
+    if (distinct != K || ends.empty())
+      continue;
+
+    //
+    // The right boundary must itself contribute something.
+    // Otherwise this is not a minimal K-source window.
+    //
+    auto r = counts.find(source);
+
+    if (r == counts.end() || r->second != 1)
+      continue;
+
+    const GPTYPE start = hits[left].GetFieldStart();
+    const GPTYPE end   = *ends.rbegin();
+
+    covers->push_back(
+      MakeCover(FC(start, end), K, possibleEvidence));
+  }
+}
+
+
+EVIDENCE_COVERS RESULT::GetEvidenceCovers(size_t Max) const
+{
+  EVIDENCE_COVERS result;
+
+  if (HitTable.IsEmpty())
+    return result;
+
+  std::vector<HIT> lexical;
+  std::vector<HIT> opaque;
+
+  lexical.reserve(HitTable.GetTotalEntries());
+  opaque.reserve(HitTable.GetTotalEntries());
+
+  std::set<FCSOURCE> lexicalSourceSet;
+
+  for (const auto& hit : HitTable)
+  {
+    const FCSOURCE source = HitSource(hit);
+
+    if (source != 0)
+    {
+      lexical.push_back(hit);
+      lexicalSourceSet.insert(source);
+    }
+    else
+    {
+      //
+      // A real FC hit without lexical provenance:
+      // Date, Numeric, HNSW, etc.
+      //
+      opaque.push_back(hit);
+    }
+  }
+
+  std::sort(lexical.begin(), lexical.end(), HitByStart);
+  std::sort(opaque.begin(),  opaque.end(),  HitByStart);
+
+  const UINT lexicalSources =
+    static_cast<UINT>(lexicalSourceSet.size());
+
+  //
+  // AuxCount is our best statement of how much independent
+  // query evidence is represented by this RESULT.
+  //
+  UINT possibleEvidence = GetAuxCount();
+
+  if (possibleEvidence < lexicalSources)
+    possibleEvidence = lexicalSources;
+
+  //
+  // If anonymous FC evidence exists but AuxCount does not
+  // reflect it, allow one anonymous evidence dimension.
+  //
+  if (!opaque.empty() && possibleEvidence <= lexicalSources)
+    possibleEvidence = lexicalSources + 1;
+
+  if (possibleEvidence == 0)
+    possibleEvidence = 1;
+
+
+  std::vector<COVER_CANDIDATE> candidates;
+
+
+  //
+  // --------------------------------------------------------
+  // 1. Lexical evidence covers.
+  // --------------------------------------------------------
+  //
+  // K=1 is useful internally because it can combine with an
+  // anonymous Date/HNSW/etc. FC.  We normally don't retain
+  // bare one-term contexts for a multi-evidence query.
+  //
+  for (UINT K = 1; K <= lexicalSources; ++K)
+  {
+    std::vector<COVER_CANDIDATE> lexicalCovers;
+
+    FindLexicalCovers(
+      lexical,
+      K,
+      possibleEvidence,
+      &lexicalCovers);
+
+    for (const auto& lexicalCover : lexicalCovers)
+    {
+      //
+      // Keep lexical-only candidates when they contain at
+      // least two distinct lexical sources, or this really
+      // is a one-source result.
+      //
+      if (K >= 2 || possibleEvidence == 1)
+        candidates.push_back(lexicalCover);
+
+      //
+      // ----------------------------------------------------
+      // 2. Combine with anonymous/nonlexical FC evidence.
+      // ----------------------------------------------------
+      //
+      // At present all SourceId==0 hits are anonymous.
+      // We therefore treat each FC as an alternative for
+      // ONE anonymous evidence dimension, not as mutually
+      // independent evidence.
+      //
+      for (const auto& anonymousHit : opaque)
+      {
+        const FC extent =
+          CoverExtent(lexicalCover.cover.extent,
+                      anonymousHit);
+
+        candidates.push_back(
+          MakeCover(
+            extent,
+            lexicalCover.evidence + 1,
+            possibleEvidence));
+      }
+    }
+  }
+
+
+  //
+  // Anonymous-only covers.
+  //
+  // Important for pure Date/Numeric/HNSW searches.
+  //
+  for (const auto& hit : opaque)
+  {
+    candidates.push_back(
+      MakeCover(hit, 1, possibleEvidence));
+  }
+
+
+  if (candidates.empty())
+    return result;
+
+
+  //
+  // --------------------------------------------------------
+  // 3. Collapse identical extents.
+  // --------------------------------------------------------
+  //
+  // If the same extent was discovered with different amounts
+  // of evidence, keep the one carrying the most evidence.
+  //
+  std::sort(
+    candidates.begin(),
+    candidates.end(),
+    [](const COVER_CANDIDATE& a,
+       const COVER_CANDIDATE& b)
+    {
+      const GPTYPE as = a.cover.extent.GetFieldStart();
+      const GPTYPE bs = b.cover.extent.GetFieldStart();
+
+      if (as != bs)
+        return as < bs;
+
+      const GPTYPE ae = a.cover.extent.GetFieldEnd();
+      const GPTYPE be = b.cover.extent.GetFieldEnd();
+
+      if (ae != be)
+        return ae < be;
+
+      return a.evidence > b.evidence;
+    });
+
+
+  std::vector<COVER_CANDIDATE> unique;
+  unique.reserve(candidates.size());
+
+  for (const auto& candidate : candidates)
+  {
+    if (!unique.empty() &&
+        unique.back().cover.extent.GetFieldStart() ==
+          candidate.cover.extent.GetFieldStart() &&
+        unique.back().cover.extent.GetFieldEnd() ==
+          candidate.cover.extent.GetFieldEnd())
+    {
+      //
+      // Sorted by evidence descending, therefore the first
+      // one for this FC is the strongest.
+      //
+      continue;
+    }
+
+    unique.push_back(candidate);
+  }
+
+
+  //
+  // --------------------------------------------------------
+  // 4. Rank the covers.
+  // --------------------------------------------------------
+  //
+  std::sort(
+    unique.begin(),
+    unique.end(),
+    [](const COVER_CANDIDATE& a,
+       const COVER_CANDIDATE& b)
+    {
+      const DOUBLE ar = CoverRank(a.cover);
+      const DOUBLE br = CoverRank(b.cover);
+
+      if (ar != br)
+        return ar > br;
+
+      if (a.cover.Energy != b.cover.Energy)
+        return a.cover.Energy > b.cover.Energy;
+
+      if (a.cover.Dispersion != b.cover.Dispersion)
+        return a.cover.Dispersion < b.cover.Dispersion;
+
+      return a.cover.extent.GetFieldStart() <
+             b.cover.extent.GetFieldStart();
+    });
+
+
+  const size_t count =
+    Max && Max < unique.size()
+      ? Max
+      : unique.size();
+
+  result.reserve(count);
+
+  for (size_t i = 0; i < count; ++i)
+    result.push_back(unique[i].cover);
+
+  return result;
+}
+
+
+FC RESULT::GetBestContextHit() const
+{
+  const EVIDENCE_COVERS covers =
+    GetEvidenceCovers(1);
+
+  if (!covers.empty())
+    return covers[0].extent;
+
+  return FC();
+}
+
+#if 0
+
+
+// MaxBytesAdvice expresses the expected human attention budget; the cost function
+// allows evidence to spend beyond that budget when the marginal value justifies it.
+
+
+static DOUBLE DisplayUtility(
+    const DISPLAY_EVIDENCE& candidate,
+    size_t MaxBytesAdvice)
+{
+    const DOUBLE value =
+        CoverRank(candidate.Evidence)
+        * candidate.StructureBonus;
+
+    DOUBLE over = 0.0;
+
+    if (candidate.Bytes > MaxBytesAdvice && MaxBytesAdvice)
+        over =
+            (DOUBLE)(candidate.Bytes - MaxBytesAdvice) /
+            (DOUBLE)MaxBytesAdvice;
+
+    const DOUBLE cost =
+        DisplayOverageWeight *
+        pow(over, DisplayOverageExponent);
+
+    return value - cost;
+}
+
+#endif

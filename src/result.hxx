@@ -22,11 +22,33 @@ Description:	Class RESULT - Search Result
 #endif
 
 
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <set>
+#include <vector>
+
 
 class DOCTYPE;
 class MDTREC;
 
 extern long __IB_RESULT_allocated_count; // Used to track stray RESULTs
+
+
+struct EVIDENCE_COVER
+{
+    FC     extent;
+    DOUBLE Energy;
+    DOUBLE Dispersion;
+};
+
+struct COVER_WORK
+{
+    EVIDENCE_COVER cover;
+    UINT           evidence;
+};
+
+typedef std::vector<EVIDENCE_COVER> EVIDENCE_COVERS;
 
 
 class RESULT {
@@ -153,6 +175,7 @@ public:
 	STRING *Term, DOCTYPE *DoctypePtr) const;
 
   // Context..
+  EVIDENCE_COVERS GetEvidenceCovers(size_t Max) const;
   FC GetBestContextHit() const;
   bool PresentBestContextHit(STRING *StringBuffer, STRING *Term,
 	const STRING& BeforeTerm = NulString, const STRING& AfterTerm = NulString,
