@@ -1676,116 +1676,6 @@ static DOUBLE DisplayUtility(
 }
 
 
-#if 0
-FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
-{
-  const EVIDENCE_COVERS covers =
-    GetEvidenceCovers(0);
-
-  if (covers.empty())
-    return FC();
-
-  FC best;
-  DOUBLE bestUtility = -MAXFLOAT;
-
-  IDBOBJ *idb = NULL;
-  off_t offset = 0;
-  bool haveStructure = false;
-
-  //
-  // Resolve the record-relative -> global offset once.
-  //
-  if (DoctypePtr && DoctypePtr->Db)
-  {
-    idb = DoctypePtr->Db;
-
-    MDTREC mdtrec;
-
-    if (idb->GetMainMdt()->GetEntry(
-          GetMdtIndex(), &mdtrec))
-    {
-      offset =
-        mdtrec.GetGlobalFileStart() +
-        mdtrec.GetLocalRecordStart();
-
-      haveStructure = true;
-    }
-  }
-
-  for (const auto& cover : covers)
-  {
-    //
-    // ----------------------------------------------------
-    // Candidate 1: the evidence cover itself.
-    // ----------------------------------------------------
-    //
-    {
-      const DOUBLE utility =
-        DisplayUtility(
-          cover,
-          cover.extent,
-          MaxBytesAdvice,
-          false);
-
-      if (utility > bestUtility)
-      {
-        bestUtility = utility;
-        best = cover.extent;
-      }
-    }
-
-    //
-    // ----------------------------------------------------
-    // Candidate 2: smallest structural container containing
-    // the evidence.
-    // ----------------------------------------------------
-    //
-    if (haveStructure)
-    {
-      FC global = cover.extent;
-      global += offset;
-
-      STRING tag;
-      const FC peer =
-        idb->GetPeerFc(global, &tag);
-
-      if (!peer.IsEmpty())
-      {
-        const GPTYPE start =
-          peer.GetFieldStart() - offset;
-
-        const GPTYPE end =
-          peer.GetFieldEnd() - offset;
-
-        //
-        // Sanity: don't escape the RESULT.
-        //
-        if (end >= start &&
-            end <= (RecordEnd - RecordStart))
-        {
-          const FC localPeer(start, end);
-
-          const DOUBLE utility =
-            DisplayUtility(
-              cover,
-              localPeer,
-              MaxBytesAdvice,
-              true);
-
-          if (utility > bestUtility)
-          {
-            bestUtility = utility;
-            best = localPeer;
-          }
-        }
-      }
-    }
-  }
-
-  return best;
-}
-#elif 0
-
 static DOUBLE DisplayEvidenceValue(
     const EVIDENCE_COVER& evidence)
 {
@@ -1800,495 +1690,25 @@ static DOUBLE DisplayEvidenceValue(
     std::pow(compactness, DispersionWeight);
 }
 
-FC RESULT::GetDisplayEvidence(
-    size_t MaxBytesAdvice,
-    DOCTYPE *DoctypePtr) const
-{
-  //
-  // Legitimate case: relevance-feedback result, etc.
-  //
-  if (HitTable.IsEmpty())
-    return FC();
 
-  const EVIDENCE_COVERS covers =
-    GetEvidenceCovers(0);
-
-  IDBOBJ *idb = NULL;
-  off_t offset = 0;
-  bool haveStructure = false;
-
-  //
-  // Resolve record-relative -> global offset once.
-  //
-  if (DoctypePtr && DoctypePtr->Db)
-  {
-    idb = DoctypePtr->Db;
-
-    MDTREC mdtrec;
-
-    if (idb->GetMainMdt()->GetEntry(
-          GetMdtIndex(), &mdtrec))
-    {
-      offset =
-        mdtrec.GetGlobalFileStart() +
-        mdtrec.GetLocalRecordStart();
-
-      haveStructure = true;
-    }
-  }
-
-
-  FC best;
-  DOUBLE bestUtility = -MAXFLOAT;
-  EVIDENCE_COVER bestEvidence = { FC(), 0.0, 0.0 };
-
-  //
-  // Common candidate evaluator.
-  //
-  auto consider =
-    [&](const EVIDENCE_COVER& evidence,
-        const FC& extent,
-        bool structural)
-    {
-      if (extent.IsEmpty())
-        return;
-
-      const DOUBLE utility =
-        DisplayUtility(
-          evidence,
-          extent,
-          MaxBytesAdvice,
-          structural);
-
-      if (best.IsEmpty() || utility > bestUtility)
-      {
-        bestUtility = utility;
-        best = extent;
-        bestEvidence = evidence; 
-      }
-    };
-
-
-  //
-  // Optionally consider the smallest structural container
-  // containing a candidate.
-  //
-  auto considerStructure =
-    [&](const EVIDENCE_COVER& evidence)
-    {
-      if (!haveStructure)
-        return;
-
-      FC global = evidence.extent;
-      global += offset;
-
-      STRING tag;
-
-      const FC peer =
-        idb->GetPeerFc(global, &tag);
-
-      if (peer.IsEmpty())
-        return;
-
-      const GPTYPE start =
-        peer.GetFieldStart() - offset;
-
-      const GPTYPE end =
-        peer.GetFieldEnd() - offset;
-
-      if (end < start ||
-          end > (RecordEnd - RecordStart))
-        return;
-
-      consider(
-        evidence,
-        FC(start, end),
-        true);
-    };
-
-
-  //
-  // ----------------------------------------------------
-  // 1. Evidence-cover candidates.
-  // ----------------------------------------------------
-  //
-  for (const auto& cover : covers)
-  {
-    consider(
-      cover,
-      cover.extent,
-      false);
-
-    considerStructure(cover);
-  }
-
-
-  //
-  // ----------------------------------------------------
-  // 2. Graceful degradation:
-  //    individual evidence hits.
-  //
-  // GetEvidenceCovers deliberately does not expose bare K=1
-  // lexical covers for a multi-evidence result.  Display,
-  // however, must always have something useful to show.
-  // ----------------------------------------------------
-  //
-  UINT possibleEvidence = GetAuxCount();
-
-  if (possibleEvidence == 0)
-    possibleEvidence = 1;
-
-  for (const auto& hit : HitTable)
-  {
-    EVIDENCE_COVER evidence;
-
-    evidence.extent = hit;
-
-    evidence.Energy =
-      1.0 / static_cast<DOUBLE>(possibleEvidence);
-
-    evidence.Dispersion =
-      ExtentWidth(hit);
-
-    consider(
-      evidence,
-      hit,
-      false);
-
-    considerStructure(evidence);
-  }
-
-
-  //
-  // HitTable was nonempty, therefore one of the individual
-  // hits should necessarily have supplied a candidate.
-  //
 #if 1
-message_log(LOG_INFO,
-    "Display winner %ld-%ld len=%lu E=%g D=%g U=%g",
-    (long)best.GetFieldStart(),
-    (long)best.GetFieldEnd(),
-    (unsigned long)best.GetLength(),
-    bestEvidence.Energy,
-    bestEvidence.Dispersion,
-    bestUtility);
-#endif
-  return best;
-}
 
-
-#elif 0
-
-FC RESULT::GetDisplayEvidence(
-    size_t MaxBytesAdvice,
-    DOCTYPE *DoctypePtr) const
+FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 {
+    cerr << "GetDisplayEvidence(MAX): "
+         << MaxBytesAdvice
+         << " doctype=" << (void *)DoctypePtr
+         << endl ;
+
+
   if (HitTable.IsEmpty() || RecordEnd < RecordStart)
     return FC();
 
-  FC             best;
-  EVIDENCE_COVER bestEvidence;
-  DOUBLE         bestUtility = 0.0;
-  bool           haveBest    = false;
-
-
-  //
-  // Candidate selection is deliberately cheap:
-  //
-  //     evidence geometry
-  //     +
-  //     display byte cost
-  //
-  // No structural lookup happens here.
-  //
-  auto consider =
-    [&](const EVIDENCE_COVER& evidence,
-        const FC& extent,
-        bool structured)
-    {
-      const GPTYPE start = extent.GetFieldStart();
-      const GPTYPE end   = extent.GetFieldEnd();
-
-      if (end < start)
-        return;
-
-      if (end > (RecordEnd - RecordStart))
-        return;
-
-      const DOUBLE utility =
-          DisplayUtility(
-              evidence,
-              extent,
-              MaxBytesAdvice,
-              structured);
-
-      if (!haveBest ||
-          utility > bestUtility ||
-          (utility == bestUtility &&
-           ExtentWidth(extent) < ExtentWidth(best)))
-        {
-          best         = extent;
-          bestEvidence = evidence;
-          bestUtility  = utility;
-          haveBest     = true;
-        }
-    };
-
-
-  //
-  // --------------------------------------------------------
-  // 1. Raw evidence candidates.
-  // --------------------------------------------------------
-  //
-  // GetEvidenceCovers() is already ranked by evidence strength
-  // and compactness.  DisplayUtility adds the attention/byte
-  // budget policy.
-  //
-  const EVIDENCE_COVERS covers =
-      GetEvidenceCovers(0);
-
-  for (const auto& cover : covers)
-    consider(
-        cover,
-        cover.extent,
-        false);
-
-
-  //
-  // --------------------------------------------------------
-  // 2. Single-hit fallback.
-  // --------------------------------------------------------
-  //
-  // Normally GetEvidenceCovers() gives us something useful.
-  // If not, don't invent expensive context: choose the best
-  // individual evidence FC.
-  //
-  if (!haveBest)
-    {
-      UINT possibleEvidence = GetAuxCount();
-
-      if (possibleEvidence == 0)
-        possibleEvidence = 1;
-
-      for (const auto& hit : HitTable)
-        {
-          const COVER_CANDIDATE candidate =
-              MakeCover(
-                  hit,
-                  1,
-                  possibleEvidence);
-
-          consider(
-              candidate.cover,
-              hit,
-              false);
-        }
-    }
-
-
-  if (!haveBest)
-    return FC();
-
-
-  //
-  // --------------------------------------------------------
-  // 3. Structural refinement.
-  // --------------------------------------------------------
-  //
-  // Everything above was in-memory geometry.
-  //
-  // Now -- and only now -- pay for structural discovery.
-  //
-  if (DoctypePtr == NULL || DoctypePtr->Db == NULL)
-    return best;
-
-  IDBOBJ *idb = DoctypePtr->Db;
-
-  MDTREC mdtrec;
-
-  if (!idb->GetMainMdt()->GetEntry(
-          GetMdtIndex(),
-          &mdtrec))
-    return best;
-
-  const GPTYPE offset =
-      mdtrec.GetGlobalFileStart() +
-      mdtrec.GetLocalRecordStart();
-
-
-  //
-  // Prefer a lexical point inside the winning evidence.
-  //
-  // SourceId==0 evidence can itself represent a large Date,
-  // Numeric, vector, etc. region.  A lexical hit generally gives
-  // us the most useful point from which to discover the deepest
-  // structural field.
-  //
-  GPTYPE anchor =
-      best.GetFieldStart();
-
-#if _TRACK_TERM_IDENTITY
-  for (const auto& hit : HitTable)
-    {
-      if (hit.GetSourceId() != 0 &&
-          best.Contains(hit))
-        {
-          anchor = hit.GetFieldStart();
-          break;
-        }
-    }
-#endif
-
-
-  STRING deepestField;
-
-  //
-  // The ONE generic PEER lookup.
-  //
-  // Keep its returned FC: it may already be the structural
-  // container we need.
-  //
-  const FC anchorPeer =
-      idb->GetPeerFc(
-          anchor + offset,
-          &deepestField);
-
-  if (deepestField.IsEmpty())
-    return best;
-
-
-  DFDT *dfdt = idb->GetDfdt();
-
-  if (dfdt == NULL)
-    return best;
-
-
-  const FIELD_PATH path =
-      dfdt->GetFieldPath(deepestField);
-
-  //
-  // [TEXT], [BODY], etc. -- only a root/common field.
-  //
-  // Nothing structurally useful to add.
-  //
-  if (path.size() <= 1)
-    return best;
-
-
-  FC globalBest(best);
-  globalBest += offset;
-
-  FC     globalPeer;
-  STRING peerField;
-  bool   havePeer = false;
-
-
-  //
-  // Cheapest case:
-  //
-  // the deepest field discovered by the generic point lookup
-  // already contains all of the selected evidence.
-  //
-  // Don't search its field index again.
-  //
-  if (anchorPeer.Contains(globalBest))
-    {
-      globalPeer = anchorPeer;
-      peerField  = deepestField;
-      havePeer   = true;
-    }
-  else
-    {
-      //
-      // The deepest field did not contain the complete evidence.
-      //
-      // We already know that, so don't probe it again.
-      //
-      // Remove it from the path and search only its ancestors.
-      // The final path member remains the root and is skipped by
-      // the path-constrained GetPeerFc().
-      //
-      //
-      // Example:
-      //
-      //   original:
-      //     LINE SPEECH SCENE ACT PLAY
-      //
-      //   ancestors:
-      //          SPEECH SCENE ACT PLAY
-      //
-      //
-      if (path.size() > 2)
-        {
-          const FIELD_PATH ancestors(
-              path.begin() + 1,
-              path.end());
-
-          globalPeer =
-              idb->GetPeerFc(
-                  globalBest,
-                  ancestors,
-                  &peerField);
-
-          havePeer =
-              !peerField.IsEmpty();
-        }
-    }
-
-
-  if (!havePeer)
-    return best;
-
-
-  //
-  // Convert the structural candidate back to record-relative
-  // coordinates.
-  //
-  FC peer(globalPeer);
-  peer -= offset;
-
-
-  //
-  // Defensive sanity checks.
-  //
-  if (!peer.Contains(best))
-    return best;
-
-  if (peer.GetFieldEnd() < peer.GetFieldStart())
-    return best;
-
-  if (peer.GetFieldEnd() >
-      (RecordEnd - RecordStart))
-    return best;
-
-
-  //
-  // Same evidence, one structural alternative.
-  //
-  // MaxBytesAdvice remains soft policy inside DisplayUtility().
-  //
-  consider(
-      bestEvidence,
-      peer,
-      true);
-
-
-  return best;
-}
-
-#else
-
-
-FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
-{
-  if (HitTable.IsEmpty() || RecordEnd < RecordStart)
-    return FC();
+  const GPTYPE recordEnd =
+      RecordEnd - RecordStart;
 
   const EVIDENCE_COVERS covers =
       GetEvidenceCovers(0);
-
-  if (covers.empty())
-    return FC();
 
 
   //
@@ -2296,18 +1716,26 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
   // UNBOUNDED DISPLAY
   // ========================================================
   //
-  // MaxBytesAdvice == 0 means:
+  // Max == 0 means:
   //
-  //     show the strongest evidence we have
+  //     preserve the strongest/full evidence.
   //
-  // No attention-cost model, no partial/single fallback merely
-  // to make the result shorter.
-  //
-  // This is useful for agents, diagnostics, query explanation,
-  // etc.
+  // No attention-cost model, no shortening, no presentation
+  // expansion.  This is the useful agent / diagnostic form.
   //
   if (MaxBytesAdvice == 0)
-    return covers[0].extent;
+    {
+      if (!covers.empty())
+        return covers[0].extent;
+
+      //
+      // Defensive fallback.
+      //
+      for (const auto& hit : HitTable)
+        return hit;
+
+      return FC();
+    }
 
 
   //
@@ -2315,34 +1743,42 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
   // BOUNDED DISPLAY
   // ========================================================
   //
-  // Now attention has a cost.
+  // Attention now has a cost.
   //
-  // Full evidence, partial evidence and individual hits are all
-  // allowed to compete.
+  // Full/partial covers and individual evidence may compete.
   //
   FC             best;
   EVIDENCE_COVER bestEvidence;
-  DOUBLE         bestUtility = 0.0;
-  bool           haveBest    = false;
-  bool           bestIsSingle = false;
+
+  DOUBLE bestUtility = 0.0;
+
+  bool haveBest         = false;
+  bool bestIsSingle     = false;
+  bool bestHasStructure = false;
 
 
+  //
+  // --------------------------------------------------------
+  // Evidence candidate comparator.
+  // --------------------------------------------------------
+  //
+  // This chooses WHAT evidence is worth showing.
+  //
+  // Structure does not compete here.  Structure is considered
+  // later as a presentation envelope around the winner.
+  //
   auto consider =
     [&](const EVIDENCE_COVER& evidence,
         const FC& extent,
-        bool structured,
         bool single)
     {
-      if (extent.IsEmpty())
-        return;
+      const GPTYPE start =
+          extent.GetFieldStart();
 
-      const GPTYPE start = extent.GetFieldStart();
-      const GPTYPE end   = extent.GetFieldEnd();
+      const GPTYPE end =
+          extent.GetFieldEnd();
 
-      if (end < start)
-        return;
-
-      if (end > (RecordEnd - RecordStart))
+      if (end < start || end > recordEnd)
         return;
 
       const DOUBLE utility =
@@ -2350,12 +1786,63 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
               evidence,
               extent,
               MaxBytesAdvice,
-              structured);
+              false);
 
-      if (!haveBest ||
-          utility > bestUtility ||
-          (utility == bestUtility &&
-           ExtentWidth(extent) < ExtentWidth(best)))
+      bool better = false;
+
+      if (!haveBest)
+        {
+          better = true;
+        }
+      else if (utility > bestUtility)
+        {
+          better = true;
+        }
+      else if (utility == bestUtility)
+        {
+          //
+          // Deterministic tie breaking:
+          //
+          //     more evidence
+          //     less dispersion
+          //     shorter extent
+          //     earlier occurrence
+          //
+          if (evidence.Energy > bestEvidence.Energy)
+            {
+              better = true;
+            }
+          else if (evidence.Energy == bestEvidence.Energy)
+            {
+              if (evidence.Dispersion <
+                  bestEvidence.Dispersion)
+                {
+                  better = true;
+                }
+              else if (evidence.Dispersion ==
+                       bestEvidence.Dispersion)
+                {
+                  const DOUBLE width =
+                      ExtentWidth(extent);
+
+                  const DOUBLE bestWidth =
+                      ExtentWidth(best);
+
+                  if (width < bestWidth)
+                    {
+                      better = true;
+                    }
+                  else if (width == bestWidth &&
+                           extent.GetFieldStart() <
+                           best.GetFieldStart())
+                    {
+                      better = true;
+                    }
+                }
+            }
+        }
+
+      if (better)
         {
           best          = extent;
           bestEvidence  = evidence;
@@ -2376,24 +1863,63 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
       consider(
           cover,
           cover.extent,
-          false,
           false);
     }
 
 
   //
   // --------------------------------------------------------
-  // 2. Individual evidence.
+  // 2. Individual evidence candidates.
   // --------------------------------------------------------
   //
-  // Singles are DISPLAY alternatives only in bounded mode.
+  // Singles are legitimate display alternatives in bounded
+  // mode.  This is what lets:
   //
-  // Retrieval semantics remain untouched.
+  //     whores ---------------- money
   //
-  UINT possibleEvidence = GetAuxCount();
+  // or:
+  //
+  //     tools ----------------- quantum
+  //
+  // collapse to useful local evidence rather than forcing the
+  // human to consume the entire span.
+  //
+  // Keep possibleEvidence consistent with GetEvidenceCovers().
+  //
+  std::set<FCSOURCE> lexicalSourceSet;
+  bool haveOpaque = false;
+
+  for (const auto& hit : HitTable)
+    {
+      const FCSOURCE source =
+          HitSource(hit);
+
+      if (source != 0)
+        lexicalSourceSet.insert(source);
+      else
+        haveOpaque = true;
+    }
+
+  const UINT lexicalSources =
+      static_cast<UINT>(
+          lexicalSourceSet.size());
+
+  UINT possibleEvidence =
+      GetAuxCount();
+
+  if (possibleEvidence < lexicalSources)
+    possibleEvidence = lexicalSources;
+
+  if (haveOpaque &&
+      possibleEvidence <= lexicalSources)
+    {
+      possibleEvidence =
+          lexicalSources + 1;
+    }
 
   if (possibleEvidence == 0)
     possibleEvidence = 1;
+
 
   for (const auto& hit : HitTable)
     {
@@ -2406,7 +1932,6 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
       consider(
           candidate.cover,
           hit,
-          false,
           true);
     }
 
@@ -2417,15 +1942,32 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 
   //
   // --------------------------------------------------------
-  // 3. One structural refinement.
+  // 3. Natural structural presentation envelope.
   // --------------------------------------------------------
   //
-  // No structure exists, or caller did not supply a database:
-  // we're done with evidence selection.
+  // Evidence selection is now finished.
+  //
+  // Spend at most:
+  //
+  //     ONE generic PEER discovery
+  //
+  // followed, only if required, by a bounded ancestor-path
+  // search.
+  //
+  // Important:
+  //
+  // The field discovered by the generic PEER is useful even if
+  // its FIELD_PATH contains only itself:
+  //
+  //     [ LINE ]
+  //
+  // Path depth only determines whether we can search upward.
   //
   if (DoctypePtr && DoctypePtr->Db)
     {
-      IDBOBJ *idb = DoctypePtr->Db;
+      IDBOBJ *idb =
+          DoctypePtr->Db;
+
       MDTREC mdtrec;
 
       if (idb->GetMainMdt()->GetEntry(
@@ -2436,8 +1978,12 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
               mdtrec.GetGlobalFileStart() +
               mdtrec.GetLocalRecordStart();
 
+
           //
-          // Prefer a lexical anchor inside the selected evidence.
+          // Prefer a lexical point inside the winning evidence.
+          //
+          // SourceId==0 evidence may itself be a broad Date,
+          // Numeric, HNSW, etc. interval.
           //
           GPTYPE anchor =
               best.GetFieldStart();
@@ -2448,35 +1994,596 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
               if (hit.GetSourceId() != 0 &&
                   best.Contains(hit))
                 {
-                  anchor = hit.GetFieldStart();
+                  anchor =
+                      hit.GetFieldStart();
+
                   break;
                 }
             }
 #endif
+
+
+          STRING deepestField;
+
+          //
+          // The ONE generic PEER operation.
+          //
+          // Keep the returned FC.  It may already be the natural
+          // presentation envelope.
+          //
+
+          const FC anchorPeer = idb->GetPeerFc(anchor + offset, &deepestField);
+
+          if (!deepestField.IsEmpty())
+            {
+              FC globalBest(best);
+              globalBest += offset;
+
+#if 1
+  cerr << "STRUCT:"
+         << " best(local)="
+         << best.GetFieldStart() << "-"
+         << best.GetFieldEnd()
+         << " anchor(local)=" << anchor
+         << " offset=" << offset
+         << " best(global)="
+         << globalBest.GetFieldStart() << "-"
+         << globalBest.GetFieldEnd()
+         << endl;
+#endif
+
+              FC     globalPeer;
+              STRING peerField;
+
+              bool havePeer = false;
+
+
+              //
+              // ------------------------------------------------
+              // 3a. Deepest field itself.
+              // ------------------------------------------------
+              //
+              // This is valid structure regardless of path depth.
+              //
+              // Example:
+              //
+              //     deepestField = LINE
+              //     path         = [ LINE ]
+              //
+              // If LINE contains the complete selected evidence,
+              // it is exactly the envelope we want.
+              //
+              if (anchorPeer.Contains(globalBest))
+                {
+                  globalPeer =
+                      anchorPeer;
+
+                  peerField =
+                      deepestField;
+
+                  havePeer = true;
+                }
+              else
+                {
+                  //
+                  // --------------------------------------------
+                  // 3b. Search ancestors only.
+                  // --------------------------------------------
+                  //
+                  // The deepest field has already been disproved:
+                  //
+                  //     anchorPeer !Contains(globalBest)
+                  //
+                  // Don't search that field again.
+                  //
+                  DFDT *dfdt =
+                      idb->GetDfdt();
+
+                  if (dfdt)
+                    {
+                      const FIELD_PATH path =
+                          dfdt->GetFieldPath(
+                              deepestField);
+
+                      //
+                      // Need at least:
+                      //
+                      //     deepest
+                      //     parent
+                      //     root
+                      //
+                      // because:
+                      //
+                      //   deepest is already disproved
+                      //   root is deliberately excluded
+                      //
+                      if (path.size() > 2)
+                        {
+                          const FIELD_PATH ancestors(
+                              path.begin() + 1,
+                              path.end());
+
+                          globalPeer =
+                              idb->GetPeerFc(
+                                  globalBest,
+                                  ancestors,
+                                  &peerField);
+
+                          havePeer =
+                              !peerField.IsEmpty();
+                        }
+                    }
+                }
+
+
+              //
+              // ------------------------------------------------
+              // 3c. Natural structure gets first refusal.
+              // ------------------------------------------------
+              //
+              if (havePeer)
+                {
+                  FC peer(globalPeer);
+                  peer -= offset;
+
+                  if (peer.Contains(best) &&
+                      peer.GetFieldStart() <=
+                          peer.GetFieldEnd() &&
+                      peer.GetFieldEnd() <=
+                          recordEnd)
+                    {
+                      const size_t peerBytes =
+                          static_cast<size_t>(
+                              ExtentWidth(peer));
+
+                      //
+                      // Structure is presentation, not evidence.
+                      //
+                      // If the complete natural container fits
+                      // inside the caller's attention budget,
+                      // use it outright.
+                      //
+                      // No StructureBonus.
+                      // No utility contest against its contents.
+                      //
+                      if (peerBytes <= MaxBytesAdvice)
+                        {
+                          best =
+                              peer;
+
+                          bestHasStructure =
+                              true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+  //
+  // --------------------------------------------------------
+  // 4. Bounded flat-context fallback.
+  // --------------------------------------------------------
+  //
+  // If bounded selection deliberately chose a single evidence
+  // item and no useful natural structural envelope fit, give
+  // the human some nearby context.
+  //
+  // This is deliberately the LAST resort because arbitrary byte
+  // clipping may cut XML, JSON, markup, etc.
+  //
+  // Shakespeare should normally be handled by LINE/SPEECH above.
+  //
+  // Flat WIKI TEXT will normally arrive here.
+  //
+  if (bestIsSingle &&
+      !bestHasStructure)
+    {
+      GPTYPE start =
+          best.GetFieldStart();
+
+      GPTYPE end =
+          best.GetFieldEnd();
+
+      const GPTYPE width =
+          end - start + 1;
+
+      const GPTYPE budget =
+          static_cast<GPTYPE>(
+              MaxBytesAdvice);
+
+      if (budget > width)
+        {
+          GPTYPE extra =
+              budget - width;
+
+          GPTYPE left =
+              extra / 2;
+
+          GPTYPE right =
+              extra - left;
+
+
+          //
+          // Grow left.
+          //
+          if (left > start)
+            {
+              const GPTYPE missing =
+                  left - start;
+
+              start = 0;
+              right += missing;
+            }
+          else
+            {
+              start -= left;
+            }
+
+
+          //
+          // Grow right.
+          //
+          const GPTYPE availableRight =
+              recordEnd - end;
+
+          if (right <= availableRight)
+            {
+              end += right;
+            }
+          else
+            {
+              const GPTYPE missing =
+                  right - availableRight;
+
+              end = recordEnd;
+
+              //
+              // Recover unused budget on the left if possible.
+              //
+              if (missing <= start)
+                start -= missing;
+              else
+                start = 0;
+            }
+
+
+          best =
+              FC(start, end);
+        }
+    }
+
+
+  return best;
+}
+
+
+#else
+
+FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
+{
+  if (HitTable.IsEmpty() || RecordEnd < RecordStart)
+    return FC();
+
+  const GPTYPE recordEnd =
+      RecordEnd - RecordStart;
+
+  const EVIDENCE_COVERS covers =
+      GetEvidenceCovers(0);
+
+
+  //
+  // ========================================================
+  // UNBOUNDED
+  // ========================================================
+  //
+  // Max == 0 means:
+  //
+  //     preserve the strongest evidence statement.
+  //
+  // No display-cost model, no shortening, no structural
+  // decoration merely for presentation.
+  //
+  if (MaxBytesAdvice == 0)
+    {
+      if (!covers.empty())
+        return covers[0].extent;
+
+      //
+      // Extremely defensive fallback.
+      //
+      for (const auto& hit : HitTable)
+        return hit;
+
+      return FC();
+    }
+
+
+  //
+  // ========================================================
+  // BOUNDED
+  // ========================================================
+  //
+  // Attention now has a price.
+  //
+  FC             best;
+  EVIDENCE_COVER bestEvidence;
+
+  DOUBLE bestUtility = 0.0;
+
+  bool haveBest         = false;
+  bool bestIsSingle     = false;
+  bool bestHasStructure = false;
+
+
+  //
+  // --------------------------------------------------------
+  // Candidate comparator.
+  // --------------------------------------------------------
+  //
+  // This chooses EVIDENCE only.
+  //
+  // Structure will not compete here.  Once evidence has been
+  // selected, structure is merely a presentation envelope.
+  //
+  auto consider =
+    [&](const EVIDENCE_COVER& evidence,
+        const FC& extent,
+        bool single)
+    {
+      const GPTYPE start = extent.GetFieldStart();
+      const GPTYPE end   = extent.GetFieldEnd();
+
+      if (end < start || end > recordEnd)
+        return;
+
+      const DOUBLE utility =
+          DisplayUtility(
+              evidence,
+              extent,
+              MaxBytesAdvice,
+              false);
+
+      bool better = false;
+
+      if (!haveBest)
+        {
+          better = true;
+        }
+      else if (utility > bestUtility)
+        {
+          better = true;
+        }
+      else if (utility == bestUtility)
+        {
+          //
+          // Deterministic tie breaking:
+          //
+          //   more evidence
+          //   less dispersion
+          //   shorter extent
+          //   earlier occurrence
+          //
+          if (evidence.Energy > bestEvidence.Energy)
+            {
+              better = true;
+            }
+          else if (evidence.Energy == bestEvidence.Energy)
+            {
+              if (evidence.Dispersion <
+                  bestEvidence.Dispersion)
+                {
+                  better = true;
+                }
+              else if (evidence.Dispersion ==
+                       bestEvidence.Dispersion)
+                {
+                  const DOUBLE width =
+                      ExtentWidth(extent);
+
+                  const DOUBLE bestWidth =
+                      ExtentWidth(best);
+
+                  if (width < bestWidth)
+                    {
+                      better = true;
+                    }
+                  else if (width == bestWidth &&
+                           extent.GetFieldStart() <
+                           best.GetFieldStart())
+                    {
+                      better = true;
+                    }
+                }
+            }
+        }
+
+      if (better)
+        {
+          best          = extent;
+          bestEvidence  = evidence;
+          bestUtility   = utility;
+          bestIsSingle  = single;
+          haveBest      = true;
+        }
+    };
+
+
+  //
+  // --------------------------------------------------------
+  // 1. Full and partial evidence covers.
+  // --------------------------------------------------------
+  //
+  for (const auto& cover : covers)
+    {
+      consider(
+          cover,
+          cover.extent,
+          false);
+    }
+
+
+  //
+  // --------------------------------------------------------
+  // 2. Individual evidence candidates.
+  // --------------------------------------------------------
+  //
+  // Singles are legitimate DISPLAY alternatives when Max > 0.
+  //
+  // Retrieval still required whatever the query required.
+  // We are only deciding how much evidence a human should have
+  // to consume in order to understand the result.
+  //
+  // Calculate possibleEvidence the same way GetEvidenceCovers()
+  // does so single-hit Energy remains compatible with its
+  // covers.
+  //
+  std::set<FCSOURCE> lexicalSourceSet;
+  bool haveOpaque = false;
+
+  for (const auto& hit : HitTable)
+    {
+      const FCSOURCE source =
+          HitSource(hit);
+
+      if (source)
+        lexicalSourceSet.insert(source);
+      else
+        haveOpaque = true;
+    }
+
+  const UINT lexicalSources =
+      static_cast<UINT>(
+          lexicalSourceSet.size());
+
+  UINT possibleEvidence =
+      GetAuxCount();
+
+  if (possibleEvidence < lexicalSources)
+    possibleEvidence = lexicalSources;
+
+  if (haveOpaque &&
+      possibleEvidence <= lexicalSources)
+    possibleEvidence =
+        lexicalSources + 1;
+
+  if (possibleEvidence == 0)
+    possibleEvidence = 1;
+
+
+  for (const auto& hit : HitTable)
+    {
+      const COVER_CANDIDATE candidate =
+          MakeCover(
+              hit,
+              1,
+              possibleEvidence);
+
+      consider(
+          candidate.cover,
+          hit,
+          true);
+    }
+
+
+  if (!haveBest)
+    return FC();
+
+
+  //
+  // --------------------------------------------------------
+  // 3. Structural presentation envelope.
+  // --------------------------------------------------------
+  //
+  // Evidence selection is finished.
+  //
+  // We now spend at most ONE generic PEER discovery, followed
+  // by a very small ancestry search if necessary.
+  //
+  // If the natural enclosing structure fits inside Max, use it.
+  //
+  // It does NOT need to beat its own contained evidence in a
+  // scoring contest.
+  //
+  if (DoctypePtr && DoctypePtr->Db)
+    {
+      IDBOBJ *idb =
+          DoctypePtr->Db;
+
+      MDTREC mdtrec;
+
+      if (idb->GetMainMdt()->GetEntry(
+              GetMdtIndex(),
+              &mdtrec))
+        {
+          const GPTYPE offset =
+              mdtrec.GetGlobalFileStart() +
+              mdtrec.GetLocalRecordStart();
+
+
+          //
+          // Prefer a lexical point inside the winning evidence.
+          //
+          // SourceId==0 evidence may itself be a broad Date,
+          // Numeric, HNSW, etc. interval.  A lexical point is
+          // normally the best way to discover the deepest
+          // meaningful structural field.
+          //
+          GPTYPE anchor =
+              best.GetFieldStart();
+
+#if _TRACK_TERM_IDENTITY
+          for (const auto& hit : HitTable)
+            {
+              if (hit.GetSourceId() != 0 &&
+                  best.Contains(hit))
+                {
+                  anchor =
+                      hit.GetFieldStart();
+
+                  break;
+                }
+            }
+#endif
+
 
           STRING deepestField;
 
           //
           // The ONE generic PEER.
           //
+          // Keep both pieces of information:
+          //
+          //     deepestField
+          //     anchorPeer
+          //
+          // anchorPeer may already be exactly the structural
+          // envelope we need.
+          //
           const FC anchorPeer =
               idb->GetPeerFc(
                   anchor + offset,
                   &deepestField);
 
+
           if (!deepestField.IsEmpty())
             {
-              DFDT *dfdt = idb->GetDfdt();
+              DFDT *dfdt =
+                  idb->GetDfdt();
 
               if (dfdt)
                 {
                   const FIELD_PATH path =
-                      dfdt->GetFieldPath(deepestField);
+                      dfdt->GetFieldPath(
+                          deepestField);
 
                   //
-                  // A one-element path is effectively flat:
+                  // [TEXT]
                   //
-                  //     [TEXT]
+                  // A single-element path gives us no useful
+                  // local structural envelope.  Treat this as
+                  // flat data.
                   //
                   if (path.size() > 1)
                     {
@@ -2485,25 +2592,43 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 
                       FC     globalPeer;
                       STRING peerField;
-                      bool   havePeer = false;
+
+                      bool havePeer = false;
+
 
                       //
-                      // The generic point lookup may already
-                      // have found exactly the container we need.
+                      // Cheapest possible case:
+                      //
+                      // the field discovered around the anchor
+                      // already contains all selected evidence.
                       //
                       if (anchorPeer.Contains(globalBest))
                         {
-                          globalPeer = anchorPeer;
-                          peerField  = deepestField;
-                          havePeer   = true;
+                          globalPeer =
+                              anchorPeer;
+
+                          peerField =
+                              deepestField;
+
+                          havePeer = true;
                         }
                       else if (path.size() > 2)
                         {
                           //
-                          // Deepest field already failed to
-                          // contain the complete evidence.
+                          // The deepest field has already been
+                          // disproved: anchorPeer does not
+                          // contain globalBest.
                           //
-                          // Search ancestors only.
+                          // Do not look it up again.
+                          //
+                          // Search only:
+                          //
+                          //     parent
+                          //     grandparent
+                          //     ...
+                          //
+                          // The path overload itself ignores the
+                          // final common root.
                           //
                           const FIELD_PATH ancestors(
                               path.begin() + 1,
@@ -2519,36 +2644,46 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
                               !peerField.IsEmpty();
                         }
 
+
                       if (havePeer)
                         {
                           FC peer(globalPeer);
                           peer -= offset;
 
+
+                          //
+                          // Defensive sanity.
+                          //
                           if (peer.Contains(best) &&
                               peer.GetFieldStart() <=
-                                peer.GetFieldEnd() &&
+                                  peer.GetFieldEnd() &&
                               peer.GetFieldEnd() <=
-                                (RecordEnd - RecordStart))
+                                  recordEnd)
                             {
                               const size_t peerBytes =
                                   static_cast<size_t>(
                                       ExtentWidth(peer));
 
                               //
-                              // Structure is optional.
+                              // Structure is a presentation
+                              // envelope.
                               //
-                              // It may consume unused attention
-                              // budget, but it must not be the
-                              // reason an otherwise compact
-                              // display blows through that budget.
+                              // If the complete natural
+                              // container fits within the
+                              // caller's attention budget,
+                              // prefer it outright.
                               //
-                              if (peerBytes <= MaxBytesAdvice)
+                              // No StructureBonus.
+                              // No second utility contest.
+                              //
+                              if (peerBytes <=
+                                  MaxBytesAdvice)
                                 {
-                                  consider(
-                                      bestEvidence,
-                                      peer,
-                                      true,
-                                      false);
+                                  best =
+                                      peer;
+
+                                  bestHasStructure =
+                                      true;
                                 }
                             }
                         }
@@ -2561,79 +2696,97 @@ FC RESULT::GetDisplayEvidence( size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 
   //
   // --------------------------------------------------------
-  // 4. Cheap context for a bare single-hit winner.
+  // 4. Bounded flat-context fallback.
   // --------------------------------------------------------
   //
-  // If the bounded model deliberately sacrificed evidence
-  // coverage to avoid a huge span, don't leave the human with
-  // just one naked word.
+  // If display deliberately selected only one evidence item,
+  // and we could not find a useful natural structural envelope,
+  // give the human some nearby context instead of a naked word.
   //
-  // Structural refinement above gets first refusal.  We only
-  // expand when the winning result is still the original single
-  // evidence FC.
+  // This is intentionally the LAST resort because arbitrary
+  // byte clipping may cut markup or other structure.
   //
   if (bestIsSingle &&
-      ExtentWidth(best) < MaxBytesAdvice)
+      !bestHasStructure)
     {
-      GPTYPE start = best.GetFieldStart();
-      GPTYPE end   = best.GetFieldEnd();
+      GPTYPE start =
+          best.GetFieldStart();
+
+      GPTYPE end =
+          best.GetFieldEnd();
 
       const GPTYPE width =
           end - start + 1;
 
-      GPTYPE extra =
-          static_cast<GPTYPE>(MaxBytesAdvice) - width;
+      GPTYPE budget =
+          static_cast<GPTYPE>(
+              MaxBytesAdvice);
 
-      GPTYPE left  = extra / 2;
-      GPTYPE right = extra - left;
-
-      //
-      // Left record boundary.
-      //
-      if (left > start)
+      if (budget > width)
         {
-          right += left - start;
-          start = 0;
-        }
-      else
-        {
-          start -= left;
-        }
+          GPTYPE extra =
+              budget - width;
 
-      //
-      // Right record boundary.
-      //
-      const GPTYPE recordEnd =
-          RecordEnd - RecordStart;
+          GPTYPE left =
+              extra / 2;
 
-      if (end + right > recordEnd)
-        {
-          const GPTYPE overflow =
-              end + right - recordEnd;
+          GPTYPE right =
+              extra - left;
 
-          end = recordEnd;
 
-          if (overflow <= start)
-            start -= overflow;
+          //
+          // Grow left.
+          //
+          if (left > start)
+            {
+              const GPTYPE missing =
+                  left - start;
+
+              start = 0;
+              right += missing;
+            }
           else
-            start = 0;
-        }
-      else
-        {
-          end += right;
-        }
+            {
+              start -= left;
+            }
 
-      best = FC(start, end);
+
+          //
+          // Grow right without overflowing the record.
+          //
+          const GPTYPE availableRight =
+              recordEnd - end;
+
+          if (right <= availableRight)
+            {
+              end += right;
+            }
+          else
+            {
+              const GPTYPE missing =
+                  right - availableRight;
+
+              end = recordEnd;
+
+              //
+              // Try to recover unused budget on the left.
+              //
+              if (missing <= start)
+                start -= missing;
+              else
+                start = 0;
+            }
+
+
+          best =
+              FC(start, end);
+        }
     }
 
 
   return best;
 }
-
-
-
 #endif
-
 
 
 bool RESULT::PresentBestDisplayEvidence(

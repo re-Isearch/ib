@@ -1837,6 +1837,9 @@ private:
 
 FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
 {
+#if 1
+  return GetPeerFc( FC(HitGp, HitGp), NodeNamePtr);
+#else
   const size_t TotalEntries = MainDfdt->GetTotalEntries();
   FC     PeerFC;
   STRING PeerFieldName;
@@ -1910,6 +1913,7 @@ FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)
   if (NodeNamePtr)
     *NodeNamePtr = PeerFieldName;
   return PeerFC;
+#endif
 }
 
 
