@@ -2038,6 +2038,10 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
 
 FC IDB::GetPeerFc(const FC& HitFc, const STRING& FieldName)
 {
+#if 1
+  FC PeerFC;
+  return FindPeerFc(HitFc, FieldName, &PeerFC) ? PeerFC : HitFc;
+#else
   FCACHE *PFCache = GetPeerFieldCache();
 
   if (PFCache == nullptr)
@@ -2090,6 +2094,7 @@ FC IDB::GetPeerFc(const FC& HitFc, const STRING& FieldName)
         }
     }
   return found ? PeerFC : HitFc;
+#endif
 }
 
 
@@ -3717,8 +3722,13 @@ STRLIST IDB::GetXMLAllHits(const RESULT& ResultRecord) const
 bool IDB::Context(const RESULT& ResultRecord, PSTRING Line, PSTRING Term,
 	const STRING& Before, const STRING& After, STRING *TagName) const
 {
+#if 1
+  return (&ResultRecord)->PresentBestDisplayEvidence(Line, Term, Before, After,
+        GetDocTypePtr( ResultRecord.GetDocumentType() ), TagName);
+#else
   return (&ResultRecord)->PresentBestContextHit(Line, Term, Before, After,
         GetDocTypePtr( ResultRecord.GetDocumentType() ), TagName);
+#endif
 }
 
 
@@ -6299,3 +6309,101 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
   return Result;
 }
 
+
+
+bool IDB::FindPeerFc(const FC& HitFc, const STRING& FieldName, FC *PeerFc)
+{
+  FCACHE *PFCache = GetPeerFieldCache();
+
+  if (PFCache == NULL)
+    return false;
+
+  const size_t nRecords = PFCache->LoadFieldCache(FieldName, false);
+
+  if (nRecords == 0)
+    return false;
+
+  const size_t PosFound = InMemoryFcZoneSearch(PFCache, HitFc, nRecords);
+
+  if (PosFound == 0)
+    return false;
+
+  size_t Pos = PosFound - 1;
+  FC Fc2;
+
+  //
+  // Move to beginning of containing run.
+  //
+  while (Pos > 0)
+    {
+      Fc2 = PFCache->GetRecordFc(Pos - 1);
+
+      if (!Fc2.Contains(HitFc))
+        break;
+
+      --Pos;
+    }
+
+  FC Best;
+  bool found = false;
+
+  for (size_t j = Pos; j < nRecords; ++j)
+    {
+      Fc2 = PFCache->GetRecordFc(j);
+
+      if (!Fc2.Contains(HitFc))
+        break;
+
+      if (!found || Best.Contains(Fc2))
+        {
+          Best = Fc2;
+          found = true;
+        }
+    }
+
+  if (found && PeerFc)
+    *PeerFc = Best;
+
+  return found;
+}
+
+
+FC IDB::GetPeerFc(const FC& HitFc, const FIELD_PATH& FieldPath, STRING *NodeNamePtr)
+{
+  if (NodeNamePtr)
+    NodeNamePtr->Clear();
+
+  //
+  // A one-element path is flat.
+  //
+  if (FieldPath.size() < 2)
+    return HitFc;
+
+  //
+  // Last member is the root. Deliberately don't search it.
+  //
+  for (size_t i = 0; i + 1 < FieldPath.size(); ++i)
+    {
+      const STRING FieldName =
+          MainDfdt->GetFieldNameByFileNumber(FieldPath[i]);
+
+      if (FieldName.IsEmpty())
+        continue;
+
+      FC PeerFC;
+
+      if (FindPeerFc(HitFc, FieldName, &PeerFC))
+        {
+          if (NodeNamePtr)
+            *NodeNamePtr = FieldName;
+
+          return PeerFC;
+        }
+    }
+
+  //
+  // No useful structural container below root.
+  // Caller falls back to distance semantics.
+  //
+  return HitFc;
+}

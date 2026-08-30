@@ -635,7 +635,7 @@ int DFDT::Roots(STRLIST *ListPtr) const
   size_t     count = 0;
   for (size_t i=0; i<TotalEntries; i++)
     {
-      const char Seps[] = "\\/:";
+      const char Seps[] = "\\/|:";
       STRING     fn;
       size_t     len;
 
@@ -848,4 +848,106 @@ DFDT::~DFDT ()
   if (Table)
     delete[]Table;
 }
+
+
+STRING DFDT::GetFieldNameByFileNumber(uint16_t n) const
+{
+   if (n >0  &&  n <= TotalEntries) {
+    for (size_t i = 0; i < TotalEntries; ++i)
+        if (Table[i].GetFileNumber() == n) {
+            return Table[i].GetFieldName();
+	}
+     message_log(LOG_ERROR, "Filenumber %d not found. DFDT corrupt?", (int)n);
+   }
+  return NulString;
+}
+
+FIELD_PATH DFDT::GetFieldPath(uint16_t FileNumber) const
+{
+  if (FileNumber == 0 || FileNumber > TotalEntries)
+    return FIELD_PATH();
+
+  const STRING FieldName =
+      GetFieldNameByFileNumber(FileNumber);
+
+  if (FieldName.IsEmpty())
+    return FIELD_PATH();
+
+  return GetFieldPath(FieldName);
+}
+
+FIELD_PATH DFDT::GetFieldPath(const STRING& FieldName) const
+{
+  FIELD_PATH Path;
+
+  const INT FileNumber = GetFileNumber(FieldName);
+
+  if (FileNumber <= 0)
+    return Path;
+
+  Path.push_back((uint16_t)FileNumber);
+
+  //
+  // Work with the canonical name stored in the DFDT.
+  //
+  STRING Current =
+      GetFieldNameByFileNumber((uint16_t)FileNumber);
+
+  static const char Separators[] = "\\/|:";
+
+  while (!Current.IsEmpty())
+    {
+      const char  *s   = Current.c_str();
+      const size_t len = Current.GetLength();
+
+      INT ParentNumber = 0;
+
+      //
+      // Walk backwards.  The first prefix which is itself
+      // a defined field is our immediate ancestor.
+      //
+      for (size_t i = len; i > 0; --i)
+        {
+          const size_t pos = i - 1;
+          const char   ch  = s[pos];
+
+          if (strchr(Separators, ch) == NULL)
+            continue;
+
+          if (pos == 0)
+            continue;
+
+          const STRING ParentName(s, pos);
+
+          ParentNumber = GetFileNumber(ParentName);
+
+          if (ParentNumber > 0)
+            break;
+        }
+
+      if (ParentNumber <= 0)
+        break;
+
+      //
+      // Defensive guard. A proper prefix should obviously never
+      // resolve back to the same field.
+      //
+      if ((uint16_t)ParentNumber == Path.back())
+        {
+          message_log(LOG_ERROR,
+              "DFDT path loop for field '%s'",
+              Current.c_str());
+          break;
+        }
+
+      Path.push_back((uint16_t)ParentNumber);
+
+      Current =
+          GetFieldNameByFileNumber((uint16_t)ParentNumber);
+    }
+
+  return Path;
+}
+
+
 

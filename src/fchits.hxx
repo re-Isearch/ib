@@ -99,6 +99,8 @@ public:
   using container_type = std::vector<hit_type>;
   using const_iterator = container_type::const_iterator;
 
+  using const_reverse_iterator = container_type::const_reverse_iterator;
+
   FCHITS() = default;
 
   explicit FCHITS(const hit_type& fc)
@@ -319,6 +321,9 @@ public:
   const_iterator begin() const { return Buffer.begin(); }
   const_iterator end() const   { return Buffer.end(); }
 
+  const_reverse_iterator rbegin() const { return Buffer.rbegin(); }
+  const_reverse_iterator rend()   const { return Buffer.rend(); }
+
   void Write(FILE* fp) const;
   bool Read( FILE* fp);
 
@@ -337,6 +342,7 @@ class HITTABLE
 public:
   using hit_type       = FCHITS::hit_type;
   using const_iterator = FCHITS::const_iterator;
+  using const_reverse_iterator = FCHITS::const_reverse_iterator;
 
   // Append-only adapter for external hit producers.
   class SINK
@@ -488,6 +494,17 @@ public:
   {
     return Readable().end();
   }
+
+  const_reverse_iterator rbegin() const
+  {
+    return Readable().rbegin();
+  }
+
+  const_reverse_iterator rend() const
+  {
+    return Readable().rend();
+  }
+
 
   void Clear()
   {

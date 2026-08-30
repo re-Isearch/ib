@@ -35,6 +35,32 @@ class MDTREC;
 extern long __IB_RESULT_allocated_count; // Used to track stray RESULTs
 
 
+struct DISPLAY_MARKER
+{
+  STRING LexicalStart;
+  STRING LexicalEnd;
+
+  STRING EvidenceStart;
+  STRING EvidenceEnd;
+
+  bool IsEmpty() const {
+  return LexicalStart.IsEmpty()  &&
+         LexicalEnd.IsEmpty()    &&
+         EvidenceStart.IsEmpty() &&
+         EvidenceEnd.IsEmpty();
+  }
+
+};
+
+enum DISPLAY_MARKER_STYLE
+{
+  DisplayMarkerNone = 0,
+  DisplayMarkerText,
+  DisplayMarkerVT100,
+  DisplayMarkerMarkDown
+};
+
+
 struct EVIDENCE_COVER
 {
     FC     extent;
@@ -166,6 +192,19 @@ public:
   // Get the data
   void   GetRecordData(STRING *StringBuffer, DOCTYPE *DoctypePtr = NULL) const;
 
+  static const DISPLAY_MARKER& GetDisplayMarkers(DISPLAY_MARKER_STYLE Style);
+
+  bool PresentDisplay( const FC& Range, STRING *StringBuffer, DOCTYPE *DoctypePtr) const {
+    return PresentDisplay( Range, StringBuffer, DisplayMarkerVT100, DoctypePtr);
+  }
+
+  bool PresentDisplay( const FC& Range, STRING *StringBuffer,
+	DISPLAY_MARKER_STYLE Style = DisplayMarkerText, DOCTYPE *DoctypePtr = NULL) const {
+    return PresentDisplay( Range, StringBuffer, GetDisplayMarkers(Style), DoctypePtr);
+  }
+  // Display the hit with evidence wrapped 
+  bool PresentDisplay(const FC& Range, STRING *StringBuffer, const DISPLAY_MARKER& Marker,
+	DOCTYPE *DoctypePtr = NULL) const;
 
   bool PresentHit(const FC& Fc, STRING *StringBuffer, STRING *Term,
         const STRING& BeforeTerm, const STRING& AfterTerm, DOCTYPE *DoctypePtr = NULL,
@@ -177,6 +216,24 @@ public:
   // Context..
   EVIDENCE_COVERS GetEvidenceCovers(size_t Max) const;
   FC GetBestContextHit() const;
+
+
+  FC GetDisplayEvidence(DOCTYPE *DoctypePtr) const {
+   return GetDisplayEvidence(0, DoctypePtr);
+  }
+  FC GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr = NULL) const;
+
+  bool PresentBestDisplayEvidence( size_t MaxBytesAdvice, STRING *StringBuffer,
+    STRING *Term = NULL, const STRING& BeforeTerm = NulString, const STRING& AfterTerm = NulString,
+    DOCTYPE *DoctypePtr = NULL, STRING *TagPtr = NULL) const;
+
+  bool PresentBestDisplayEvidence(STRING *StringBuffer, STRING *Term = NULL,
+	const STRING& BeforeTerm = NulString, const STRING& AfterTerm = NulString,
+	DOCTYPE *DoctypePtr = NULL, STRING *TagPtr = NULL) const {
+    return PresentBestDisplayEvidence(130, StringBuffer, Term, BeforeTerm, AfterTerm,
+	DoctypePtr, TagPtr);
+  }
+
   bool PresentBestContextHit(STRING *StringBuffer, STRING *Term,
 	const STRING& BeforeTerm = NulString, const STRING& AfterTerm = NulString,
 	DOCTYPE *DoctypePtr = NULL, STRING *FieldNamePtr=NULL) const;
@@ -217,6 +274,7 @@ public:
 
   ~RESULT();
 private:
+  FC             GetAltContextHit() const;
   INDEX_ID       Index;
   _index_id_t    ExtIndex; // Other order
   STRING         Key;

@@ -199,6 +199,11 @@ public:
     return HitFc;
   }
 
+  virtual FC GetPeerFc(const FC& HitFc, const FIELD_PATH& FieldPath, STRING *NodeNamePtr = NULL) {
+    if (NodeNamePtr) NodeNamePtr->Clear();
+    return HitFc;
+  }
+
 #if 0
   virtual int GetNodeList (const GPTYPE& HitGp, TREENODELIST *NodeList) {
     return GetNodeList(FC(HitGp,HitGp), NodeList);

@@ -239,6 +239,9 @@ public:
      return TREENODE(fc, name);
   }
 
+  bool FindPeerFc(const FC& HitFc, const STRING& FieldName, FC *PeerFc);
+  FC GetPeerFc(const FC& HitFc, const FIELD_PATH& FieldPath, STRING *NodeNamePtr = NULL);
+
 #if 0
   int GetNodeList (const FC& HitFc, TREENODELIST *NodeList);
 #endif

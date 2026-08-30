@@ -2121,7 +2121,7 @@ again:
               if (ShowXML)
                 cout << "<HIT TERM=\"" << tstring << "\">";
               else
-                cout << "Hit: ";
+                cout << "Evidence: ";
 	      if (string.IsEmpty())
 		cout << "** Unavailable **";
               else

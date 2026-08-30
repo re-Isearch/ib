@@ -12,6 +12,9 @@ Description:	Class DFDT - Data Field Definitions Table
 
 class IDBOBJ;
 
+#include <vector>
+
+typedef std::vector<uint16_t> FIELD_PATH;
 
 // NOTE: The capacity for fields is limited at 65535 (16-bit int).
 // Realistic since we don't expect to ever see more than 600 fields/paths
@@ -61,6 +64,11 @@ public:
   STRING      FirstRoot() const;  // Returns first root
 
   STRING      GetFieldName(size_t Index) const;
+
+  STRING     GetFieldNameByFileNumber(uint16_t n) const ;
+  FIELD_PATH GetFieldPath(uint16_t FileNumber) const;
+  FIELD_PATH GetFieldPath(const STRING& FieldName) const;
+
   bool GetAttributes (const size_t Index, PATTRLIST AttributesBuffer) const;
   bool GetAttributes (const STRING& FieldName, PATTRLIST AttributesBuffer) const;
   size_t      GetTotalEntries() const { return TotalEntries; }
