@@ -397,6 +397,9 @@ public:
   }
 
   // Context Match
+  // TODO:   REPLACE THESE: We no longer want to have Before, After but
+  // have now DISPLAY_MARKER  which includes features to distinguish between
+  // hits that have lexical and object evidence. 
   bool Context(const RESULT& ResultRecord, PSTRING Line, STRING *Term = NULL,
 	const STRING& Before = NulString, const STRING& After = NulString,
 	STRING *TagName = NULL) const;

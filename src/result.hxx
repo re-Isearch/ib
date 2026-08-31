@@ -74,6 +74,33 @@ struct COVER_WORK
     UINT           evidence;
 };
 
+struct DISPLAY_EVIDENCE
+{
+  //
+  // What evidence actually won.
+  //
+  EVIDENCE_COVER Cover;
+
+  //
+  // What bytes PresentDisplay() should read.
+  //
+  FC DisplayExtent;
+
+  //
+  // Smallest known structural container containing Cover.extent.
+  //
+  // This may be much larger than DisplayExtent.
+  //
+  FC     ContainerExtent;
+  STRING ContainerName;
+
+  bool HasContainer() const
+  {
+    return !ContainerName.IsEmpty();
+  }
+};
+
+
 typedef std::vector<EVIDENCE_COVER> EVIDENCE_COVERS;
 
 
@@ -206,6 +233,9 @@ public:
   bool PresentDisplay(const FC& Range, STRING *StringBuffer, const DISPLAY_MARKER& Marker,
 	DOCTYPE *DoctypePtr = NULL) const;
 
+
+  // TODO:   REPLACE: We no longer want to have Before, After but
+  // have now DISPLAY_MARKER  which includes features to distinguish between
   bool PresentHit(const FC& Fc, STRING *StringBuffer, STRING *Term,
         const STRING& BeforeTerm, const STRING& AfterTerm, DOCTYPE *DoctypePtr = NULL,
 	STRING *Tag = NULL) const;
@@ -218,10 +248,18 @@ public:
   FC GetBestContextHit() const;
 
 
+
+  DISPLAY_EVIDENCE GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const;
+  DISPLAY_EVIDENCE GetDisplayEvidence(DOCTYPE *DoctypePtr) const {
+    return GetDisplayEvidence( (size_t)0, DoctypePtr);
+  }
+
+#if 0
   FC GetDisplayEvidence(DOCTYPE *DoctypePtr) const {
    return GetDisplayEvidence(0, DoctypePtr);
   }
   FC GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr = NULL) const;
+#endif
 
   bool PresentBestDisplayEvidence( size_t MaxBytesAdvice, STRING *StringBuffer,
     STRING *Term = NULL, const STRING& BeforeTerm = NulString, const STRING& AfterTerm = NulString,
