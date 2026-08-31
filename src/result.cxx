@@ -1695,10 +1695,7 @@ static DOUBLE DisplayEvidenceValue(
 
 FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 {
-    cerr << "GetDisplayEvidence(MAX): "
-         << MaxBytesAdvice
-         << " doctype=" << (void *)DoctypePtr
-         << endl ;
+//    cerr << "GetDisplayEvidence(MAX): " << MaxBytesAdvice << " doctype=" << (void *)DoctypePtr << endl ;
 
 
   if (HitTable.IsEmpty() || RecordEnd < RecordStart)
@@ -2019,7 +2016,7 @@ FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
               FC globalBest(best);
               globalBest += offset;
 
-#if 1
+#if 0
   cerr << "STRUCT:"
          << " best(local)="
          << best.GetFieldStart() << "-"
@@ -2177,8 +2174,11 @@ FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
   //
   // Flat WIKI TEXT will normally arrive here.
   //
-  if (bestIsSingle &&
-      !bestHasStructure)
+#if 1
+  if (!bestHasStructure && ExtentWidth(best) < MaxBytesAdvice)
+#else
+  if (bestIsSingle && !bestHasStructure)
+#endif
     {
       GPTYPE start =
           best.GetFieldStart();

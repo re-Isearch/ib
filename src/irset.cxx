@@ -5852,7 +5852,7 @@ size_t atomicIRSET::ReduceToTop(size_t Total, enum SortBy sortBy)
     return TotalEntries;
   }
 
-#if 1
+#if 0
 DOUBLE best = -DBL_MAX;
 
 const auto start = std::chrono::steady_clock::now();
