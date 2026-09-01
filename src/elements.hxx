@@ -13,5 +13,6 @@ const char ELEMENT_Raw      = 'R';
 const char ELEMENT_Location = 'L';
 const char ELEMENT_Metadata = 'M';
 const char ELEMENT_Highlight= 'H';
+const char ELEMENT_Context  = 'C';
 
 #endif

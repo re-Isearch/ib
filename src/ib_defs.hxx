@@ -479,6 +479,7 @@ extern const STRING SOURCE_MAGIC;
 extern const STRING LOCATION_MAGIC;
 extern const STRING METADATA_MAGIC;
 extern const STRING HIGHLIGHT_MAGIC;
+extern const STRING CONTEXT_MAGIC;
 
 
 // Attributes

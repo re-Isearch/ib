@@ -397,18 +397,27 @@ public:
   }
 
   // Context Match
-  // TODO:   REPLACE THESE: We no longer want to have Before, After but
-  // have now DISPLAY_MARKER  which includes features to distinguish between
-  // hits that have lexical and object evidence. 
-  bool Context(const RESULT& ResultRecord, PSTRING Line, STRING *Term = NULL,
-	const STRING& Before = NulString, const STRING& After = NulString,
-	STRING *TagName = NULL) const;
-  STRING      Context(const RESULT& ResultRecord,
-	const STRING& Before = NulString, const STRING& After = NulString, STRING *TagName = NULL) const {
+
+  bool		Context(const RESULT& ResultRecord,
+	PSTRING Line, const DISPLAY_MARKER &m, STRING *TagName = NULL, size_t MaxAdvice = 130);
+  bool		Context(const RESULT& ResultRecord,
+	PSTRING Line, const STRING& s, STRING *TagName = NULL, size_t MaxAdvice = 130) {
+    return Context(ResultRecord, Line, RESULT::GetDisplayMarkers(s), TagName, MaxAdvice);
+  }
+  STRING	Context(const RESULT& ResultRecord,
+	const DISPLAY_MARKER &m, STRING *TagName = NULL) {
     STRING line;
-    Context(ResultRecord, &line, NULL, Before, After, TagName);
+    Context(ResultRecord, &line, m, TagName); 
     return line;
   }
+/*
+  STRING      Context(const RESULT& ResultRecord,
+        const STRING& s, STRING *TagName = NULL) const {
+    return Context(ResultRecord, RESULT::GetDisplayMarkers(s), TagName);
+  }
+*/
+
+  // These have a different function...
   bool NthContext(size_t N, const RESULT& ResultRecord, PSTRING Line, STRING *Term = NULL,
         const STRING& Before = NulString, const STRING& After = NulString, STRING *TagName = NULL) const {
     return (&ResultRecord)->PresentNthHit(N, Line, Term, Before, After, 

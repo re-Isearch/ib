@@ -128,6 +128,7 @@ const STRING SOURCE_MAGIC   (ELEMENT_Raw); /* CNIDR does not have this (Raw Reco
 const STRING LOCATION_MAGIC (ELEMENT_Location); /* Extension, redirect */
 const STRING METADATA_MAGIC (ELEMENT_Metadata); /* Metadata Record */
 const STRING HIGHLIGHT_MAGIC (ELEMENT_Highlight);
+const STRING CONTEXT_MAGIC   (ELEMENT_Context); 
 
 
 

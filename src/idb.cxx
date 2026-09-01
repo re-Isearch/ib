@@ -3723,6 +3723,17 @@ STRLIST IDB::GetXMLAllHits(const RESULT& ResultRecord) const
 
 
 // Context Match
+
+bool IDB::Context(const RESULT& ResultRecord, PSTRING Line,
+        const DISPLAY_MARKER &m, STRING *TagName, size_t Advice)
+{
+  return  (&ResultRecord)->PresentBestDisplayEvidence(Advice, m,
+	Line, GetDocTypePtr( ResultRecord.GetDocumentType() ), TagName);
+}
+
+
+#if 0
+// Obsolete!
 bool IDB::Context(const RESULT& ResultRecord, PSTRING Line, PSTRING Term,
 	const STRING& Before, const STRING& After, STRING *TagName) const
 {
@@ -3734,6 +3745,8 @@ bool IDB::Context(const RESULT& ResultRecord, PSTRING Line, PSTRING Term,
         GetDocTypePtr( ResultRecord.GetDocumentType() ), TagName);
 #endif
 }
+
+#endif
 
 
 bool IDB::XMLContext(const RESULT& ResultRecord, PSTRING Line, PSTRING Term,

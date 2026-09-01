@@ -2116,12 +2116,12 @@ again:
 	      if (ShowXML)
 		pdb->XMLContext(result, &string, &tstring, "MATCH");
 	      else
-		pdb->Context(result, &string, &tstring);
+		pdb->Context(result, &string, RESULT::GetDisplayMarkers(DisplayMarkerVT100), &tstring);
 
               if (ShowXML)
                 cout << "<HIT TERM=\"" << tstring << "\">";
               else
-                cout << "Evidence: ";
+                cout << "Evidence: [\033[3m" << tstring << "\033[23m] ";
 	      if (string.IsEmpty())
 		cout << "** Unavailable **";
               else

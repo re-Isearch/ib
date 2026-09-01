@@ -391,12 +391,14 @@ public:
   }
 
   // Context Match
-  bool Context(const RESULT& ResultRecord, PSTRING Line, STRING *Term = NULL,
-	const STRING& Before = NulString, const STRING& After = NulString) const;
+
+  bool Context(const RESULT& ResultRecord,
+	PSTRING Line, const DISPLAY_MARKER &m, STRING *TagName = NULL, size_t MaxAdvice = 130);
+
   STRING      Context(const RESULT& ResultRecord,
-	const STRING& Before = NulString, const STRING& After = NulString) const {
+	const DISPLAY_MARKER &m, STRING *TagName = NULL, size_t MaxAdvice = 130) {
     STRING line;
-    Context(ResultRecord, &line, NULL, Before, After);
+    Context(ResultRecord, &line, m, TagName, MaxAdvice);
     return line;
   }
   bool NthContext(size_t N, const RESULT& ResultRecord, PSTRING Line, STRING *Term = NULL,

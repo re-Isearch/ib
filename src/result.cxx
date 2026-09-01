@@ -2255,6 +2255,24 @@ FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 #endif
 
 
+bool RESULT::PresentBestDisplayEvidence(size_t MaxBytesAdvice,
+    const DISPLAY_MARKER& Marker, STRING *StringBuffer, DOCTYPE *DoctypePtr, STRING *TagPtr) const
+{ 
+  const DISPLAY_EVIDENCE evidence = GetDisplayEvidence( MaxBytesAdvice, DoctypePtr);
+  bool result = PresentDisplay(evidence.DisplayExtent, StringBuffer, Marker, DoctypePtr);
+  if (result) {
+    if (StringBuffer && !TagPtr) {
+      STRING s;
+       s << "[" << evidence.ContainerName << "] " << *StringBuffer;
+       *StringBuffer = s;
+    } else if (TagPtr) *TagPtr = evidence.ContainerName;
+  }
+  return result;
+} 
+
+
+
+// OBSOLETE (to be removed)
 bool RESULT::PresentBestDisplayEvidence(
     size_t MaxBytesAdvice,
     STRING *StringBuffer,
@@ -2312,6 +2330,21 @@ const DISPLAY_MARKER& RESULT::GetDisplayMarkers(DISPLAY_MARKER_STYLE Style)
     case DisplayMarkerMarkDown: return DisplayMarkersMarkDown;
    }
   // NOT REACHED 
+}
+
+const DISPLAY_MARKER& GetDisplayMarkers(const STRING& Style)
+{
+  if (Style.IsNumber())
+    return GetDisplayMarkers( (DISPLAY_MARKER_STYLE)(Style.GetInt()));
+  if (Style.IsEmpty() || (Style ^= "None")) 
+    return GetDisplayMarkers( DisplayMarkerNone );
+  if (Style ^= "Text") return GetDisplayMarkers( DisplayMarkerText );
+  if (Style ^= "VT100") return GetDisplayMarkers( DisplayMarkerVT100 );
+  if ((Style ^= "MarkDown") || (Style ^= "MD"))
+    return GetDisplayMarkers( DisplayMarkerMarkDown );
+
+  // Default
+  return GetDisplayMarkers(DisplayMarkerNone);
 }
 
 

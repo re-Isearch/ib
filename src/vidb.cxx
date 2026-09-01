@@ -1984,15 +1984,17 @@ bool VIDB::Headline(const RESULT& ResultRecord, PSTRING StringBuffer) const
 }
 
 // Context Match
-bool VIDB::Context(const RESULT& ResultRecord, PSTRING Line, PSTRING Term,
-	const STRING& Before, const STRING& After) const
+
+bool VIDB::Context(const RESULT& ResultRecord,
+  PSTRING Line, const DISPLAY_MARKER &m, STRING *TagName, size_t MaxAdvice)
 {
   RESULT Result;
   const size_t i = VirtualSet (ResultRecord, &Result);
   if (i)
-    return c_dblist[i-1]->Context (Result, Line, Term, Before, After);
+    return c_dblist[i-1]->Context (Result, Line, m, TagName, MaxAdvice);
   return false;
 }
+
 
 bool VIDB::NthContext(size_t N, const RESULT& ResultRecord, PSTRING Line, STRING *Term,
         const STRING& Before, const STRING& After) const

@@ -219,7 +219,11 @@ public:
   // Get the data
   void   GetRecordData(STRING *StringBuffer, DOCTYPE *DoctypePtr = NULL) const;
 
+  static const DISPLAY_MARKER& GetDisplayMarkers(const STRING& Style);
   static const DISPLAY_MARKER& GetDisplayMarkers(DISPLAY_MARKER_STYLE Style);
+
+  bool PresentBestDisplayEvidence(size_t MaxBytesAdvice, const DISPLAY_MARKER &Marker,
+    STRING *StringBuffer, DOCTYPE *DoctypePtr = NULL, STRING *TagPtr = NULL) const;
 
   bool PresentDisplay( const FC& Range, STRING *StringBuffer, DOCTYPE *DoctypePtr) const {
     return PresentDisplay( Range, StringBuffer, DisplayMarkerVT100, DoctypePtr);
@@ -335,6 +339,7 @@ private:
   FCT            HitTable;
 #endif
 };
+
 
 extern const RESULT& NulResult;
 
