@@ -11,6 +11,7 @@ Description:	Class FC - Field Coordinates
 #include "defs.hxx"
 
 class FC {
+friend class DFD_FC_RANGE;
 public:
   FC();
   FC(const FC& Fc);

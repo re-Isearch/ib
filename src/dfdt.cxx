@@ -949,5 +949,127 @@ FIELD_PATH DFDT::GetFieldPath(const STRING& FieldName) const
   return Path;
 }
 
+bool DFDT::SaveFcRanges(const STRING& FileName)
+{
+  PFILE fp = FileName.Fopen("wb");
+  if (fp == NULL)
+    return false;
+
+  putObjID(objDFDTRANGE, fp);
+  ::Write((BYTE)1, fp);                 // version
+  ::Write((UINT2)TotalEntries, fp);
+
+  for (size_t n = 0; n < TotalEntries; n++)
+    {
+      const INT fileNumber = Table[n].GetFileNumber();
+      ::Write((INT2)fileNumber, fp);
+      if (FcRanges[n].Valid)
+	{
+	  ::Write((INT2)n, fp);
+	  FcRanges[n].Fc.Write(fp);
+	}
+
+    }
+  const bool result = (ferror(fp) == 0);
+  fclose(fp);
+
+  if (result)
+    FcRangesChanged = false;
+
+  return result;
+}
+
+bool DFDT::LoadFcRanges(const STRING& FileName)
+{
+  ClearFcRanges();
+
+  PFILE fp = FileName.Fopen("rb");
+  if (fp == NULL)
+    return false;
+
+  bool ok = false;
+
+  do {
+    if (getObjID(fp) != objDFDTRANGE)
+      break;
+
+    BYTE version;
+    ::Read(&version, fp);
+
+    if (version != 1)
+      break;
+
+    UINT2 count;
+    ::Read(&count, fp);
+
+    // Cannot have more cached fields than DFDs.
+    if (count > TotalEntries)
+      break;
+
+    for (size_t i = 0; i < count; i++)
+      {
+        INT2 fileNumber;
+        ::Read(&fileNumber, fp);
+
+        if (fileNumber <= 0)
+          {
+            ClearFcRanges();
+            fclose(fp);
+            return false;
+          }
+
+        // Make sure this FileNumber actually belongs to this DFDT.
+        bool found = false;
+        for (size_t x = 0; x < TotalEntries; x++)
+          {
+            if (Table[x].GetFileNumber() == fileNumber)
+              {
+                found = true;
+                break;
+              }
+          }
+
+        if (!found)
+          {
+            ClearFcRanges();
+            fclose(fp);
+            return false;
+          }
+
+        FC fc;
+        if (!fc.Read(fp))
+          {
+            ClearFcRanges();
+            fclose(fp);
+            return false;
+          }
+
+        if ((size_t)fileNumber >= FcRanges.size())
+          FcRanges.resize(fileNumber + 1);
+
+        FcRanges[fileNumber].Fc    = fc;
+        FcRanges[fileNumber].Valid = true;
+      }
+
+    if (ferror(fp))
+      break;
+
+    ok = true;
+
+  } while (0);
+
+  fclose(fp);
+
+  if (!ok)
+    ClearFcRanges();
+
+  FcRangesChanged = false;
+  return ok;
+}
 
 
+void DFDT::ClearFcRanges(bool markChanged)
+{
+  FcRanges.clear();
+  FcRangesChanged = markChanged;
+}

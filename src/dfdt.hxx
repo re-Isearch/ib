@@ -9,12 +9,53 @@ Description:	Class DFDT - Data Field Definitions Table
 #define DFDT_HXX
 
 #include "dfd.hxx"
+#include "fc.hxx"
 
 class IDBOBJ;
 
 #include <vector>
 
 typedef std::vector<uint16_t> FIELD_PATH;
+
+
+struct DFD_FC_RANGE {
+  bool   Valid;
+  FC     Fc;
+
+  DFD_FC_RANGE() : Valid(false) {}
+
+  void Add(const FC& fc)
+  {
+    if (!Valid) {
+      Fc = fc;
+      Valid = true;
+    } else {
+      if (fc.GetFieldStart() < Fc.FieldStart) {
+        Fc.FieldStart = fc.GetFieldStart();
+      }
+      if (fc.GetFieldEnd() > Fc.FieldEnd) {
+        Fc.FieldEnd = fc.GetFieldEnd();
+      }
+    }
+  }
+
+  bool Overlaps(const FC& fc) const
+  {
+    // Unknown must never reject.
+    if (!Valid)
+      return true;
+
+    return fc.GetFieldEnd() >= Fc.FieldStart &&
+           fc.GetFieldStart() <= Fc.FieldEnd;
+  }
+
+  bool Contains(GPTYPE gp) const
+  {
+    // Unknown must never reject.
+    return !Valid || (gp >= Fc.FieldStart && gp <= Fc.FieldEnd);
+  }
+};
+
 
 // NOTE: The capacity for fields is limited at 65535 (16-bit int).
 // Realistic since we don't expect to ever see more than 600 fields/paths
@@ -89,9 +130,22 @@ public:
                 return Table ? Table->checkFieldName(FieldName) : true;
   }
 
+
+  void UpdateFcRange(INT n, const FC& fc) {
+    if (n <= 0) return;
+    if (FcRanges.size() <= (size_t)n) FcRanges.resize(n + 1);
+    FcRanges[n].Add(fc);
+  }
+  bool LoadFcRanges(const STRING& FileName);
+  bool SaveFcRanges(const STRING& FileName);
+
 private:
 //void Initialize();
 //
+  std::vector<DFD_FC_RANGE> FcRanges;
+  void        ClearFcRanges(bool markChanged = false);
+  bool        FcRangesChanged {false};
+
   size_t      FieldExists(const STRING& FieldName, STRING *Val) const;
   INT         GetNewFileNumber() const;
   bool Expand();
