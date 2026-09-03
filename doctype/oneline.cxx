@@ -63,7 +63,7 @@ void ONELINE::ParseRecords(const RECORD& FileRecord)
     // If there is a newline character, advance record_end to consume it, 
     // keeping the file records perfectly seamless (no gaps).
     if (next_nl) {
-        record_end; // Points right at the '\n' index
+        record_end++; // Points right at the '\n' index
     }
 
     // Maintain original length filter criteria

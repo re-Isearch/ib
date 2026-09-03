@@ -6250,9 +6250,13 @@ QueryOptimizationResult IDB::OptimizeSQuery(SQUERY* Query)
      * Negative infinity is intentionally retained because it may represent
      * a known zero-frequency term and should therefore sort first.
      */
-
+#if 0
     if (std::isnan(Entry.Expectation))
         Entry.Expectation = std::numeric_limits<double>::infinity();
+#else
+    if (std::isnan(Entry.Expectation))
+	Entry.Expectation = std::numeric_limits<double>::max();
+#endif
   }
 
   Result.PlanType = QueryPlanPureAnd;

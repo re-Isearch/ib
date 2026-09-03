@@ -9,6 +9,7 @@ Author:		Jim Fullton, Jim.Fullton@cnidr.org
 #include "doctype.hxx"
 #include <ctype.h>
 
+
 /* add miscellaneous PATO defs here.  clean up later */
 
 #define PATO_MAXSTR 256
@@ -317,9 +318,9 @@ USPAT::Present(const RESULT& ResultRecord, const STRING& ElementSet,
     pato_Get_PN(ThePatent,PN,64);
     AddCommas(PN,PN2);
     if(PreferredRecordSyntax->Equals(SutrsRecordSyntax))
-      sprintf(MyString,"(%s) %s",PN2,TTL);
+      snprintf(MyString, sizeof(MyString), "(%s) %s",PN2,TTL);
     else
-      sprintf(MyString,"(<B>%s</B>) %s",PN2,TTL);
+      snprintf(MyString,sizeof(MyString), "(<B>%s</B>) %s",PN2,TTL);
     *StringBuffer=MyString;
   }else if(ElementSet.Equals("PN")){
     char PN[64];
@@ -1794,7 +1795,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
       pato_Write(Output, "</B></TD></TR>\n");
       
       Field=pato_FindField(Group,"PD2");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_ExpandDate(S,T);
 	pato_Write(Output,"<TR>");
@@ -1804,7 +1805,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output, "</B></TD></TR>\n");
       }
       Field=pato_FindField(Group,"PCP");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_Write(Output,"<TR>");
 	pato_Write(Output,"<TD>PCT Pub. No.: </TD>");
@@ -1813,7 +1814,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output, "</B></TD></TR>\n");
       }
       Field=pato_FindField(Group,"PCD");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_ExpandDate(S,T);
 	pato_Write(Output,"<TR>");
@@ -2063,24 +2064,24 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
       
       while ( (Group != NULL) && (strcmp(Group->ID, "PRIR") == 0) ) {
 	Field = pato_FindField(Group, "APD");
-	if(Field->Data){
+	if(*(Field->Data)){
 	  strcpy(S,Field->Data);
 	  pato_ExpandDate(S,T);		// date in T
 	}
 	
 	Field = pato_FindField(Group, "CNT");
-	if(Field->Data){
+	if(&(Field->Data)){
 	  strcpy(Code,Field->Data);
 	}
 	
 	if ( Code[2] == 'X') Code[2] = '\0';
 	// write date/code pair
 	char oBuf[256];
-	sprintf(oBuf,"<TD WIDTH=100%%>%s [%s]</TD>",T,Code);
+	snprintf(oBuf, sizeof(oBuf), "<TD WIDTH=100%%>%s [%s]</TD>",T,Code);
 	pato_Write(Output,"<TR>");
 	pato_Write(Output,oBuf);
 	Field = pato_FindField(Group, "APN");
-	if(Field->Data){
+	if(*(Field->Data)){
 	  strcpy(oBuf,Field->Data);
 	  pato_Write(Output,"<TD WIDTH=50% ALIGN=RIGHT>");
 	  pato_Write(Output,oBuf);
@@ -2118,7 +2119,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  
 	  if(bold)
 	    pato_Write(Output,"<B>");
-	  sprintf(xBuf,"%s %s/%s",S,T,U);
+	  snprintf(xBuf,sizeof(xBuf), "%s %s/%s",S,T,U);
 	  
 	  pato_Write(Output,xBuf);
 	  if(bold){
@@ -2154,9 +2155,9 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	
 	strcpy(t, v);
 	if ( t[6] == '\0')
-	  sprintf(s, "%c%c%c", t[3], t[4], t[5]);
+	  snprintf(s,sizeof(s), "%c%c%c", t[3], t[4], t[5]);
 	else
-	  sprintf(s, "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
+	  snprintf(s,sizeof(s), "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
 	
 	t[3] = '\0';
 	x = 0;
@@ -2178,7 +2179,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output,"<TD ALIGN=RIGHT WIDTH=50%><B>");
 	
 	if (isdigit(u[0])) {		// No 'D' class files available yet
-	  sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	  snprintf(w, sizeof(w), "/CLASSES/%s/%s.html", u, u);
 	  pato_Write(Output,"<a href=\"");
 	  pato_Write(Output, w);
 	  pato_Write(Output,"\">");
@@ -2218,9 +2219,9 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  strcpy(t, v);
 	  
 	  if ( t[6] == '\0' )
-	    sprintf(s, "%c%c%c", t[3], t[4], t[5]);
+	    snprintf(s, sizeof(s), "%c%c%c", t[3], t[4], t[5]);
 	  else
-	    sprintf(s, "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
+	    snprintf(s, sizeof(s), "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
 	  
 	  t[3] = '\0';
 	  x = 0;
@@ -2240,7 +2241,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  while (*p == ' ') p++;	// cut off initial spaces from v - gem
 	  
 	  if ( isdigit(u[0]) ) {	// No 'D' class files available yet
-	    sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	    snprintf(w, sizeof(w), "/CLASSES/%s/%s.html", u, u);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, w);
 	    pato_Write(Output,"\">");
@@ -2295,7 +2296,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  p = t;
 	  while (*p == ' ') p++;
 	  if ( isdigit(u[0]) ) {	// No 'D' class files available yet
-	    sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	    snprintf(w, sizeof(w),  "/CLASSES/%s/%s.html", u, u);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, w);
 	    pato_Write(Output,"\">");
@@ -2431,7 +2432,7 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  scl[3]='\0';
 	  strcpy(ex,S+6);
 	  if (isdigit(temp[0])) {
-	    sprintf(bf, "/CLASSES/%s/%s.html", temp, temp);
+	    snprintf(bf, sizeof(bf), "/CLASSES/%s/%s.html", temp, temp);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, bf);
 	    pato_Write(Output,"\">");
@@ -2446,9 +2447,9 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  pato_Write(Output, "/");
 	  
 	  if(!strlen(ex))
-	    sprintf(bf,"%s",scl);
+	    snprintf(bf, sizeof(bf), "%s",scl);
 	  else
-	    sprintf(bf,"%s%s",scl,ex);
+	    snprintf(bf, sizeof(bf), "%s%s",scl,ex);
 	  pato_Write(Output, bf);
 	  
 	}
@@ -2506,9 +2507,9 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  scl[3]='\0';
 	  strcpy(ex,S+6);
 	  if(!strlen(ex))
-	    sprintf(bf,"%s/%s",cl,scl);
+	    snprintf(bf, sizeof(bf), "%s/%s",cl,scl);
 	  else
-	    sprintf(bf,"%s/%s %s",cl,scl,ex);
+	    snprintf(bf, sizeof(bf), "%s/%s %s",cl,scl,ex);
 	  pato_Write(Output,bf);
 	}else
 	  pato_Write(Output, " ");
@@ -2641,16 +2642,16 @@ USPAT::pato_HtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	
 	i=atoi(Field->Data);
 	if(i>1)
-	  sprintf(fBuf,"%d Claims, ",i);
+	  snprintf(fBuf, sizeof(fBuf), "%d Claims, ",i);
 	else if(i==1)
-	  sprintf(fBuf,"%d Claim, ",i);
+	  snprintf(fBuf,sizeof(fBuf), "%d Claim, ",i);
 	pato_Write(Output,"<CENTER><B>");
 	pato_Write(Output, fBuf);
 	pato_Write(Output, "</B>\n");
       }
     }else{
       char fBuf[256];
-      sprintf(fBuf,"No Claims, ");
+      snprintf(fBuf, sizeof(fBuf), "No Claims, ");
       pato_Write(Output,"<CENTER><B>");
       pato_Write(Output, fBuf);
       pato_Write(Output, "</B>\n");
@@ -2902,7 +2903,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
       pato_Write(Output, "</B><p>\n");
       
       Field=pato_FindField(Group,"PD2");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_ExpandDate(S,T);
 	pato_Write(Output,"102(e) Date: ");
@@ -2911,7 +2912,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output, "</B><p>\n");
       }
       Field=pato_FindField(Group,"PCP");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_Write(Output,"PCT Pub. No.: ");
 	pato_Write(Output,"<B>");
@@ -2919,7 +2920,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output, "</B><p>\n");
       }
       Field=pato_FindField(Group,"PCD");
-      if(Field->Data){
+      if(*(Field->Data)){
 	strcpy(S,Field->Data);
 	pato_ExpandDate(S,T);
 	pato_Write(Output,"PCT Pub. Date: ");
@@ -3153,13 +3154,13 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
       
       while ( (Group != NULL) && (strcmp(Group->ID, "PRIR") == 0) ) {
 	Field = pato_FindField(Group, "APD");
-	if(Field->Data){
+	if(*(Field->Data)){
 	  strcpy(S,Field->Data);
 	  pato_ExpandDate(S,T);		// date in T
 	}
 	
 	Field = pato_FindField(Group, "CNT");
-	if(Field->Data){
+	if(*(Field->Data)){
 	  strcpy(Code,Field->Data);
 	}
 	
@@ -3168,10 +3169,10 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	}
 	// write date/code pair
 	char oBuf[256];
-	sprintf(oBuf, " %s [%s] ", T, Code);
+	snprintf(oBuf, sizeof(oBuf), " %s [%s] ", T, Code);
 	pato_Write(Output, oBuf);
 	Field = pato_FindField(Group, "APN");
-	if(Field->Data) {
+	if(*(Field->Data)) {
 	  strcpy(oBuf,Field->Data);
 	  pato_Write(Output,oBuf);
 	}
@@ -3206,7 +3207,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  
 	  if(bold)
 	    pato_Write(Output,"<B>");
-	  sprintf(xBuf,"%s %s/%s",S,T,U);
+	  snprintf(xBuf, sizeof(xBuf), "%s %s/%s",S,T,U);
 	  
 	  pato_Write(Output,xBuf);
 	  if(bold){
@@ -3240,9 +3241,9 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	
 	strcpy(t, v);
 	if ( t[6] == '\0')
-	  sprintf(s, "%c%c%c", t[3], t[4], t[5]);
+	  snprintf(s, sizeof(s), "%c%c%c", t[3], t[4], t[5]);
 	else
-	  sprintf(s, "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
+	  snprintf(s, sizeof(s), "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
 	
 	t[3] = '\0';
 	x = 0;
@@ -3263,7 +3264,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	pato_Write(Output, "<B>U.S. Cl.:</B> <B>");
 	
 	if (isdigit(u[0])) {		// No 'D' class files available yet
-	  sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	  snprintf(w, sizeof(w), "/CLASSES/%s/%s.html", u, u);
 	  pato_Write(Output,"<a href=\"");
 	  pato_Write(Output, w);
 	  pato_Write(Output,"\">");
@@ -3303,9 +3304,9 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  strcpy(t, v);
 	  
 	  if ( t[6] == '\0' )
-	    sprintf(s, "%c%c%c", t[3], t[4], t[5]);
+	    snprintf(s, sizeof(s),  "%c%c%c", t[3], t[4], t[5]);
 	  else
-	    sprintf(s, "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
+	    snprintf(s, sizeof(s), "%c%c%c.%c%c%c", t[3], t[4], t[5], t[6], t[7], t[8]);
 	  
 	  t[3] = '\0';
 	  x = 0;
@@ -3325,7 +3326,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  while (*p == ' ') p++;	// cut off initial spaces from v - gem
 	  
 	  if ( isdigit(u[0]) ) {	// No 'D' class files available yet
-	    sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	    snprintf(w, sizeof(w), "/CLASSES/%s/%s.html", u, u);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, w);
 	    pato_Write(Output,"\">");
@@ -3375,7 +3376,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  p = t;
 	  while (*p == ' ') p++;
 	  if ( isdigit(u[0]) ) {	// No 'D' class files available yet
-	    sprintf(w, "/CLASSES/%s/%s.html", u, u);
+	    snprintf(w, sizeof(w), "/CLASSES/%s/%s.html", u, u);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, w);
 	    pato_Write(Output,"\">");
@@ -3504,7 +3505,7 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  strcpy(ex,T+6);
 	  space(S,20,Output);
 	  if (isdigit(temp[0])) {
-	    sprintf(bf, "/CLASSES/%s/%s.html", temp, temp);
+	    snprintf(bf, sizeof(bf), "/CLASSES/%s/%s.html", temp, temp);
 	    pato_Write(Output,"<a href=\"");
 	    pato_Write(Output, bf);
 	    pato_Write(Output,"\">");
@@ -3519,9 +3520,9 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  pato_Write(Output, "/");
 	  
 	  if(!strlen(ex))
-	    sprintf(bf,"%s",scl);
+	    snprintf(bf, sizeof(bf), "%s",scl);
 	  else
-	    sprintf(bf,"%s%s",scl,ex);
+	    snprintf(bf, sizeof(bf), "%s%s",scl,ex);
 	  pato_Write(Output, bf);
 	  
 	}
@@ -3570,9 +3571,9 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	  scl[3]='\0';
 	  strcpy(ex,S+6);
 	  if(!strlen(ex))
-	    sprintf(bf,"%s/%s",cl,scl);
+	    snprintf(bf, sizeof(bf), "%s/%s",cl,scl);
 	  else
-	    sprintf(bf,"%s/%s %s",cl,scl,ex);
+	    snprintf(bf, sizeof(bf), "%s/%s %s",cl,scl,ex);
 	  pato_Write(Output,bf);
 	}else
 	  pato_Write(Output, " ");
@@ -3704,16 +3705,16 @@ USPAT::pato_TextHtmlElement(PATO_OUTPUT* Output, PATO_PATENT* Patent,
 	
 	i=atoi(Field->Data);
 	if(i>1)
-	  sprintf(fBuf,"%d Claims, ",i);
+	  snprintf(fBuf, sizeof(fBuf), "%d Claims, ",i);
 	else if(i==1)
-	  sprintf(fBuf,"%d Claim, ",i);
+	  snprintf(fBuf, sizeof(fBuf), "%d Claim, ",i);
 	pato_Write(Output,"<CENTER><B>");
 	pato_Write(Output, fBuf);
 	pato_Write(Output, "</B>\n");
       }
     }else{
       char fBuf[256];
-      sprintf(fBuf,"No Claims, ");
+      snprintf(fBuf, sizeof(fBuf), "No Claims, ");
       pato_Write(Output,"<CENTER><B>");
       pato_Write(Output, fBuf);
       pato_Write(Output, "</B>\n");
@@ -3938,12 +3939,12 @@ USPAT::PatentPath(char* fn, char* path) const
   if (fn[2] == 'T') {
     strcpy(path, fn);
   } else {
-    sprintf(t, "00%s", fn+2);
-    sprintf(d1, "%c%c%c/", t[0], t[1], t[2]);
-    sprintf(d2, "%c%c%c/", t[3], t[4], t[5]);
-    sprintf(d3, "%c%c%c/", t[6], t[7], t[8]);
-    sprintf(buf, "%s%s%s", d1, d2, d3);
-    sprintf(path, "%s%s", buf, fn);
+    snprintf(t,sizeof(t),  "00%s", fn+2);
+    snprintf(d1, sizeof(d1), "%c%c%c/", t[0], t[1], t[2]);
+    snprintf(d2, sizeof(d2), "%c%c%c/", t[3], t[4], t[5]);
+    snprintf(d3, sizeof(d3), "%c%c%c/", t[6], t[7], t[8]);
+    snprintf(buf,sizeof(buf),  "%s%s%s", d1, d2, d3);
+    snprintf(path,sizeof(buf), "%s%s", buf, fn);
   }
 }
 /*
@@ -4267,8 +4268,7 @@ USPAT::pato_html_FigLinks(char* Data, char* Buffer) const
 	strcpy(fig, "FIG.");
       else
 	strcpy(fig, "FIGS.");
-      sprintf(Buffer, "<A HREF=\"http: //%s/pto/figs.html\">",
-	      pato_HostName);
+      snprintf(Buffer, strlen(pato_HostName) + 40,   "<A HREF=\"http: //%s/pto/figs.html\">", pato_HostName);
       strcat(Buffer, fig);
       strcat(Buffer, "</A>");
       p = f + strlen(fig);
@@ -4480,16 +4480,16 @@ USPAT::pato_ExpandDate(char* S, char* Buffer) const
 {
   int x;
   char T[PATO_MAXSTR];
-  sprintf(T, "%c%c", S[4], S[5]);
+  snprintf(T, sizeof(T), "%c%c", S[4], S[5]);
   x = atoi(T);
   pato_GetMonth(x, T);
   strcpy(Buffer, T);
-  sprintf(T, "%c%c", S[6], S[7]);
+  snprintf(T, sizeof(T), "%c%c", S[6], S[7]);
   x = atoi(T);
   if (x == 0)
-    sprintf(T, ", ");
+    snprintf(T, sizeof(T), ", ");
   else
-    sprintf(T, " %i, ", x);
+    snprintf(T, sizeof(T), " %i, ", x);
   strcat(Buffer, T);
   S[4] = '\0';
   strcat(Buffer, S);

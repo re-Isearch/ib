@@ -1802,3 +1802,14 @@ INT JSONDOC::ReadFile(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) const
 
   return count;
 }
+
+
+/*
+INT JSONDOC::GetRecordData(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Length) const
+{
+   INT result = GetRecordData(Fp, StringPtr, Offset, Length);
+   if (StringPtr)  ResolveJSONUnicodeEscapes(StringPtr->stealData(), StringPtr->GetLength(), ' ');
+   return result;
+}
+*/
+

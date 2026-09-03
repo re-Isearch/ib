@@ -425,6 +425,17 @@ FILE * BBOXLIST::OpenForAppend(const STRING& Fn)
       return fopen(Fn, "wb"); // Can start from scratch
     }
 
+#if 1
+  STRING TmpName = GetTempFilename("bbox.", true);
+  FILE *ofp = fopen(TmpName, "wb");
+  if (ofp == NULL)
+    {
+      unlink(TmpName);
+      message_log( LOG_ERRNO, "Can't create temporary numlist '%s'", Fn.c_str());
+      fclose(fp);
+      return NULL;
+    }
+#else
   STRING TmpName = Fn + "~";
 
   for (size_t i =0; FileExists(TmpName); i++)
@@ -448,7 +459,7 @@ FILE * BBOXLIST::OpenForAppend(const STRING& Fn)
 	}
       TmpName = TempName; // Set it
     }
-
+#endif
   // Copy over
   BBOXFLD fld;
   for (UINT4 i=0; i< Total; i++)

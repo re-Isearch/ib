@@ -1424,12 +1424,18 @@ STRING& DOCTYPE::DescriptiveName(const STRING& Language,
 
 void DOCTYPE::Present (const RESULT& ResultRecord, const STRING& ElementSet, STRING *StringBufferPtr) const
 {
+  if (StringBufferPtr == NULL) return; // No pointer so nothing to do
 
   StringBufferPtr->Clear();
 
   if (ElementSet == SOURCE_MAGIC)
     {
       ResultRecord.GetRecordData (StringBufferPtr);
+    }
+  else if (ElementSet == CONTEXT_MAGIC)
+    {
+       *StringBufferPtr = ResultRecord.GetRawRecordData(
+	ResultRecord.GetBestContextHit(), Db); 
     }
   else if (ElementSet == FULLTEXT_MAGIC)
     {

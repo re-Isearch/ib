@@ -31,6 +31,7 @@ Description:	Class RESULT - Search Result
 
 class DOCTYPE;
 class MDTREC;
+class IDBOBJ;
 
 extern long __IB_RESULT_allocated_count; // Used to track stray RESULTs
 
@@ -172,6 +173,10 @@ public:
   UINT4  GetRecordEnd() const                       { return RecordEnd;             }
   off_t  GetLength () const                         { return RecordEnd-RecordStart; }
   off_t  GetRecordSize() const                      { return GetLength() + 1;       }
+
+  STRING GetRawRecordData(const FC &fc, IDBOBJ *idb) const;
+  STRING GetRawRecordData(const FC &fc, DOCTYPE *idb) const;
+
 
   void        SetExtIndex(const _index_id_t newVal) { ExtIndex = newVal;            }
   _index_id_t GetExtIndex() const                   { return ExtIndex;              }

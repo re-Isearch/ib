@@ -329,7 +329,7 @@ void ANTIHTML::ParseFields (RECORD *NewRecord)
       // 2147483647-2147483647
       char tmp[32];
       if (RecStart || RecEnd)
-        sprintf(tmp, "[%ld-%ld]", (long)RecStart, (long)RecEnd);
+        snprintf(tmp, sizeof(tmp), "[%ld-%ld]", (long)RecStart, (long)RecEnd);
       else
         tmp[0] = '\0';
       message_log (LOG_WARN, "%s: zero-length record - '%s'%s...",
@@ -372,7 +372,7 @@ void ANTIHTML::ParseFields (RECORD *NewRecord)
 #if BSN_EXTENSIONS
       char tmp[32];
       if (RecStart || RecEnd)
-	sprintf(tmp, "[%ld-%ld]", (long)RecStart, (long)RecEnd);
+	snprintf(tmp, sizeof(tmp), "[%ld-%ld]", (long)RecStart, (long)RecEnd);
       else
 	tmp[0] = '\0';
       message_log (LOG_WARN, "Unable to parse %s-tags in '%s'%s",

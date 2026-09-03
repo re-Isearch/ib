@@ -67,7 +67,7 @@
 
 // General
 #ifndef BSN_EXTENSIONS
-# define BSN_EXTENSIONS	0 /* 0 ==> CNIDR's Isearch, 1==> BSn's version */
+# define BSN_EXTENSIONS	1 /* 0 ==> CNIDR's Isearch, 1==> BSn's version */
 #endif
 
 #endif

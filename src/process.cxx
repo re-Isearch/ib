@@ -177,13 +177,13 @@ int _IB_system (const char * const *argv, int Async)
       if (errno == ENOENT)
         {
           char tmp[BUFSIZ];
-          sprintf(tmp, "%s: command not found", *argv);
+          snprintf(tmp, BUFSIZ, "%s: command not found", *argv);
           _IB_WarningMessage(tmp);
         }
       else
         {
           char tmp[BUFSIZ];
-          sprintf(tmp, "could not execute '%s'", *argv);
+          snprintf(tmp, BUFSIZ, "could not execute '%s'", *argv);
           _IB_ErrnoMessage( tmp );
         }
       _exit(2); //  _exit (-1);
@@ -220,6 +220,7 @@ int _IB_system (const char *command, int Async)
   const char *IFS = " \t\n";
 
 #ifdef __GNUG__
+#  pragma clang diagnostic ignored "-Wvla-cxx-extension"
   size_t      len = strlen(command)+1;
   char        tmp[len+1];
   memcpy(tmp, command, len);

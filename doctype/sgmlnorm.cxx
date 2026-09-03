@@ -162,7 +162,7 @@ INT SGMLNORM::ReadFile(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Length)
 {
   int count = DOCTYPE::ReadFile(Fp, StringPtr, Offset, Length);
   if (count)
-    Entities.normalize((char *)(StringPtr->c_str()), count); // WARNING: WARNING: WARNING (Hack!)
+    Entities.normalize(StringPtr->stealData(), count);
   return count;
 }
 
@@ -178,7 +178,7 @@ INT SGMLNORM::GetRecordData(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Le
 {
   int count = DOCTYPE::ReadFile(Fp, StringPtr, Offset, Length);
   if (count)
-    Entities.normalize2((char *)(StringPtr->c_str()), count); // WARNING: WARNING: WARNING (Hack!)
+    Entities.normalize2(StringPtr->stealData(), count); 
   return count;
 }
 
@@ -677,7 +677,7 @@ void SGMLNORM::XmlMetaPresent(const RESULT &ResultRecord, const STRING &RecordSy
 void SGMLNORM::DocPresent (const RESULT& ResultRecord, const STRING& ElementSet,
 	const STRING& RecordSyntax, PSTRING StringBuffer) const
 {
-  if (ElementSet.Equals(SOURCE_MAGIC) || ElementSet.Equals(FULLTEXT_MAGIC))
+  if (ElementSet.Equals(SOURCE_MAGIC) || ElementSet.Equals(FULLTEXT_MAGIC) || ElementSet.Equals(CONTEXT_MAGIC))
     {
       Present(ResultRecord, ElementSet, RecordSyntax, StringBuffer);
     }
@@ -693,6 +693,10 @@ void SGMLNORM::Present (const RESULT& ResultRecord, const STRING& ElementSet,
 {
 //cerr << "PRESENT " << ElementSet << endl;
   StringBuffer->Clear();
+
+  if (ElementSet.Equals(CONTEXT_MAGIC))
+    return DOCTYPE::Present (ResultRecord, ElementSet, RecordSyntax, StringBuffer) ;
+
   if (ElementSet.Equals(BRIEF_MAGIC))
     {
 //cerr << "XXXXXXX Present " << ElementSet << " for " << Doctype << endl; 

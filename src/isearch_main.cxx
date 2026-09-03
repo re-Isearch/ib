@@ -3445,27 +3445,27 @@ static void HelpUsageText( const char *progname, std::ostream& out)
 
    out << endl <<
         "Examples: " << prog << " -d POETRY truth 'beaut*' urn:2\n" << 
-        "          " << prog << " -d FTP -headline L C++\n" <<
-        "          " << prog << " -d WEBPAGES title/library\n" << 
-        "          " << prog << " -d WEBPAGES  -rpn \"Harvard library\" WITHIN:title\n" << 
-        "          " << prog << " -d STORIES -rpn title/cat title/dog OR title/mouse OR\n" << 
-        "          " << prog << " -d STORIES -infix title/(cat or dog or mouse)\n" << 
-        "          " << prog << " -d POETRY -rpn speaker/hamlet line/love AND:scene\n" << 
-        "          " << prog << " -d POETRY -infix (speaker/hamlet and:scene line/love)\n" << 
-        "          " << prog << " -d POETRY -infix act/(speaker/hamlet and:scene line/love)\n" << 
-        "          " << prog << " -d MAIL -H -infix from/edz AND subject/CoreQuarry=\n" << 
-        "          " << prog << " -d BILLS -rpn vendor/NONMONOTONIC price<100 AND\n" << 
-	"          " << prog << " -d NEWS -rpn AMD GPU NVIDIA MAYBE PROMOTE\n" << 
-        "          " << prog << " -d NEWS  -rpn xLSTM WITHIN:2026\n" << 
-        "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -P speech/line  -rpn out spot PEER" << endl <<
-        "Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short.\n" << endl <<
-        "Additional \"Special\" elements: R for Raw, H for Highlight/Hits; and if they exist," << endl <<
-        "L for location/redirect and M for metadata." << endl << endl <<
-        "In the response one can select not just the record but also all elements of a specific field as" << endl <<
-        "well as specific contents where the hit occurs (similar to -P). Example:  1,speech/speech" << endl <<
-        "to select the contents of a speech where the hit(s) in record #1 occurs." << endl <<
-        "Shorthand for element/element is @element, so 1,@line or even 1@line is really 1,line/line" << endl <<
-        "By contrast 1,speech returns ALL the speeches in record #1." << endl <<
+        "          " << prog << " -d FTP -headline L C++\n"
+        "          " << prog << " -d WEBPAGES title/library\n"
+        "          " << prog << " -d WEBPAGES  -rpn \"Harvard library\" WITHIN:title\n"
+        "          " << prog << " -d STORIES -rpn title/cat title/dog OR title/mouse OR\n" 
+        "          " << prog << " -d STORIES -infix title/(cat or dog or mouse)\n"
+        "          " << prog << " -d POETRY -rpn speaker/hamlet line/love AND:scene\n"
+        "          " << prog << " -d POETRY -infix (speaker/hamlet and:scene line/love)\n"
+        "          " << prog << " -d POETRY -infix act/(speaker/hamlet and:scene line/love)\n"
+        "          " << prog << " -d MAIL -H -infix from/edz AND subject/CoreQuarry=\n"
+        "          " << prog << " -d BILLS -rpn vendor/NONMONOTONIC price<100 AND\n"
+	"          " << prog << " -d NEWS -rpn AMD GPU NVIDIA MAYBE PROMOTE\n"
+        "          " << prog << " -d NEWS  -rpn xLSTM WITHIN:2026\n" 
+        "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -P speech/line  -rpn out spot PEER\n" << 
+        "Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short.\n" 
+        "Additional \"Special\" elements: R for Raw, C for context, H for Highlight/Hits; and if they\n"
+	"exist, L for location/redirect and M for metadata." << endl << endl <<
+        "In the response one can select not just the record but also all elements of a specific field\n"
+        "well as specific contents where the hit occurs (similar to -P). Example:  1,speech/speech\n"
+        "to select the contents of a speech where the hit(s) in record #1 occurs.\n" 
+        "Shorthand for element/element is @element, so 1,@line or even 1@line is really 1,line/line\n" 
+        "By contrast 1,speech returns ALL the speeches in record #1.\n" 
         "The above 'special' elements may also be specified, e.g. 1,H" << endl << endl;
 }
 

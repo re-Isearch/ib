@@ -14,8 +14,8 @@ Author:		Edward C. Zimmermann, edz@nonmonotonic.net
 //#include <string.h>
 //#include <errno.h>
 //#include <ctype.h>
-#include "doc_conf.hxx"
 #include "digesttoc.hxx"
+#include "doc_conf.hxx"
 #include "common.hxx"
 
 DIGESTTOC::DIGESTTOC (PIDBOBJ DbParent, const STRING& Name):

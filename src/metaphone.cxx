@@ -358,7 +358,7 @@ UINT8 MString::DoubleMetaphone(STRING &metaph, STRING &metaph2)
             }
 
           //double 'C', but not if e.g. 'McClellan'
-          if (StringAt(current, 2, "CC", NULL) AND !((current == 1) AND (GetAt(0) == 'M')))
+          if (StringAt(current, 2, "CC", NULL) AND !((current == 1) AND (GetAt(0) == 'M'))) {
             //'bellocchio' but not 'bacchus'
             if (StringAt((current + 2), 1, "I", "E", "H") AND !StringAt((current + 2), 2, "HU", NULL))
               {
@@ -378,6 +378,7 @@ UINT8 MString::DoubleMetaphone(STRING &metaph, STRING &metaph2)
                 current += 2;
                 break;
               }
+	  }
 
           if (StringAt(current, 2, "CK", "CG", "CQ", NULL))
             {
@@ -773,7 +774,7 @@ UINT8 MString::DoubleMetaphone(STRING &metaph, STRING &metaph2)
           if (StringAt(current, 2, "SC", NULL))
             {
               //Schlesinger's rule
-              if (GetAt(current + 2) == 'H')
+              if (GetAt(current + 2) == 'H') {
                 //dutch origin, e.g. 'school', 'schooner'
                 if (StringAt((current + 3), 2, "OO", "ER", "EN", "UY", "ED", "EM", NULL))
                   {
@@ -796,6 +797,7 @@ UINT8 MString::DoubleMetaphone(STRING &metaph, STRING &metaph2)
                     current += 3;
                     break;
                   }
+	      }
 
               if (StringAt((current + 2), 1, "I", "E", "Y", NULL))
                 {

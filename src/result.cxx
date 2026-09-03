@@ -517,6 +517,29 @@ bool RESULT::PresentDisplay(const FC& Range, STRING *StringBuffer,
 }
 
 
+STRING RESULT::GetRawRecordData(const FC &fc, IDBOBJ *idb) const
+{
+  STRING result;
+  MDTREC mdtrec;
+
+  if (idb &&  idb->GetMainMdt()->GetEntry (GetMdtIndex(), &mdtrec))
+    {
+      const off_t offset = mdtrec.GetLocalRecordStart();
+      ::GetRecordData(GetFullFileName(), &result, fc.GetFieldStart() + offset, fc.GetLength(),
+	 idb->GetDocTypePtr( DocumentType));
+    }
+  return result;
+
+}
+
+STRING RESULT::GetRawRecordData(const FC &fc, DOCTYPE *doc) const
+{
+  if (doc) return GetRawRecordData(fc, doc->Db);
+  return NulString;
+}
+
+
+
 /*
   Pass FC for hit
   BeforeTerm, AfterTerm to insert before and after the hit

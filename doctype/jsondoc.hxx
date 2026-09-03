@@ -121,6 +121,8 @@ protected:
   void SkipWhitespace(const char *json, size_t& pos) const;
   void SkipWhitespace(const char *json, size_t& pos, size_t len) const;
 
+  // INT GetRecordData(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Length) const;
+
   STRING SanitiseFieldName(const STRING& raw) const;
 
   // Register fieldname + FC with the engine.  contents is used only

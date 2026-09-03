@@ -192,7 +192,7 @@ Present (const RESULT &ResultRecord,
 
 	  // Is the <BASE HREF="xxx"> value requested?
 	  char tmp[12];
-	  sprintf (tmp, "BASE%cHREF", ATTRIB_SEP);
+	  snprintf (tmp, sizeof(tmp), "BASE%cHREF", ATTRIB_SEP);
 	  STRING BaseHref = tmp;
 	  if ((ElementSet ^= BaseHref) && Url.GetLength ())
 	    {

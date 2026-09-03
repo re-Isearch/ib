@@ -167,7 +167,7 @@ void PDFDOC::parsePDFinfo(const STRING& FileName, LOCATOR *Locator)
 		i++; // Skip white space
 	      if (sscanf((const char *)&Buffer[i], "%d %d R", &n1, &n2) == 2)
 		{
-		  sprintf(directory, "%d %d obj", n1, n2);
+		  snprintf(directory, sizeof(directory), "%d %d obj", n1, n2);
 		  directory_len = strlen(directory);
 		  break;
 		}
@@ -452,7 +452,7 @@ void PDFDOC::ParseRecords(const RECORD& FileRecord)
 
   // Create directory
 #define mask (S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
-  if (MkDirs(s , mask) == -1)
+  if (!MkDirs(s , mask))
     {
       message_log (LOG_ERRNO, "Can't create filter directory '%s'", s.c_str() );
       return;
@@ -611,7 +611,7 @@ void PDFDOC::ParseRecords(const RECORD& FileRecord)
 
     {
       char tmp[125];
-      sprintf(tmp,
+      snprintf(tmp, sizeof(tmp),
 #ifdef _WIN32
 	"%I64d bytes (%d pages)"
 #else

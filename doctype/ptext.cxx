@@ -184,10 +184,8 @@ Should not map line and sentence to the same name, Sentence field disabled!");
 
 void PTEXT::InitFields()
 {
-//cerr << "PTEXT::InitFields()" << endl;
   PTEXT::AddFieldDefs();
 
-//cerr << "ParseBody = " << (int)ParseBody << endl;
   if (Db && initFields && initAutoFields  && ParseBody)
     {
       DFD         dfd;
@@ -197,7 +195,7 @@ void PTEXT::InitFields()
       dfd.SetFieldType (FIELDTYPE::text);
 
 #define _f_init(_x) { if (!_x.IsEmpty()) { \
-          dfd.SetFieldName (_x); SetMetaIgnore(_x); Db->DfdtAddEntry (dfd); count++; } ; maxD++; }
+          dfd.SetFieldName (_x); /* SetMetaIgnore(_x); */ Db->DfdtAddEntry (dfd); count++; } ; maxD++; }
 
       _f_init(paraPath);
       _f_init(satzPath);
@@ -214,10 +212,10 @@ void PTEXT::InitFields()
 
       _f_init(headlineFieldName);
 
-//cerr << "satz = " << satzFieldName << " = " << satzPath << endl;
-//cerr << "para = " << paraFieldName << " = " << paraPath << endl;
-//cerr << "line = " << lineFieldName << " = " << linePath << endl;
-//cerr << "page = " << pageFieldName << endl;
+// cerr << "satz = " << satzFieldName << " = " << satzPath << endl;
+// cerr << "para = " << paraFieldName << " = " << paraPath << endl;
+// cerr << "line = " << lineFieldName << " = " << linePath << endl;
+// cerr << "page = " << pageFieldName << endl;
 
 #undef _f_init
 

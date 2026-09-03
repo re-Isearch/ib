@@ -14,8 +14,8 @@ Author:		Edward Zimmermann
 #if USE_LIBMAGIC
 #endif
 
-#include "doc_conf.hxx"
 #include "xfilter.hxx"
+#include "doc_conf.hxx"
 #include "process.hxx"
 
 static const char *mime_application_binary = "application/binary";

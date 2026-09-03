@@ -2401,17 +2401,17 @@ char *ISOdate(time_t t)
 {
   // Ring of buffers to try to outwit side-effects
   static int const   bufSize        = 24;
-  static int const   numBuffers     = 8;
+  static int const   numBuffers     = 16;
   static char        buffer[ numBuffers ][ bufSize ];
   static int         n;              // which buffer to use
   char   *buf        = buffer[n];
 
   if (t == 0) t = time(NULL);
   struct tm *tm = gmtime (&t);
-  sprintf(buf, "%04d-%02d-%02d", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
-  sprintf(buf+10, "T%02d:%02d", tm->tm_hour, tm->tm_min);
+  snprintf(buf, bufSize, "%04d-%02d-%02d", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
+  snprintf(buf+10, bufSize-10, "T%02d:%02d", tm->tm_hour, tm->tm_min);
   if (tm->tm_sec)
-    sprintf(buf+16, ":%02d", tm->tm_sec);
+    snprintf(buf+16, bufSize-16, ":%02d", tm->tm_sec);
   strcat(buf, "Z"); // For GMT
   n++; n = (n % numBuffers);
   return buf;
@@ -2433,13 +2433,13 @@ char *ANSIdate(time_t t)
 
   struct tm *tm = gmtime (&t);
   // YYYYMMDD HH:MM GMT
-  sprintf(buf, "%04d%02d%02d",
+  snprintf(buf, bufSize, "%04d%02d%02d",
         tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
   if (tm->tm_hour || tm->tm_min || tm->tm_sec)
     {
-      sprintf(buf+8, " %02d:%02d", tm->tm_hour, tm->tm_min);
+      snprintf(buf+8, bufSize-8, " %02d:%02d", tm->tm_hour, tm->tm_min);
       if (tm->tm_sec)
-	sprintf(buf+14, "%02d", tm->tm_sec);
+	snprintf(buf+14, bufSize-14, "%02d", tm->tm_sec);
       strcat(buf, " GMT");
     }
   n++; n = (n % numBuffers);
@@ -2451,7 +2451,7 @@ char *RFCdate(time_t t)
 {
   // Ring of buffers to try to outwit side-effects
   static int const   bufSize        = 40;
-  static int const   numBuffers     = 6;
+  static int const   numBuffers     = 8;
   static char        buffer[ numBuffers ][ bufSize ];
   static int         n;              // which buffer to use
   char   *buf        = buffer[n];
@@ -2466,7 +2466,7 @@ char *RFCdate(time_t t)
   if (t == 0) t = time(NULL);
   struct tm *tm = gmtime (&t);
 
-  sprintf(buf, "%s, %.2d %s %d %.2d:%.2d:%.2d GMT",
+  snprintf(buf, bufSize, "%s, %.2d %s %d %.2d:%.2d:%.2d GMT",
 	days[tm->tm_wday],
 	tm->tm_mday,
 	months[tm->tm_mon],
@@ -2733,24 +2733,18 @@ STRING GetTempFilename(const char *prefix, bool Secure)
       tfilename = filename;
       if (j)
 	{
-	  // tfilename.Cat(".");
 	  tfilename.Cat(j);
 	}
-      if (!Exists(tfilename))
+      if (Secure)
 	{
-	  if (Secure)
-	    {
-#ifdef WIN32
-	      int fd = open(tfilename, O_CREAT|O_TRUNC|O_RDWR);
-
-#else
-	      int fd = open (tfilename, O_CREAT|O_EXCL|O_TRUNC|O_RDWR, 0600);
-#endif
-	      if (fd == 0) close(fd);
-	    }
-	  cache = (short)(j+1);
-	  return tfilename; 
+	  int fd = open (tfilename, O_CREAT|O_EXCL|O_TRUNC|O_RDWR, 0600);
+	  if (fd < 0) continue; 
+	  close(fd);
 	}
+      if (Exists(tfilename)) continue;
+
+      cache = (short)(j+1);
+      return tfilename; 
     }
   message_log (LOG_PANIC, "Problems creating temporary file names.");
   if (prefix && *prefix)
@@ -3939,7 +3933,7 @@ bool DBExists(const STRING& FileSpec)
 FILE *makeTemporaryFile (STRING &path, const STRING& Prefix, const char *mode = "wb")
 {
   STRING  fname = Prefix + "XXXXXX";
-  int fd = mkstemp((char *)fname.c_str()); //Warning this is "dangerous" but we are OK 
+  int fd = mkstemp(fname.stealData()); //Warning this is "dangerous" but we are OK 
   if (fd > 2) {
      path = fname;
      return fdopen(fd, mode);
@@ -3982,6 +3976,7 @@ int encode58(const unsigned char *source, int len, unsigned char result[], int r
     if (!(pend = len)) return 0;
     while (pbegin != pend && !source[pbegin]) pbegin = ++zeros;
     int size = 1 + iFactor * (double)(pend - pbegin);
+#  pragma clang diagnostic ignored "-Wvla-cxx-extension"
     unsigned char b58[size];
     for (int i = 0; i < size; i++) b58[i] = 0;
     while (pbegin != pend) {

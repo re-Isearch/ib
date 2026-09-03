@@ -2444,7 +2444,8 @@ char *CHARSET::ToUTF(char *buffer, const char *From) const
   while (From && *From)
     {
 /* Generate a mask of LENGTH one-bits, right justified in a word.  */
-#define MASK(Length) ((unsigned) ~(~0 << (Length)))
+//#define MASK(Length) ((unsigned) ~(~0 << (((unsigned)Length))))
+#define MASK(Length) ((1U << (unsigned)(Length)) - 1U)
       value  = Which > 1 ? CharTab[(unsigned char)*From++] : *From++;
       if (value & ~MASK (7))
         if (value & ~MASK (11))
@@ -2493,7 +2494,7 @@ void CHARSET::ToUTF(STRING *Buffer, const STRING& From) const
   for (size_t i=1; i<=Len; i++)
     {
 /* Generate a mask of LENGTH one-bits, right justified in a word.  */
-#define MASK(Length) ((unsigned) ~(~0 << (Length)))
+#define MASK(Length) ((unsigned) ~(~0U << ((unsigned)(Length))))
       value  = CharTab[(unsigned char)(From.GetChr(i))];
       if (value & ~MASK (7))
 	if (value & ~MASK (11))

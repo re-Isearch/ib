@@ -53,7 +53,9 @@ const size_t StringCompLength = 0x7fffffff;
 # include "ib_defs.hxx"
 #endif /* !STANDALONE */
 
-#define BSN_EXTENSIONS	2
+#ifndef BSN_EXTENSIONS
+# define BSN_EXTENSIONS	2
+#endif
 
 #ifdef PLATFORM_MSVC
 #define strcasecmp stricmp

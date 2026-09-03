@@ -25,6 +25,7 @@ class BBOXFLD;
 
 class DOCTYPE {
 friend class RESULT;
+friend class AUTODETECT;
 public:
   DOCTYPE();
   DOCTYPE(IDBOBJ* DbParent);

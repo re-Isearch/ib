@@ -947,6 +947,21 @@ cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
       return fopen(Fn, "wb"); // Can start from scratch
     }
 
+#if 1
+
+  STRING TmpName = GetTempFilename("intlist.", true);
+  FILE *oFp = fopen(TmpName, "wb");
+  if (oFp == NULL)
+  {
+    unlink(TmpName);
+
+    message_log( LOG_ERRNO, "Can't create temporary intlist '%s'", Fn.c_str());
+    fclose(Fp);
+    return NULL;
+  }
+
+#else
+
   STRING TmpName = Fn + "~";
 
   for (size_t i =0; FileExists(TmpName); i++)
@@ -970,6 +985,7 @@ cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
 	}
       TmpName = TempName; // Set it
     }
+#endif
 
   // Copy over
   INTERVALFLD fld;

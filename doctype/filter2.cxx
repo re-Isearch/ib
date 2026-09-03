@@ -11,8 +11,8 @@ Author:		Edward Zimmermann
 //#include <grp.h>
 #include <errno.h>
 
-#include "doc_conf.hxx"
 #include "filter2.hxx"
+#include "doc_conf.hxx"
 #include "process.hxx"
 
 #if 0

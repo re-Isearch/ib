@@ -29,7 +29,7 @@ Option:\n\
 
   FILTER2TEXTDOC::Description(List);
 
-  if (tmp[1] == '\0') sprintf(tmp, message, def_filter);
+  if (tmp[1] == '\0') snprintf(tmp, sizeof(tmp), message, def_filter);
   return tmp;
 }
 

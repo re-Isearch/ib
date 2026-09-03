@@ -19,21 +19,19 @@
 
 #include "dtreg_list.hxx"
 
-
-#ifdef _WIN32
-inline FILE *fopen_rt(const STRING& file) { return file.Fopen("rt"); }
-inline FILE *fopen_rb(const STRING& file) { return file.Fopen("rb"); } 
-inline FILE *fopen_wb(const STRING& file) { return file.Fopen("wb"); } 
-inline FILE *fopen_ab(const STRING& file) { return file.Fopen("ab"); } 
-
+#if 0 /* Don't want to cache these since the cache will be flushed anyway */
+#define fopen_rt(_x)   Db->ffopen(_x, "r")
+#define fclose_rt(_x)  Db->ffclose(_x)
 #else
 
-inline FILE *fopen_rt(const STRING& file) { return file.Fopen("r"); }
-inline FILE *fopen_rb(const STRING& file) { return file.Fopen("r"); }
-inline FILE *fopen_wb(const STRING& file) { return file.Fopen("w"); }
-inline FILE *fopen_ab(const STRING& file) { return file.Fopen("a"); }
+#define fopen_rt(_x)   fopen(_x, "r")
+#define fclose_rt(_x)  fclose(_x)
 
 #endif
+
+inline void  fclose_wb(FILE *fp)          { fclose(fp);             }
+inline FILE *fopen_wb(const STRING& file) { return file.Fopen("w"); }
+inline FILE *fopen_ab(const STRING& file) { return file.Fopen("a"); }
 
 /*
 #define strncasecmp StrNCaseCmp
@@ -61,6 +59,117 @@ static STRING ISOTEIAclass = "ISOTEIA"; // Use builtin
 #else
 static STRING ISOTEIAclass = "ISOTEIA:"; // Use plugin 
 #endif
+
+// libmagic results which are unsafe for arbitrary textual input.
+// Match these as substrings of the description returned by magic_file().
+//
+// Add items as more are exposed.
+static const char *evilMagic[] =
+{
+    // 0 string Rast    RST-format raster font data
+    "RST-format",
+
+    // 0 string Ora\    ELI 5750 archive data
+    "ELI 5750",
+
+    // 0 string LG      Arhangel archive data
+    "Arhangel",
+
+    // 0 string X1      X1 archive data
+    "X1 ",
+
+    // 0 string FIZ     FIZ archive data
+    "FIZ ",
+
+    // 0 string BOA     BOA archive data
+    "BOA ",
+
+    // 0 string PAR     Par archive data
+    "Par ",
+
+    // 0 string ESP     ESP archive data
+    "ESP ",
+
+    // 0 string PSA     PSA archive data
+    "PSA ",
+
+    // 0 string HPA     HPA archive data
+    "HPA ",
+
+    // 0 string SEM     SemOne archive data
+    "SemOne",
+
+    // 0 string UFA     UFA archive data
+    "UFA ",
+
+    // 0 string DST     Disintegrator archive data
+    "Disintegrator",
+
+    // 0 string ASD     ASD archive data
+    "ASD ",
+
+    // 0 string SBC     SBC archive data
+    "SBC ",
+
+    // 0 string PDZ     PDZ archive data
+    "PDZ ",
+
+    // 0 string UHB     UHBC archive data
+    "UHBC",
+
+    // 0 string WWP     WWPack archive data
+    "WWPack",
+
+    // 0 string AKT     AKT archive data
+    "AKT ",
+
+    // 0 string AKT32   AKT32 archive data
+    "AKT32",
+
+    // 0 string Blink   Blink archive data
+    "Blink ",
+
+    // 0 string CRUSH   Crush archive data
+    "Crush ",
+
+    // 0 string 777     777 archive data
+    "777 ",
+
+    // 0 string UB      HIT archive data
+    "HIT ",
+
+    // 0 string Seg     StuffIt Deluxe Segment (data)
+    "StuffIt Deluxe Segment",
+
+    // 0 string FORM    IFF data
+    "IFF data",
+
+    // 0 string RIFF    RIFF (little-endian) data
+    "RIFF ",
+
+    // 0 string MOVI    Silicon Graphics movie file
+    "Silicon Graphics movie",
+
+    // 0 string TOC     TOC sound file
+    "TOC sound",
+
+    // 0 string SBI     SoundBlaster instrument data
+    "SoundBlaster instrument",
+
+    // 0 string ID3     Audio file with ID3 version 2
+    "ID3 version 2",
+
+    // 0 string/b LCP   COSMI document
+    "COSMI document",
+
+    // HPGL has several dangerously weak textual starters,
+    // including:
+    // 0 string CO\040  -> Hewlett-Packard Graphics Language
+    // 0 string PS\040  -> Hewlett-Packard Graphics Language
+    // 0 string SP + numeric continuation
+    // 0 string PA + numeric continuation
+    "Hewlett-Packard Graphics Language",
+};
 
 AUTODETECT::AUTODETECT (PIDBOBJ DbParent, const STRING& Name):
 	DOCTYPE (DbParent, Name)
@@ -736,7 +845,7 @@ void AUTODETECT::ParseRecords (const RECORD& FileRecord)
 	    {
 	      // Empty Record
 	      // message_log (LOG_DEBUG, "Empty text. skip");
-	      fclose(fp);
+	      fclose_rt(fp);
 	      return; // Skip
 	    }
 	  size_t buf_len = strlen(buf);
@@ -897,7 +1006,7 @@ void AUTODETECT::ParseRecords (const RECORD& FileRecord)
 	    } 
 #endif
 	}
-      fclose(fp);
+      fclose_rt(fp);
     }
 #endif
 
@@ -1223,7 +1332,7 @@ void AUTODETECT::ParseRecords (const RECORD& FileRecord)
 		}	
 	    }
 #endif
-	  fclose(fp);
+	  fclose_rt(fp);
 	}
 #endif
     }
@@ -1240,19 +1349,29 @@ void AUTODETECT::ParseRecords (const RECORD& FileRecord)
       if (magic_cookie)
 	{
 	  const char *typ = magic_file (magic_cookie, s.c_str());
-
+	  
 	  if (typ && *typ)
 	    {
-	      while (isspace(*typ)) typ++;
-              // Map
-              if (tagRegistry)
+	      bool evil = false;
+	      for (const char *p : evilMagic) {
+		if (strstr(typ, p)) {
+		  evil = true;
+		  break;
+	        }
+	      }
+	      if (!evil) {
+	        while (isspace(*typ)) typ++;
+                // Map
+                if (tagRegistry)
                 tagRegistry->ProfileGetString("File", typ, NulString, &doctype);
-              if (doctype.IsEmpty())
-		{
+                if (doctype.IsEmpty())
 		  doctype = typ;
+	      }
+	      if (evil)
+		{
+		   doctype = "PLAINTEXT";
 		}
-
-              if (doctype.SearchAny("OpenDocument"))
+              else if (doctype.SearchAny("OpenDocument"))
 		{
 		  message_log (LOG_DEBUG, "Recognized %s as ODF", s.c_str());
 		  // OpenDocument Text
@@ -1331,10 +1450,23 @@ message_log (LOG_DEBUG, "AFTER INDEXING");
 	    {
 	      const char *typ = lineBuf.c_str() + ((lineBuf.GetLength() > s.GetLength()) ? s.GetLength() + 1 : 0);
 	      while (isspace(*typ)) typ++;
-	      // Map
-	      if (tagRegistry)
-		tagRegistry->ProfileGetString("File", typ, NulString, &doctype);
-	      if (doctype.IsEmpty())
+ 	      bool evil = false;
+              for (const char *p : evilMagic) {
+                if (strstr(typ, p)) {
+                  evil = true;
+                  break;
+                }
+              }
+
+	      if (!evil) {
+		if (tagRegistry)
+		  tagRegistry->ProfileGetString("File", typ, NulString, &doctype);
+	      }
+	      if (evil)
+		{
+		  doctype = "PLAINTEXT";
+		}
+	      else if (doctype.IsEmpty())
 		{
 		  doctype = typ;
 		  if (doctype.SearchAny("tiff")) 
@@ -1664,7 +1796,7 @@ D \010O \010N \010' \010T  \010E \010D \010I \010T\
 		NewRecord.SetDocumentType ( "RESOURCE" );
 	      NewRecord.SetBadRecord(false); // Need to set OK
 	      NewRecord.SetLanguage ("en");
-	      fclose (Fp);
+	      fclose_wb (Fp);
 	      Db->DocTypeAddRecord(NewRecord);
 	      message_log(LOG_NOTICE, "Identified %s as %s, parsing info only (%s).", s.c_str(),
 		doctype.c_str(), NewRecord.GetDocumentType().ClassName(true).c_str());

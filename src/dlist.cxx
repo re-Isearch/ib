@@ -936,6 +936,17 @@ FILE *DATELIST::OpenForAppend(const STRING& Fn)
       return fopen(Fn, "wb"); // Can start from scratch
     }
 
+#if 1
+  STRING TmpName = GetTempFilename("dlist.", true);
+  FILE *oFp = fopen(TmpName, "wb");
+  if (oFp == NULL)
+    {
+      unlink(TmpName);
+      message_log( LOG_ERRNO, "Can't create temporary dlist '%s'", Fn.c_str());
+      fclose(Fp);
+      return NULL;
+    }
+#else
   STRING TmpName = Fn + "~";
 
   for (size_t i =0; FileExists(TmpName); i++)
@@ -959,6 +970,7 @@ FILE *DATELIST::OpenForAppend(const STRING& Fn)
 	}
       TmpName = TempName; // Set it
     }
+#endif
 
   // Copy over
   DATEFLD fld;
