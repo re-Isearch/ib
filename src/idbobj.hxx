@@ -54,6 +54,7 @@ public:
   // Set/Get Range (start of first and end as max end) 
   virtual bool DfdtGetFieldRange(const STRING&, FC *) const { return false; }
   virtual bool DfdtSetFieldRange(const STRING&, const FC&) { return false; }
+  virtual bool DfdtInvalidateFcRanges() { return false; }
 
   virtual  void SetMirrorBaseDirectory(const STRING& Mirror) {;}
 

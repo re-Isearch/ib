@@ -274,6 +274,12 @@ public:
     return false;
   }
 
+  bool DfdtInvalidateFcRanges() {
+    if (MainDfdt == NULL)
+      return false;
+    return MainDfdt->InvalidateFcRanges(ComposeDbFn(DbExtDfd));
+  }
+
 //
   void SetMirrorBaseDirectory(const STRING& Mirror);
   void SetHTTPServer(const STRING& Server);

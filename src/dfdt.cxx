@@ -121,9 +121,12 @@ void DFDT::LoadTable (const STRING& FileName)
   PFILE fp = FileName.Fopen ("rb");
   if (fp)
     {
-      Read (fp);
+      const bool Ok = Read (fp);
       fclose (fp);
+      if (Ok)
+	LoadFcRanges(FileName + FcCacheExtension);
     }
+
 }
 
 bool DFDT::Read (PFILE fp)
@@ -166,9 +169,9 @@ bool DFDT::Read (PFILE fp)
 void DFDT::Flush(const STRING& FileName)
 {
   if (Changed)
-    {
-      SaveTable (FileName);
-    }
+    SaveTable (FileName);
+  else if (FcRangesChanged)
+    SaveFcRanges(FileName + FcCacheExtension);
 }
 
 void DFDT::SaveTable (const STRING& FileName)
@@ -1083,10 +1086,7 @@ bool DFDT::LoadFcRanges(const STRING& FileName)
 
   fclose(fp);
 
-  if (!ok)
-    ClearFcRanges();
-  else
-    LoadFcRanges(FileName + FcCacheExtension);
+  if (!ok) ClearFcRanges();
 
   FcRangesChanged = false;
   return ok;
@@ -1113,4 +1113,17 @@ bool DFDT::GetFcRange(INT FileNumber, FC *RangePtr) const
 
   *RangePtr = entry.Fc;
   return true;
+}
+
+
+bool DFDT::InvalidateFcRanges(const STRING& FileName)
+{
+  ClearFcRanges(false);
+
+  const STRING CacheFile = FileName + FcCacheExtension;
+
+  if (!FileExists(CacheFile))
+    return true;
+
+  return CacheFile.Unlink() != -1;
 }

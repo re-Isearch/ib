@@ -128,6 +128,13 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
   // else: same field as last call -- Disk, FieldTotal, BaseAddress, Fp
   // are all already correct from the prior successful load. Do nothing.
 
+#if 1
+  if (FieldTotal)
+    {
+      FC range;
+      GetRange(&range);
+    }
+#endif
   return FieldTotal;
 }
 
@@ -806,6 +813,7 @@ bool FCACHE::DeriveRange(FC *RangePtr)
   if (RangePtr == NULL || FieldTotal == 0)
     return false;
 
+cerr << "Running DeriveRange.. " << endl;
   const FC first = GetRecordFc(0);
   const FC last  = GetRecordFc(FieldTotal - 1);
 

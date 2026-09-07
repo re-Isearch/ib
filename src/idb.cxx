@@ -5307,8 +5307,12 @@ bool IDB::Close()
 
   if (MainDfdt)
     {
+#if 1
+      MainDfdt->Flush(ComposeDbFn(DbExtDfd));
+#else
       if (MainDfdt->GetChanged ())
 	MainDfdt->SaveTable ( ComposeDbFn (DbExtDfd) );
+#endif
       delete MainDfdt;
       MainDfdt = NULL;
     }

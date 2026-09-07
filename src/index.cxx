@@ -2401,6 +2401,7 @@ memory_allocation: // This is where we try to get memory
 
 
   ActiveIndexing = true;
+  bool FcRangesInvalidated = false;
 
   for (;;)
     {
@@ -2478,6 +2479,18 @@ memory_allocation: // This is where we try to get memory
 
               Parent->IndexingStatus (IndexingStatusParsingRecord, DataFileName);
               Parent->ParseFields (&record);
+#if 1
+	      if (!FcRangesInvalidated)
+		{
+		  const DFT *dft = record.GetDftPtr();
+		  if (dft != NULL && dft->GetTotalEntries() != 0)
+		    {
+		      Parent->DfdtInvalidateFcRanges();
+		      FcRangesInvalidated = true;
+		    }
+		}
+
+#endif
 
               Doctype = record.GetDocumentType(); // Parsefield can change the doctype!
 

@@ -616,6 +616,7 @@ int _Isearch_main (int argc, char **argv)
   off_t common_words = 0;
   STRING string, tstring;
   const char *Pager = NULL;
+  size_t maxAdvice = 130;
 
   if (argv0 == NULL) argv0 = "Isearch";
 
@@ -777,6 +778,16 @@ int _Isearch_main (int argc, char **argv)
               PriorityFactor = atof(argv[x]);
               LastUsed = x;
             }
+	  else if (Flag.Equals("-advice"))
+	    {
+	      if (++x >= argc)
+                {
+                  message_log (LOG_FATAL, "Usage: No number specified after %s.", Flag.c_str());
+                  return 0;
+                }
+	      maxAdvice  = atoi(argv[x]);
+              LastUsed = x;
+	    }
 	  else if (Flag.Equals ("-sc"))
 	    {
 	      Sort = ByAdjScore;
@@ -2116,7 +2127,7 @@ again:
 	      if (ShowXML)
 		pdb->XMLContext(result, &string, &tstring, "MATCH");
 	      else
-		pdb->Context(result, &string, RESULT::GetDisplayMarkers(DisplayMarkerVT100), &tstring);
+		pdb->Context(result, &string, RESULT::GetDisplayMarkers(DisplayMarkerVT100), &tstring, maxAdvice);
 
               if (ShowXML)
                 cout << "<HIT TERM=\"" << tstring << "\">";
@@ -2512,6 +2523,12 @@ namespace
       "-show",
       NULL,
       "Show the best hit neighborhood."
+    },
+    {
+      "presentation",
+      "-advice",
+      "number",
+      "Use number as adviced neighborhood length."
     },
     {
       "presentation",

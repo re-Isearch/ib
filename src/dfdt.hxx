@@ -113,7 +113,7 @@ public:
   bool GetAttributes (const size_t Index, PATTRLIST AttributesBuffer) const;
   bool GetAttributes (const STRING& FieldName, PATTRLIST AttributesBuffer) const;
   size_t      GetTotalEntries() const { return TotalEntries; }
-  bool GetChanged() const { return Changed; }
+  bool GetChanged() const { return Changed || FcRangesChanged; }
 
   void Sort();
 
@@ -136,7 +136,11 @@ public:
     if (n <= 0) return false;
     if (FcRanges.size() <= (size_t)n) FcRanges.resize(n + 1);
     FcRanges[n].Add(fc);
+    FcRangesChanged = true;
     return true;
+  }
+  bool UpdateFcRange(const STRING& FieldName, const FC& Fc) {
+    return UpdateFcRange(GetFileNumber(FieldName), Fc);
   }
   bool LoadFcRanges(const STRING& FileName);
   bool SaveFcRanges(const STRING& FileName);
@@ -146,6 +150,8 @@ public:
   bool GetFcRange(const STRING& FieldName, FC *RangePtr) const {
     return GetFcRange(GetFileNumber(FieldName), RangePtr);
   }
+
+  bool InvalidateFcRanges(const STRING& FileName);
 
 private:
 //void Initialize();
