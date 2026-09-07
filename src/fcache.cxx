@@ -813,7 +813,6 @@ bool FCACHE::DeriveRange(FC *RangePtr)
   if (RangePtr == NULL || FieldTotal == 0)
     return false;
 
-cerr << "Running DeriveRange.. " << endl;
   const FC first = GetRecordFc(0);
   const FC last  = GetRecordFc(FieldTotal - 1);
 
