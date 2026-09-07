@@ -51,6 +51,9 @@ public:
   virtual size_t DfdtGetTotalEntries() const { return 0; }
   virtual size_t GetTotalRecords() const { return 0; }
   virtual size_t GetTotalDocumentsDeleted() const { return 0; }
+  // Set/Get Range (start of first and end as max end) 
+  virtual bool DfdtGetFieldRange(const STRING&, FC *) const { return false; }
+  virtual bool DfdtSetFieldRange(const STRING&, const FC&) { return false; }
 
   virtual  void SetMirrorBaseDirectory(const STRING& Mirror) {;}
 

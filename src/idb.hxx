@@ -264,6 +264,16 @@ public:
     return GetRecordDfdt(Result.GetKey(), DfdtBuffer);
   }
 
+  bool DfdtGetFieldRange(const STRING& FieldName, FC *RangePtr) const {
+    if (MainDfdt && RangePtr)
+      return  MainDfdt->GetFcRange(FieldName, RangePtr);
+    return false;
+  }
+  bool DfdtSetFieldRange(const STRING& FieldName, const FC& Range) {
+    if (MainDfdt) return MainDfdt->UpdateFcRange(FieldName, Range);
+    return false;
+  }
+
 //
   void SetMirrorBaseDirectory(const STRING& Mirror);
   void SetHTTPServer(const STRING& Server);

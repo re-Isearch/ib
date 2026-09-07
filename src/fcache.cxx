@@ -801,4 +801,42 @@ FC FCACHE::GetRecordFc(size_t idx) const
 }
 
 
+bool FCACHE::DeriveRange(FC *RangePtr)
+{
+  if (RangePtr == NULL || FieldTotal == 0)
+    return false;
 
+  const FC first = GetRecordFc(0);
+  const FC last  = GetRecordFc(FieldTotal - 1);
+
+  FC record;
+  PMDT mdt = Parent->GetMainMdt();
+
+  if (mdt == NULL ||
+      mdt->LookupByGp(last.GetFieldEnd(), &record) == 0)
+    return false;
+
+  *RangePtr = FC(first.GetFieldStart(),
+                 record.GetFieldEnd());
+
+  Parent->DfdtSetFieldRange(FieldName, *RangePtr);
+
+  return true;
+}
+
+
+bool FCACHE::GetRange(FC *RangePtr)
+{
+  if (RangePtr == NULL || FieldName.IsEmpty())
+    return false;
+
+  // DFDT is authoritative.
+  if (Parent->DfdtGetFieldRange(FieldName, RangePtr))
+    return true;
+
+  // We cannot derive anything until the physical field table is loaded.
+  if (FieldTotal == 0)
+    return false;
+
+  return DeriveRange(RangePtr);
+}

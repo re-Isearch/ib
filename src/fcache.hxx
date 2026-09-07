@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
+Copyright (c) 2020-26 CoreQuarry / Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
 /* ########################################################################
@@ -15,10 +15,13 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 
 class FCACHE {
 public:
+
    FCACHE(const PIDBOBJ parent);
    FCACHE(const PIDBOBJ parent, const STRING& fieldName, bool useDisk = false);
 
    bool Ok() const { return FieldTotal != 0; }
+
+   bool GetRange(FC *RangePtr);
 
    // Normal entry points...
    bool ValidateInField(const GPTYPE HitGp);
@@ -57,6 +60,7 @@ public:
 
 private:
    size_t GetZones (const GPTYPE HitGp, const STRING& fieldName, FCT *Zones);
+   bool DeriveRange(FC *RangePtr); // Set Start and End addresses for cache
 
 #if 1
    MultiMMapSession      Sessions;      // pooled, LRU/byte-budget backed
@@ -66,7 +70,7 @@ private:
 #endif
    FILE       *Fp;		// Stream
    bool Disk;     	// Use disk or memory?
-//   FC          Range;    	// Start and End points
+
    size_t      FieldTotal;	// How many Fields?
    STRING      FieldName;	// The name of the loaded field
    PIDBOBJ     Parent;  	// Parent class

@@ -24,6 +24,8 @@ Description:	Class DFDT - Data Field Definitions Table
 #define FIELD_WILD_MATCH(_x, _y)  (_x).FieldMatch(_y)
 #endif
 
+static const char *FcCacheExtension = "c";
+
 
 DFDT::DFDT ()
 {
@@ -181,6 +183,8 @@ void DFDT::SaveTable (const STRING& FileName)
 	  fclose (fp);
 	  Changed = false;
 	}
+
+      SaveFcRanges(FileName + FcCacheExtension);
     }
   else if (-1 != FileName.Unlink ())
     {
@@ -621,6 +625,10 @@ bool DFDT::KillAll(IDBOBJ* DbParent)
     }
   TotalEntries = 0;
 
+  s = DbParent->ComposeDbFn (DbExtDfd) +  FcCacheExtension;
+  if (FileExists(s) && UnlinkFile (s) == -1)
+    message_log(LOG_ERROR|LOG_ERRNO, "Can't remove '%s' (field range cache)", s.c_str());
+
   // Added 26 Feb 2004. Need to get rid of the old table
   if (Table)
     {
@@ -951,25 +959,40 @@ FIELD_PATH DFDT::GetFieldPath(const STRING& FieldName) const
 
 bool DFDT::SaveFcRanges(const STRING& FileName)
 {
+  // Nothing to save
+  if (FcRanges.size() == 0) return true;
+
   PFILE fp = FileName.Fopen("wb");
   if (fp == NULL)
     return false;
 
   putObjID(objDFDTRANGE, fp);
   ::Write((BYTE)1, fp);                 // version
-  ::Write((UINT2)TotalEntries, fp);
 
-  for (size_t n = 0; n < TotalEntries; n++)
-    {
-      const INT fileNumber = Table[n].GetFileNumber();
-      ::Write((INT2)fileNumber, fp);
-      if (FcRanges[n].Valid)
-	{
-	  ::Write((INT2)n, fp);
-	  FcRanges[n].Fc.Write(fp);
-	}
 
-    }
+  size_t validCount = 0;
+  for (size_t n = 0; n < TotalEntries; n++) {
+    const INT fileNumber = Table[n].GetFileNumber();
+
+    if (fileNumber > 0 &&
+        (size_t)fileNumber < FcRanges.size() &&
+        FcRanges[fileNumber].Valid)
+      validCount++;
+  }
+  ::Write((UINT2)validCount, fp);
+
+  for (size_t n = 0; n < TotalEntries; n++) {
+    const INT fileNumber = Table[n].GetFileNumber();
+
+    if (fileNumber > 0 &&
+        (size_t)fileNumber < FcRanges.size() &&
+        FcRanges[fileNumber].Valid)
+      {
+        ::Write((INT2)fileNumber, fp);
+        FcRanges[fileNumber].Fc.Write(fp);
+      }
+  }
+
   const bool result = (ferror(fp) == 0);
   fclose(fp);
 
@@ -1062,6 +1085,8 @@ bool DFDT::LoadFcRanges(const STRING& FileName)
 
   if (!ok)
     ClearFcRanges();
+  else
+    LoadFcRanges(FileName + FcCacheExtension);
 
   FcRangesChanged = false;
   return ok;
@@ -1072,4 +1097,20 @@ void DFDT::ClearFcRanges(bool markChanged)
 {
   FcRanges.clear();
   FcRangesChanged = markChanged;
+}
+
+bool DFDT::GetFcRange(INT FileNumber, FC *RangePtr) const
+{
+  if (RangePtr == NULL ||
+      FileNumber <= 0 ||
+      (size_t)FileNumber >= FcRanges.size())
+    return false;
+
+  const DFD_FC_RANGE& entry = FcRanges[FileNumber];
+
+  if (!entry.Valid)
+    return false;
+
+  *RangePtr = entry.Fc;
+  return true;
 }

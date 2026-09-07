@@ -4939,7 +4939,7 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
 
                   if (CheckField && FirstTime)
                     {
-                      FieldCache->SetFieldName(FieldName); // Note: Here we can adise we Disk
+                      FieldCache->SetFieldName(FieldName); // Note: Here we can advise disk
                       FirstTime = 0;
                     }
                   for (INT j=0; j<num_hits; j++)

@@ -12,7 +12,7 @@ Version:	4.0
 Description:	Command-line indexer
 @@@-*/
 
-static const int _iindex_main_version = 3;
+static const int _iindex_main_version = 4;
 
 /*-
   TODO:

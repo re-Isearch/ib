@@ -130,14 +130,22 @@ public:
                 return Table ? Table->checkFieldName(FieldName) : true;
   }
 
-
-  void UpdateFcRange(INT n, const FC& fc) {
-    if (n <= 0) return;
+  // This is a bounding range. The end is not 100% the real end but
+  // ani absolute upper boundi (the true end <= this end). 
+  bool UpdateFcRange(INT n, const FC& fc) {
+    if (n <= 0) return false;
     if (FcRanges.size() <= (size_t)n) FcRanges.resize(n + 1);
     FcRanges[n].Add(fc);
+    return true;
   }
   bool LoadFcRanges(const STRING& FileName);
   bool SaveFcRanges(const STRING& FileName);
+
+  bool GetFcRange(INT FileNumber, FC *RangePtr) const;
+
+  bool GetFcRange(const STRING& FieldName, FC *RangePtr) const {
+    return GetFcRange(GetFileNumber(FieldName), RangePtr);
+  }
 
 private:
 //void Initialize();
