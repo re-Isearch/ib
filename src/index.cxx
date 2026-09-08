@@ -4949,14 +4949,25 @@ PIRSET INDEX::MetaphoneSearch (const STRING& QueryTerm, const STRING& FieldName,
 
                   // Now sort..
                   // if (num_hits > 1) QSORT_GP(gplist, num_hits, sizeof(GPTYPE), gpcomp); // Speed up looking
-
+#if 0 /* Move down into loop */
                   if (CheckField && FirstTime)
                     {
                       FieldCache->SetFieldName(FieldName); // Note: Here we can advise disk
                       FirstTime = 0;
                     }
+#endif
                   for (INT j=0; j<num_hits; j++)
                     {
+#if 1
+		      if (CheckField && FirstTime)
+			{ 
+			  FC range;
+			  if (Parent->DfdtGetFieldRange(FieldName, &range) && !range.Contains(gplist[j]))
+			    continue;           // Don't bother loading the Cache!!
+			  FieldCache->SetFieldName(FieldName); // Note: Here we can advise disk
+			  FirstTime = 0;
+			}
+#endif
 		      if (j % 2001 == 2000 && (MaxCPU_ticks < (clock() - startClock)))
 			{
 			  CPU_ResourcesExhausted();

@@ -1970,6 +1970,7 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
   for (size_t i = start; i < end; i++)
     {
       DFD dfd;
+      FC range;
       size_t x = (i % TotalEntries) + 1;
       MainDfdt->GetEntry(x, &dfd);
 
@@ -1981,6 +1982,12 @@ FC IDB::GetPeerFc (const FC& HitFc, STRING *NodeNamePtr)
         continue;
       else if (PeerCount && !fieldname.Contains(PeerFieldName))
         continue;
+
+      // Perhaps we can save ourselves from loading a cache or doing a search...
+      // A particular use case we've seen are large indexes with a large number of
+      // fields with little data and few records coverage (we saw this in Wikipedia dumps)
+      if (MainDfdt->GetFcRange(dfd.GetFileNumber(), &range) && !range.Contains(HitFc))
+	continue;
 
       const size_t nRecords = PFCache->LoadFieldCache(fieldname, false);
       // message_log(LOG_INFO, "GetPeerFc: field=%s nRecords=%ld", fieldname.c_str(), (long)nRecords);

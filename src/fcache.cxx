@@ -266,7 +266,18 @@ bool FCACHE::ValidateInField(const GPTYPE HitGp)
     {
       return true;
     }
-  else if (!Disk && BaseAddress)
+
+#if 1
+   { FC range;
+     if (Parent->DfdtGetFieldRange(FieldName, &range) &&
+	!range.Contains(HitGp)) {
+       return false; 
+     }
+   }
+#endif
+
+
+  if (!Disk && BaseAddress)
     {
       const size_t byteLength = FieldTotal * sizeof(FC);
       return ValidateInField(HitGp, (const void *)BaseAddress, byteLength);
@@ -282,7 +293,15 @@ bool FCACHE::ValidateInField(const FC& HitFc)
 {
   if (FieldName.GetLength() == 0)
     return true;
-  else if (!Disk && BaseAddress)
+#if 1
+  { FC range;
+    if (Parent->DfdtGetFieldRange(FieldName, &range) &&
+	!range.Contains(HitFc))
+      return false;
+  }
+#endif
+
+  if (!Disk && BaseAddress)
     return ValidateInField(HitFc, (const void *)BaseAddress, FieldTotal * sizeof(FC));
   else if (Fp)
     return ValidateInField(HitFc, Fp, FieldTotal);
