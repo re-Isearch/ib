@@ -113,7 +113,7 @@ public:
   bool GetAttributes (const size_t Index, PATTRLIST AttributesBuffer) const;
   bool GetAttributes (const STRING& FieldName, PATTRLIST AttributesBuffer) const;
   size_t      GetTotalEntries() const { return TotalEntries; }
-  bool GetChanged() const { return Changed || FcRangesChanged; }
+  bool GetChanged() const { return Changed; }
 
   void Sort();
 
