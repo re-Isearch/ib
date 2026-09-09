@@ -192,6 +192,8 @@ public:
   virtual OPOBJ *And (const OPOBJ& OtherIrset, size_t Limit);
 
   virtual OPOBJ *Maybe(const OPOBJ& OtherIrset) override;
+  virtual OPOBJ *Narrow (const OPOBJ& OtherIrset) override;
+
   virtual OPOBJ *Promote(const OPOBJ& OtherIrset) override;
   virtual OPOBJ *Demote(const OPOBJ& OtherIrset) override;
 
@@ -943,6 +945,11 @@ public:
   OPOBJ* Maybe(const _IRSET& Other)
   {  
     return node()->Maybe(*Other.cnode());
+  }
+
+  OPOBJ* Narrow(const _IRSET& Other) 
+  {  
+    return node()->Narrow(*Other.cnode());
   }
 
   OPOBJ* Promote(const _IRSET& Other) 

@@ -2218,11 +2218,9 @@ OPOBJ *atomicIRSET::Maybe (const OPOBJ& OtherIrset)
   Intersection.And(OtherIrset);
 
   if (Intersection.GetTotalEntries() > 0) {
-cerr << "Intersection" << endl;
     *this = Intersection;
   } else if (OtherTotal > MyTotal ||
 	( OtherTotal == MyTotal && OtherIrset.GetMaxScore() > MaxScore)) {
-cerr << "Set to other set" << endl;
     *this = OtherIrset;
   }
 
@@ -2230,6 +2228,45 @@ cerr << "Set to other set" << endl;
 
   return this;
 }
+
+
+// Symmetric
+OPOBJ *atomicIRSET::Narrow (const OPOBJ& OtherIrset)
+{
+  /*
+    A B NARROW
+
+    if |A ∩ B| > 0:
+        return A ∩ B
+    else:
+        return |A| >= |B| ? B : A
+
+    Later MAYBE:n:
+        require a minimum size for the INTERSECTION,
+        otherwise choose the larger result set.
+  */
+
+  const size_t MyTotal    = TotalEntries;
+  const size_t OtherTotal = OtherIrset.GetTotalEntries();
+
+  atomicIRSET Intersection(Parent);
+  Intersection = *this;
+  Intersection.And(OtherIrset);
+
+
+  if (Intersection.GetTotalEntries() > 0) {
+    *this = Intersection;
+  } else if (OtherTotal < MyTotal ||
+        ( OtherTotal == MyTotal && OtherIrset.GetMaxScore() > MaxScore)) {
+    *this = OtherIrset;
+  }
+
+  // else *this is already A
+
+  return this;
+}
+
+
 
 // These are non-symetric
 OPOBJ *atomicIRSET::Demote (const OPOBJ& OtherIrset)

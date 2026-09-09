@@ -4038,6 +4038,9 @@ PIRSET INDEX::Search (const QUERY& Query)
 		    case OperatorMaybe:
 		      Stack << (Op1->Maybe (*Op2));
 		      break;
+                    case OperatorNarrow:
+                      Stack << (Op1->Narrow (*Op2));
+                      break;
 		    case OperatorPromote:
 		      if (Op1->GetTotalEntries() > 0 && Op2->GetTotalEntries()) {
                         // SwapOp(Op1,Op2);

@@ -311,6 +311,7 @@ const struct
       { "NXOR",    OperatorXnor}, // Another one (MathWorks) read NOT XOR 
       { "ANCESTOR", OperatorAncestor},
       { "MAYBE",   OperatorMaybe},
+      { "NARROW",  OperatorNarrow},
       { "PROMOTE", OperatorPromote},
       { "DEMOTE",  OperatorDemote},
 // Special Cases for the Infix Processor
@@ -502,6 +503,10 @@ if (arg_pos)
         break;
 
       case 7:
+       if (Operator.Compare("NARROW", 6) == 0)
+          {
+            return OperatorNarrow;
+          }
 	if (Operator.Compare("DEMOTE",  6) == 0)
 	  {
 	    return OperatorDemote;
@@ -939,6 +944,29 @@ size_t SQUERY::SetFreeFormWordsPhonetic(const STRING& Sentence, int Weight)
   return SetWords(Sentence, &Attrlist, &stop);
 }
 
+
+// Deal with query term saturation 
+static inline float RepeatWeight(size_t n, float base)
+{
+    if (n <= 1)
+        return base;
+
+    // Tunable hyper-paramters
+    const float K = 0.67f;
+    const float Max = 2.0f;
+    const float x = float(n - 1);
+/*
+ K = 0.67, Max = 2.0 -->
+        1 -> 1.00 * Weight
+        2 -> 1.60 * Weight
+        3 -> 1.75 * Weight
+        4 -> 1.82 * Weight
+        .. -> 2.0 * Weight
+*/
+    return base * (1.0f + (Max - 1.0f) * x / (x + K));
+}
+
+
 size_t SQUERY::SetWords(const STRING& Sentence, ATTRLIST *AttrlistPtr, const LISTOBJ *Stopwords)
 {
   if (AttrlistPtr == NULL)
@@ -973,7 +1001,12 @@ size_t SQUERY::SetWords(const STRING& Sentence, ATTRLIST *AttrlistPtr, const LIS
           continue;
         }
       Sterm.SetTerm ( lastWord );
+
+#if 1
+      AttrlistPtr->AttrSetTermWeight(RepeatWeight(factor, Weight));
+#else
       AttrlistPtr->AttrSetTermWeight (factor*Weight);
+#endif
 
       if ((rightTrunc | leftTrunc) && (lastWord.GetLength() < 4))
         {
@@ -1932,9 +1965,10 @@ bool SQUERY::isIntersectionQuery() const
           {
 	    const t_Operator Operator = OpPtr->GetOperatorType ();
 	    if (Operator == OperatorOr || Operator == OperatorNOT || Operator == OperatorNotWithin ||
-		Operator == OperatorMaybe || Operator == OperatorXWithin || Operator == OperatorXor ||
-		Operator ==  OperatorXnor || Operator == OperatorNotAnd  || Operator ==  OperatorNor ||
-		Operator ==  OperatorNand || Operator == OperatorPromote || Operator == OperatorDemote )
+		Operator == OperatorMaybe || Operator == OperatorNarrow || Operator == OperatorXWithin ||
+		Operator == OperatorXor || Operator ==  OperatorXnor || Operator == OperatorNotAnd  ||
+		Operator ==  OperatorNor || Operator ==  OperatorNand || Operator == OperatorPromote ||
+		Operator == OperatorDemote )
               operatorCount++;
           }
         delete OpPtr;
@@ -2168,6 +2202,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                   case OperatorNOT:	S = SOperatorNOT;	break;
 		  case OperatorSibling: S = "SIBLING";          break;
 		  case OperatorMaybe:   S = "MAYBE";            break;
+		  case OperatorNarrow:  S = "NARROW";           break;
 		  case OperatorPromote: S = "PROMOTE";          break;
 		  case OperatorDemote:  S = "DEMOTE";           break;
                   case OperatorOr:	S = SOperatorOr;	break;
@@ -2775,6 +2810,7 @@ int QUERY::Run()
             case OperatorXPeer:
             case OperatorAncestor:
 	    case OperatorMaybe:
+	    case OperatorNarrow:
               TempStack >> Op1;
               TempStack >> Op2;
 
@@ -2988,6 +3024,7 @@ int QUERY::Run ()
                     case OperatorXPeer:
 		    case OperatorAncestor:
 		    case OperatorMaybe:
+		    case OperatorNarrow:
 		      TempStack << Foo;
                       break;
                     default:
@@ -3618,8 +3655,20 @@ static const SQUERY::OPERATOR_DOC OperatorDocs[] =
     "MAYBE",    
     2,            
     "A B MAYBE",
-    "Return records matching both A and B when possible; if there are no common matches, return the operand with the larger result set. Ties are broken by score."
+    "Return records matching both A and B when possible; if there are no common matches, "
+    "return the operand with the larger result set. "
+    "Ties are broken by choosing the operand with the higher maximum score."
   },  
+
+  {                 
+    OperatorNarrow,  
+    "NARROW", 
+    2,                
+    "A B NARROW",      
+    "Return records matching both A and B when possible; if there are no common matches, "
+    "return the operand with the smaller result set. "
+    "Ties are broken by choosing the operand with the higher maximum score." 
+  },
   {
     OperatorPromote,
     "PROMOTE",

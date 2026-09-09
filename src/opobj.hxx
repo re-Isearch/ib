@@ -78,6 +78,7 @@ typedef enum {
   OperatorXPeer,
   OperatorAncestor,
   OperatorMaybe,
+  OperatorNarrow,
   OperatorPromote,
   OperatorDemote
 } t_Operator;
@@ -114,6 +115,7 @@ public:
   virtual OPOBJ *Nor (const OPOBJ&)       { return NULL; }
   virtual OPOBJ *And (const OPOBJ&)       { return NULL; }
   virtual OPOBJ *Maybe(const OPOBJ&)      { return NULL; }
+  virtual OPOBJ *Narrow(const OPOBJ&)      { return NULL; }
   virtual OPOBJ *Promote(const OPOBJ&)    { return NULL; }
   virtual OPOBJ *Demote(const OPOBJ&)     { return NULL; }
 

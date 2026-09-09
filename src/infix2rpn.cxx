@@ -27,6 +27,7 @@ enum operators {
    ,BoolPEERb
    ,BoolAncestor
    ,BoolMaybe
+   ,BoolNarrow
    ,BoolPromote
    ,BoolDemote
    ,BoolXXXX
@@ -288,6 +289,7 @@ static const struct {
  { "PEERb",   BoolPEERb},
  { "ANCESTOR", BoolAncestor},
  { "MAYBE",   BoolMaybe},
+ { "NARROW",  BoolNarrow},
  { "PROMOTE", BoolPromote},
  { "DEMOTE",  BoolDemote},
 
