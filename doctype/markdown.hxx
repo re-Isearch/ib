@@ -29,6 +29,9 @@ public:
                     GPTYPE DataOffset, GPTYPE *GpBuffer,
                     GPTYPE GpLength);
 
+  INT GetTerm(const STRING& Filename, CHR *Buffer,
+              off_t Offset, size_t Length);
+
   void SourceMIMEContent(PSTRING StringPtr) const;
 
   ~MARKDOWN();
