@@ -4205,6 +4205,8 @@ void SQUERY::WriteOperatorHelp(std::ostream& out)
   size_t count = 0;
   const SQUERY::OPERATOR_DOC *docs =
   SQUERY::GetOperatorDocs(&count);
+  out << "Op  \tArity\tRPN-syntax\tDescription\n\
+---------------------------------------------- " << endl;
   for (size_t i = 0; i < count; ++i) {
      out << docs[i].Name << "\t" << terms[docs[i].Arity] << "\t" << 
 	docs[i].Syntax << "\t" << docs[i].Description << endl;
