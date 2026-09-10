@@ -18,6 +18,7 @@ MARKDOWN::MARKDOWN(PIDBOBJ DbParent, const STRING& Name)
 {
   NormalizeEntities = Getoption("NormalizeEntities", "Y").GetBool();
   IgnoreHTMLTags     = Getoption("IgnoreHTMLTags", "Y").GetBool();
+  PathSep            = Getoption("PathSep", ".");
 }
 
 MARKDOWN::~MARKDOWN() {}
@@ -34,7 +35,8 @@ const char *MARKDOWN::Description(PSTRLIST List) const
   }
 
   return "Markdown document type.\n\
-Indexes ATX headings H1..H6 as nested section fields.\n\
+Indexes ATX headings H1..H6 as nested section fields, with heading labels\n\
+under Hn<PathSep>heading (PathSep default '.').\n\
 Fenced code blocks are ignored while detecting headings.\n\
 Inline Markdown presentation syntax is otherwise treated as plain text.\n\
 Options:\n\
@@ -50,14 +52,13 @@ void MARKDOWN::SourceMIMEContent(PSTRING StringPtr) const
 }
 
 
-void MARKDOWN::AddSection(PRECORD Record, int Level, GPTYPE Start, GPTYPE End)
+void MARKDOWN::AddField(PRECORD Record, const STRING& FieldName,
+                        GPTYPE Start, GPTYPE End)
 {
-  if (!Record || Level < 1 || Level > 6 || End < Start)
+  if (!Record || End < Start)
     return;
 
-  char namebuf[4];
-  snprintf(namebuf, sizeof(namebuf), "H%d", Level);
-  STRING name(UnifiedName(namebuf));
+  STRING name(UnifiedName(FieldName));
   if (name.IsEmpty())
     return;
 
@@ -79,6 +80,17 @@ void MARKDOWN::AddSection(PRECORD Record, int Level, GPTYPE Start, GPTYPE End)
     dfd.SetFieldType(FIELDTYPE::text);
     Db->DfdtAddEntry(dfd);
   }
+}
+
+
+void MARKDOWN::AddSection(PRECORD Record, int Level, GPTYPE Start, GPTYPE End)
+{
+  if (Level < 1 || Level > 6)
+    return;
+
+  char namebuf[4];
+  snprintf(namebuf, sizeof(namebuf), "H%d", Level);
+  AddField(Record, STRING(namebuf), Start, End);
 }
 
 
@@ -277,6 +289,34 @@ void MARKDOWN::ParseFields(PRECORD NewRecord)
 
         open[level] = headingStart;
         haveOpen[level] = true;
+
+        // Preserve the original source coordinates of the heading label,
+        // excluding opening hashes, surrounding whitespace and an optional
+        // CommonMark-style closing hash sequence.
+        size_t textStart = q;
+        while (textStart < lineEnd && _md_space(buf[textStart]))
+          ++textStart;
+
+        size_t textEnd = lineEnd; // exclusive
+        while (textEnd > textStart && _md_space(buf[textEnd-1]))
+          --textEnd;
+
+        size_t closing = textEnd;
+        while (closing > textStart && buf[closing-1] == '#')
+          --closing;
+        if (closing < textEnd && closing > q && _md_space(buf[closing-1])) {
+          textEnd = closing;
+          while (textEnd > textStart && _md_space(buf[textEnd-1]))
+            --textEnd;
+        }
+
+        if (textEnd > textStart) {
+          char headingName[128];
+          snprintf(headingName, sizeof(headingName), "H%d%sheading",
+                   level, PathSep.c_str());
+          AddField(NewRecord, STRING(headingName),
+                   (GPTYPE)textStart, (GPTYPE)textEnd - 1);
+        }
       }
     }
 
