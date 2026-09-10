@@ -312,3 +312,22 @@ GPTYPE MARKDOWN::ParseWords(UCHR *DataBuffer, GPTYPE DataLength,
   return DOCTYPE::ParseWords(DataBuffer, DataLength,
                              DataOffset, GpBuffer, GpLength);
 }
+
+
+INT MARKDOWN::GetTerm(const STRING& Filename, CHR *Buffer,
+                      off_t Offset, size_t Length)
+{
+  INT count = DOCTYPE::GetTerm(Filename, Buffer, Offset, Length);
+  if (count <= 0)
+    return count;
+
+  // Object parsers (including vector/HNSW fields) should see the same
+  // useful text as lexical indexing, but no GP offsets need preserving here.
+  if (IgnoreHTMLTags)
+    ZapHtmlTags(reinterpret_cast<UCHR *>(Buffer), (GPTYPE)count);
+
+  if (NormalizeEntities)
+    Entities.normalize2(Buffer, (size_t)count);
+
+  return count;
+}
