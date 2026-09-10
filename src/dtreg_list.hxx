@@ -65,5 +65,6 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #include "../doctype/jsondoc.hxx"
 #include "../doctype/jsonlddoc.hxx"
 #include "../doctype/ejsondoc.hxx"
+#include "../doctype/markdown.hxx"
 
 #endif

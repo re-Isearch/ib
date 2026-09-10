@@ -245,12 +245,16 @@ static struct {
 #else
   {"text", ""},
 #endif
+#ifdef MARKDOWN_HXX
+  {"md",  "MARKDOWN"},
+  {"markdown", "MARKDOWN"},
+#endif
 #ifdef JSONDOC_HXX
-  {".json",   "JSONDETECT"},
-  {".json5",  "JSONDETECT"},
-  {".geojson","JSON"},
-  {".jsonl",  "JSONL"},
-  {".ndjson"  "NDJSON"},
+  {"json",   "JSONDETECT"},
+  {"json5",  "JSONDETECT"},
+  {"geojson","JSON"},
+  {"jsonl",  "JSONL"},
+  {"ndjson"  "NDJSON"},
 #endif
 #ifdef MEDLINE_HXX
   {"med",     "MEDLINE"},

@@ -587,6 +587,7 @@ int _Isearch_main (int argc, char **argv)
   bool SmartQuery = true;
   STRING SmartField;
   bool WordsQuery = false;
+  bool NaturalQuery = false;
   bool AndWordsQuery = false;
   bool PlainQuery = false;
   bool ExpandSynonyms = false;
@@ -1235,10 +1236,14 @@ int _Isearch_main (int argc, char **argv)
 	    }
 	  else if (Flag.Equals ("-words"))
 	    {
-	      WordsQuery = true;
+	      if (!NaturalQuery) WordsQuery = true;
 	      LastUsed = x;
 	    }
-
+	  else if (Flag.Equals("-natural"))
+	    {
+	      if (!WordsQuery) NaturalQuery = true;
+	      LastUsed = x;
+	    }
 	  else if (Flag.Equals ("-and"))
             {
               AndWordsQuery = true;
@@ -1381,9 +1386,9 @@ int _Isearch_main (int argc, char **argv)
       message_log (LOG_FATAL, "Usage: The -rpn and -infix options can not be used together.");
       exit (1);
     }
-   if ((AndWordsQuery || WordsQuery) && (RpnQuery || InfixQuery))
+   if ((AndWordsQuery || WordsQuery || NaturalQuery) && (RpnQuery || InfixQuery))
     {
-      message_log (LOG_FATAL, "Usage: -and/-words and -rpn/-infix options can not be used together.");
+      message_log (LOG_FATAL, "Usage: -and/-words/-natural and -rpn/-infix options can not be used together.");
       exit (1);
     }
 
@@ -1603,6 +1608,8 @@ again:
         squery.SetWords (QueryString, 1, OperatorAnd);
       else if (WordsQuery)
 	squery.SetWords (QueryString);
+      else if (NaturalQuery)
+	squery.SetNaturalWords(QueryString);
       else
 	squery.SetTerm (QueryString);
     }
@@ -2776,8 +2783,15 @@ namespace
       "query",
       "-words",
       NULL,
-      "Interpret the remaining arguments as words."
+      "Interpret the remaining arguments as distinct words (ORd)."
     },
+    { 
+      "query",
+      "-natural",
+      NULL,
+      "Interpret the remaining arguments as words in a natural query."
+    },
+
     {
       "query",
       "-and",

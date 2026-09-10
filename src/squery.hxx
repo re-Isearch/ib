@@ -122,9 +122,9 @@ public:
 
   size_t SetFreeFormWords(const STRING& Sentence, int Weight=1);
   size_t SetFreeFormWordsPhonetic(const STRING& Sentence, int Weight);
-
-  size_t SetWords(const STRING& Sentence, ATTRLIST *Attrlist, const LISTOBJ *Stoplist=NULL);
+  size_t SetNaturalWords(const STRING& Sentence, const LISTOBJ *PromoteList = NULL);
   
+  size_t SetWords(const STRING& Sentence, ATTRLIST *Attrlist, const LISTOBJ *Stoplist=NULL);
   size_t SetWords (const STRING& NewTerm, INT Weight=1, t_Operator Op = OperatorOr);
   size_t SetWords (const STRING& TermList, const OPERATOR& Operator, int Weight);
   size_t SetWords (const STRING& Sentence, const OPERATOR& Operator, ATTRLIST *AttrlistPtr = NULL);

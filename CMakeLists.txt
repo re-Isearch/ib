@@ -839,7 +839,7 @@ add_library(ibDoc
     ${DOCTYPE_DIR}/htmlhead.cxx     ${DOCTYPE_DIR}/htmlremote.cxx
     ${DOCTYPE_DIR}/antihtml.cxx     ${DOCTYPE_DIR}/htmlcache.cxx
     ${DOCTYPE_DIR}/filter2.cxx      ${DOCTYPE_DIR}/pandoc.cxx
-    ${DOCTYPE_DIR}/pdf.cxx
+    ${DOCTYPE_DIR}/pdf.cxx          ${DOCTYPE_DIR}/markdown.cxx
     ${DOCTYPE_DIR}/jsondoc.cxx
     ${DOCTYPE_DIR}/jsonlddoc.cxx
     ${DOCTYPE_DIR}/ejsondoc.cxx

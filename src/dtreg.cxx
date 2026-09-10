@@ -136,6 +136,7 @@ enum Doctypes {
   _JSONDETECT, _JSON, _NDJSON,
   _LDJSON, _EJSON, _CIRRUSNDJSON,
   _ESBULKNDJSON,
+  _MARKDOWN,
 
   _MAX_ID, // This is the "last real" doctype
   _PLUGIN = 126
@@ -215,6 +216,7 @@ static const struct {
   { "EJSON",       _EJSON,      true},
   { "CIRRUSNDJSON",_CIRRUSNDJSON, true}, // Wiki Dumps from Elastic
   { "ESBULKNDJSON",_ESBULKNDJSON, true}, // ES Bulk Dumps (like CIRRUS but more general)
+  { "MARKDOWN",    _MARKDOWN, true},
 
 
   /* Aliases */
@@ -239,7 +241,6 @@ static const struct {
   { "ODT",        _PANDOC,      true},
   { "DOCX",       _PANDOC,      true},
   { "LATEX",      _PANDOC,      true},
-  { "MARKDOWN",   _PANDOC,      true},
   { "JIRA",      _PANDOC,      true},
 
   { "CSVDOC",     _CSVDOC,      false},
@@ -857,6 +858,8 @@ PDOCTYPE        DTREG::GetDocTypePtr(const DOCTYPE_ID& DoctypeId)
       return RegisterDocType (Ident, new CIRRUSNDJSON(Db, Name));
     case _ESBULKNDJSON:
       return RegisterDocType (Ident, new ESBULKNDJSON(Db, Name));
+    case _MARKDOWN:
+      return RegisterDocType (Ident, new MARKDOWN(Db, Name));
     case _PLUGIN:
       // Now look at the plugins
       STRING DocType = DoctypeId.Name;

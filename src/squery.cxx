@@ -4211,3 +4211,10 @@ void SQUERY::WriteOperatorHelp(std::ostream& out)
   }
 }
 
+
+size_t SQUERY::SetNaturalWords(const STRING& Sentence, const LISTOBJ *PromoteList)
+{
+  return 0;
+}
+
+
