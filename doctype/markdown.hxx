@@ -37,6 +37,7 @@ public:
   ~MARKDOWN();
 
 private:
+  void AddField(PRECORD Record, const STRING& Name, GPTYPE Start, GPTYPE End);
   void AddSection(PRECORD Record, int Level, GPTYPE Start, GPTYPE End);
 
   // Zap obvious raw HTML markup in-place without changing byte offsets.
@@ -44,6 +45,7 @@ private:
   static void ZapHtmlTags(UCHR *Buffer, GPTYPE Length);
 
   HTMLEntities Entities;
+  STRING HeadingSeparator;
   bool NormalizeEntities;
   bool IgnoreHTMLTags;
 };
