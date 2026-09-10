@@ -45,7 +45,7 @@ private:
   static void ZapHtmlTags(UCHR *Buffer, GPTYPE Length);
 
   HTMLEntities Entities;
-  STRING HeadingSeparator;
+  STRING PathSep;
   bool NormalizeEntities;
   bool IgnoreHTMLTags;
 };
