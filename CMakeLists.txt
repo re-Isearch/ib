@@ -955,7 +955,7 @@ ib_configure_executable(Idelete)
 # -----------------------------------------------------------------------------
 # Utility executables
 # -----------------------------------------------------------------------------
-foreach(_ib_utility siscompress sisdump sisdump32)
+foreach(_ib_utility siscompress sisdump sisdump32 sislearn)
     add_executable(
         ${_ib_utility}
         "${SRC_DIR}/${_ib_utility}.c"

@@ -246,7 +246,25 @@ inline void Write(const NUMERICALRANGE& Range, FILE *Fp)  { Range.Write(Fp);    
 inline bool Read(NUMERICALRANGE *Range, FILE *Fp)  { return Range->Read(Fp);  }
 
 
+/*
+                    +----------------+
+STRING ------------>|                |
+NUMERICOBJ -------->| Set(NUMBER)    |----> valid positive MONETARYOBJ
+NUMBER ------------>|                |
+computed callback ->|                |
+                    +----------------+
+                           ^
+                           |
+                   Set(STRING) parses
+                   syntax then calls it
+*/
+
+
 class MONETARYOBJ {
+// MONETARYOBJ represents a non-negative monetary quantity.
+// It provides fixed bounded precision suitable for prices and
+// intermediate monetary calculations.  Settlement/cash rounding
+// is an explicit operation and is not performed by Set().
 public:
   MONETARYOBJ ();
   MONETARYOBJ (const STRING& s);
@@ -285,10 +303,21 @@ public:
   operator int()    const { return (int)Amount;  }
   operator long()   const { return (long)Amount; }
 
-  bool  RoundToNearest100th() {
+  bool RoundToNearest100th() {
     if (!Ok()) return false;
-    // 500 = 1 cent (1/100 of currency unit)
-    Fract = (500 * ((Fract+250)/500));
+    UINT4 fract = 500 * ((Fract + 250) / 500);
+    if (fract >= 50000)
+      {
+        const UINT4 maxAmount = ~(UINT4)0;
+        if (Amount == maxAmount)
+          return false;
+        ++Amount;
+        Fract = 0;
+      }
+    else
+      {
+        Fract = (UINT2)fract;
+      }
     return true;
   }
 
@@ -297,7 +326,7 @@ public:
     return Amount == Other.Amount && Fract == Other.Fract;
   }
   bool operator!= (const MONETARYOBJ& Other) const {
-    return Amount != Other.Amount && Fract != Other.Fract;
+    return !(*this == Other);
   }
   bool operator>= (const MONETARYOBJ& Other) const {
     return (Amount > Other.Amount || (Amount == Other.Amount && Fract >= Other.Fract));
@@ -330,6 +359,7 @@ public:
   }
 
 private:
+  void Invalidate();
   UINT4 Amount;
   UINT2 Fract; // nearlest 1/500 th cent, e.g. Amount/500*100 = 50,000
 };

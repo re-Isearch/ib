@@ -2454,10 +2454,47 @@ bool STRING::IsDotNumber() const
   return false;
 }
 
+#if 0
+
+bool STRING::IsCurrency() const
+{
+  if (IsEmpty())
+    return false;
+
+  const unsigned char *p = (const unsigned char *)c_str();
+
+  while (*p && isspace(*p))
+    ++p;
+
+  // Legacy single-byte currency characters used by MONETARYOBJ.
+  const unsigned char money = 164;
+  const unsigned char yen   = 165;
+  const unsigned char pound = 163;
+  const unsigned char cent  = 162;
+
+  // Prefix currency symbol.
+  if (*p == '$' || *p == money || *p == yen || *p == pound)
+    return MONETARYOBJ(*this).Ok();
+
+  // Cent suffix.
+  const unsigned char *e =
+      (const unsigned char *)c_str() + GetLength();
+
+  while (e > p && isspace(e[-1]))
+    --e;
+
+  if (e > p && e[-1] == cent)
+    return MONETARYOBJ(*this).Ok();
+
+  return false;
+}
+
+#else
 bool STRING::IsCurrency() const
 {
   return MONETARYOBJ (m_pchData).Ok();  
 }
+#endif
 
 bool STRING::IsFilePath() const
 {

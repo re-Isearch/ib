@@ -99,7 +99,8 @@ void INDEX::SortNumericFieldData()
 //  bool    IsNumeric() const { return Type == numerical || Type == computed || Type == currency || Type == dotnumber; }
 //  bool    IsNumerical() const{ return Type == numerical || Type == ttl; }
 
-    if (FieldType.IsNumerical() || FieldType.IsComputed() || FieldType.IsPhonetic() ||
+    if (FieldType.IsNumerical() || FieldType.Equals(FIELDTYPE::boolean) ||
+		FieldType.IsComputed() || FieldType.IsPhonetic() ||
 		FieldType.IsHash() || FieldType.IsCaseHash() || FieldType.IsPrivHash() ||
 		FieldType.IsCurrency() || FieldType.IsLexiHash() || FieldType.IsSMILES() ) {
       NUMERICLIST().WriteIndex(Fn);
@@ -240,7 +241,14 @@ PIRSET INDEX::LexiHashSearch(const STRING& Term, const STRING& FieldName, INT4 R
 PIRSET INDEX::MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation)
 {
   if (Parent == NULL) return NULL;
-  
+
+  if (!Price.Ok())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_WARN, "Invalid monetary value in search for field '%s'", FieldName.c_str());
+      return new IRSET(Parent);
+    }
+
   const NUMBER   fKey = Price ;
 
 #ifdef FIELD_WILD_MATCH

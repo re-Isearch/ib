@@ -34,6 +34,14 @@ static const char *_s = "";
 extern "C" long double (*_IB_private_hash)(const char *, const char *, size_t );
 extern "C" const char   *_IB_private_hash_descr;
 
+/* NOTE:
+date: canonicalization is built into the datatype
+computed: canonicalization is delegated to the DOCTYPE/application
+numerical: canonicalization is essentially identity
+currency: constrained monetary canonicalization,
+    with optional application-specific ingest conversion
+*/
+
 // Data types: "text" (the default), "num", "date", "date-range" and "gpoly".
 static struct DataType {
   const char         *Name;
@@ -54,7 +62,7 @@ static struct DataType {
   {"ttl",       n,  FIELDTYPE::ttl, "Numeric computed value for time-to-live in seconds."},
   {"expires",   d,  FIELDTYPE::ttl_expires, "Numeric computed ttl value as date of expiration."},
   {"boolean",   B,  FIELDTYPE::boolean, "Boolean type"},
-  {"currency",  "$",FIELDTYPE::currency, "Monetary currency"},
+  {"currency",  "$",FIELDTYPE::currency, "Non-negative monetary value (fixed precision)"},
   {"dotnumber", n,  FIELDTYPE::dotnumber, "Dot number (Internet v4/v6 Addresses, UIDs etc)"},
   {"phonetic",  h,  FIELDTYPE::phonhash, "Computed phonetic hash applied to each word (for names)"},
   {"phone2",    h,  FIELDTYPE::phonhash2, "Phonetic hash applied to the whole field"},

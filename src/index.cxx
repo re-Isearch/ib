@@ -1290,6 +1290,8 @@ NUMERICOBJ INDEX::encodeLexiHash(const STRING& String) const
 
 
 extern "C" long double (*_IB_private_hash)(const char *, const char *, size_t );
+extern "C" long double (*_IB_search_currency)(const char *, const char *, size_t);
+
 
 
 // Given a Fieldname and FieldType return the filename (or its base)
@@ -4270,7 +4272,11 @@ PIRSET INDEX::Search (const QUERY& Query)
               else if (aFieldType.IsCurrency() || FieldType.IsCurrency()) // FIELDTYPE::currency
                 {
                   if (gotRelation==false) Relation=ZRelEQ;
-                  NewIrset=MonetarySearch( MONETARYOBJ(Term), FieldName, Relation);
+		  MONETARYOBJ price;
+		  if (_IB_search_currency)
+		    price.Set(_IB_search_currency(FieldName.c_str(), Term.c_str(), Term.GetLength()));
+		  else price.Set(Term);
+		  if (price.Ok()) NewIrset=MonetarySearch(price, FieldName, Relation);
                 }
 	      else if (aFieldType.IsLexiHash() || FieldType.IsLexiHash()) // FIELDTYPE::lexi
 		{
