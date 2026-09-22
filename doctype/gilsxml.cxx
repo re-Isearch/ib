@@ -778,7 +778,7 @@ cerr << "NO CONTENT (empty tag)" << endl;
 
       // tags_ptr[offset] = ""; // Don't re-use same end-tag
 
-#if 1
+#if 0
       if (p && have_attribute_val)
 	{
 	  STRING MetaField("."); 
@@ -920,15 +920,21 @@ cerr << "NO CONTENT (empty tag)" << endl;
 	        FieldName.Cat(levelCh);
 #endif
 
-
 	      // sanity check on fieldname 
 	      if (!dfd.checkFieldName(FieldName))
 		continue; // bad field name
 
   	      dfd.SetFieldName (FieldName);
 
-	      if (!ft.IsText())
-		  Db->AddFieldType(FieldName, ft);
+	      FIELDTYPE path_ft(Db->GetFieldType(FieldName));
+
+	      if (!ft.IsText()) {
+		Db->AddFieldType(FieldName, ft);
+		path_ft = ft;
+	      }
+
+	      if (path_ft.Defined()) dfd.SetFieldType(path_ft);
+	      else dfd.SetFieldType(ft);
 
 	      Db->DfdtAddEntry (dfd);
 	      // df.SetFct ( FC(val_start, val_start + val_len - 1) );
@@ -979,6 +985,7 @@ cerr << "NO CONTENT (empty tag)" << endl;
 		    Db->AddFieldType(TagPath, ft);
 		    dfd.SetFieldType( ft ); // Set the type
 		    dfd.SetFieldName ( TagPath );
+// cerr << "Adding " << TagPath << "   as  " << ft << endl;
 		    Db->DfdtAddEntry (dfd); // register globally
 		    continue;
 		  }

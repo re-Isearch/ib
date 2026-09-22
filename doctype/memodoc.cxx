@@ -85,7 +85,6 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
       // We only auto detect fields where the content is less than 512 bytes long
       if (autoFieldTypes && Contents.GetLength() < 512)
 	{
-cerr << "CHECK: " << Contents << endl;
 	  if (Contents.IsGeoBoundedBox())      ft = FIELDTYPE::box;
 	  else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
 	  else if (Contents.IsNumberRange())   ft = FIELDTYPE::numericalrange;

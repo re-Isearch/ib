@@ -716,6 +716,7 @@ SRCH_DATE  DOCTYPE::ParseDate(const STRING& Buffer) const
 {
   if (Buffer.IsEmpty())
     return SRCH_DATE();
+
   SRCH_DATE date (Buffer); // Let SRCH_DATE do the magic
   if (!date.Ok())
     message_log (LOG_WARN, "%s::ParseDate: '%s' was not a parseable or well-defined date.",
@@ -771,6 +772,7 @@ int  DOCTYPE::ParseBBox(const STRING& Buffer, BBOXFLD* fld) const
 
 extern "C" {
 extern long double (*_IB_parse_computed)(const char *doctype, const char *fieldname, const char *buffer, size_t len);
+extern long double (*_IB_parse_currency)(const char *doctype, const char *fieldname, const char *buffer, size_t len);
 }
 
 NUMERICOBJ DOCTYPE::ParseComputed(const STRING& FieldName, const STRING& Buffer) const
@@ -782,7 +784,7 @@ NUMERICOBJ DOCTYPE::ParseComputed(const STRING& FieldName, const STRING& Buffer)
 
 MONETARYOBJ DOCTYPE::ParseCurrency(const STRING& FieldName, const STRING& Buffer) const
 {
-  if (_IB_parse_computed)
+  if (_IB_parse_currency)
     return _IB_parse_computed(Doctype, FieldName, Buffer.c_str(), Buffer.GetLength());
   return MONETARYOBJ(Buffer);
 }

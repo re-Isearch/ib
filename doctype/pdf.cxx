@@ -1,10 +1,24 @@
 /*@@@
 File:		pdf.cxx
-Version:	1.00
+Version:	1.01
 Description:	Class PDF
 Author:		Edward Zimmermann
 @@@*/
 
+
+/*
+
+This class depends upon the utility "pdftomemo" provided as a pdftomemo.cc
+for Poppler (tested Poppler 26.09.0 API. but probably suitable for other versions)
+
+It is basically a modified pdftotext that produces a MEMODOC format: metadata followed
+by the text in the body.
+
+We have provided (in contrib) the pdftomemo.cc pdftomemo.1 and a patch for the make. This
+instead of a forked Poppler since its really just a program that uses Poppler rather than
+a modification.
+
+*/
 
 
 #include <ctype.h>
@@ -93,17 +107,74 @@ their MEMODOC style output to standard output (stdout)";
       message_log (LOG_DEBUG, "%s de-activated: External filter was set to '%s'", Doctype.c_str(), s.c_str());
       Filter = NulString;
     }
-
-  if (DateModifiedField.IsEmpty()) DateModifiedField = "ModDate";
-  if (DateCreatedField.IsEmpty())  DateCreatedField  = "CreationDate";
+  if (DateModifiedField.IsEmpty()) DateModifiedField = "XMP.xmp.ModifyDate"; // "ModDate";
+  if (DateCreatedField.IsEmpty())  DateCreatedField  = "XMP.xmp.CreateDate"; //"CreationDate";
   if (DateExpiresField.IsEmpty())  DateExpiresField  = "expirationDate";
-   if (Db)
-    {
-      Db->AddFieldType(DateCreatedField, FIELDTYPE::date);
-      Db->AddFieldType(DateModifiedField, FIELDTYPE::date);
-      Db->AddFieldType(DateExpiresField, FIELDTYPE::date);
-      Db->AddFieldType(TEXT_ELEMENT, FIELDTYPE::text);
-    }
+
+  if (Db) {
+  // Canonical PDF/MEMODOC dates.
+  Db->AddFieldType("ModDate",      FIELDTYPE::date);
+  Db->AddFieldType("CreationDate", FIELDTYPE::date);
+
+  // Source-qualified PDF dates.
+  Db->AddFieldType("PDF.ModDate",      FIELDTYPE::date);
+  Db->AddFieldType("PDF.CreationDate", FIELDTYPE::date);
+
+  // XMP Basic dates -- xap is the older prefix for the same namespace.
+  Db->AddFieldType("XMP.xmp.CreateDate",   FIELDTYPE::date);
+  Db->AddFieldType("XMP.xmp.ModifyDate",   FIELDTYPE::date);
+  Db->AddFieldType("XMP.xmp.MetadataDate", FIELDTYPE::date);
+
+  Db->AddFieldType("XMP.xap.CreateDate",   FIELDTYPE::date);
+  Db->AddFieldType("XMP.xap.ModifyDate",   FIELDTYPE::date);
+  Db->AddFieldType("XMP.xap.MetadataDate", FIELDTYPE::date);
+
+  // Other standard XMP dates.
+  Db->AddFieldType("XMP.dc.date",                    FIELDTYPE::date);
+  Db->AddFieldType("XMP.photoshop.DateCreated",      FIELDTYPE::date);
+  Db->AddFieldType("XMP.exif.DateTimeOriginal",      FIELDTYPE::date);
+  Db->AddFieldType("XMP.exif.DateTimeDigitized",     FIELDTYPE::date);
+  Db->AddFieldType("XMP.tiff.DateTime",              FIELDTYPE::date);
+  Db->AddFieldType("XMP.xmpMM.History.stEvt.when",   FIELDTYPE::date);
+
+  // Explicit textual identifiers/versions.  Do not autodetect these.
+  Db->AddFieldType("PDF.DocumentID",       FIELDTYPE::text);
+  Db->AddFieldType("XMP.pdf.PDFVersion",   FIELDTYPE::text);
+  Db->AddFieldType("XMP.desc.version",     FIELDTYPE::text);
+
+  // Dublin Core is fundamentally descriptive metadata.
+  Db->AddFieldType("XMP.dc.title",       FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.description", FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.creator",     FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.subject",     FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.publisher",   FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.contributor", FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.rights",      FIELDTYPE::text);
+  Db->AddFieldType("XMP.dc.format",      FIELDTYPE::text);
+
+  // Known numerics.
+  Db->AddFieldType("XMP.xmp.Rating",    FIELDTYPE::numerical);
+  Db->AddFieldType("XMP.xmpTPg.NPages", FIELDTYPE::numerical);
+
+  Db->AddFieldType("XMP.pdfaid.part", FIELDTYPE::numerical);
+  Db->AddFieldType("XMP.pdfaid.rev",  FIELDTYPE::numerical);
+  Db->AddFieldType("XMP.pdfuaid.part", FIELDTYPE::numerical);
+  Db->AddFieldType("XMP.pdfuaid.rev",  FIELDTYPE::numerical);
+
+  // Known boolean.
+  Db->AddFieldType("XMP.xmpRights.Marked", FIELDTYPE::boolean);
+
+  // Geospatial projection emitted by pdftomemo.
+  Db->AddFieldType("Geo.Page", FIELDTYPE::numerical);
+  Db->AddFieldType("Geo.BBox", FIELDTYPE::box);
+
+  // Configurable record dates.
+  Db->AddFieldType(DateCreatedField,  FIELDTYPE::date);
+  Db->AddFieldType(DateModifiedField, FIELDTYPE::date);
+  Db->AddFieldType(DateExpiresField,  FIELDTYPE::date);
+
+  Db->AddFieldType(TEXT_ELEMENT, FIELDTYPE::text);
+  }
    DateField = DateCreatedField;
 }
 

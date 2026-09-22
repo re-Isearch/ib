@@ -40,6 +40,7 @@ under Hn<PathSep>heading (PathSep default '.').\n\
 Fenced code blocks are ignored while detecting headings.\n\
 Inline Markdown presentation syntax is otherwise treated as plain text.\n\
 Options:\n\
+  PathSep=Character (default '.')\n\
   NormalizeEntities=Y|N  (default Y)\n\
   IgnoreHTMLTags=Y|N     (default Y)";
 }
