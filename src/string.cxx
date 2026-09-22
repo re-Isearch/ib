@@ -2522,11 +2522,19 @@ bool STRING::IsDate() const
   return false;
 }
 
+// This is stricter than the parser since its main use is autotyping..
 bool STRING::IsDateRange() const
 {
   if (Len() > 10) {
     if ( m_pchData[0] == '-' || Count('.') == 1) return false;  
-    return DATERANGE(*this).Ok();
+    DATERANGE test (*this); // Parse
+    // For autotyping we don't want 2010-2022 to pass as date-range
+    if (test.Ok() && !test.IsYearPrecision()) {
+      // We also don't want years before 1582 or after 2050
+      if (test.GetStart().Year() < 1582 || test.GetEnd().Year() > 2050)
+        return false;
+      return true;
+    }
   }
   return false;
 }

@@ -227,6 +227,64 @@ static int strint_compare (const void *v1, const void *v2)
   return strcasecmp (((struct strint *) v1)->s, ((struct strint *) v2)->s);
 }
 
+#if 1
+
+static int strint_search (const char *str, struct strint *tab, int n, int *iP)
+{
+  int i, r;
+  int l = 0;
+  int h = n - 1;
+  size_t len;
+
+  if (str == NULL || *str == '\0')
+    return 0; // ERR
+
+  len = strlen (str);
+
+  /* Ignore trailing period(s). */
+  while (len > 0 && str[len - 1] == '.')
+    --len;
+
+  if (len == 0)
+    return 0; // ERR
+
+  while (h >= l)
+    {
+      if ((i = (h + l) / 2) < 0)
+        i = 0;
+      else if (i >= n)
+        i = n - 1;
+
+      /*
+       * Compare only the significant part of str.
+       * If that prefix matches, check whether tab[i].s also ends there.
+       */
+      r = strncasecmp (str, tab[i].s, len);
+
+      if (r == 0 && tab[i].s[len] != '\0')
+        r = -1;
+
+      if (r < 0)
+        {
+          h = i - 1;
+        }
+      else if (r > 0)
+        {
+          l = i + 1;
+        }
+      else
+        {
+          *iP = tab[i].i;
+          return 1; // Found it
+        }
+    }
+
+  return 0;
+}
+
+
+
+#else
 static int strint_search (const char *str, struct strint *tab, int n, int *iP)
 {
   int i, r;
@@ -257,6 +315,7 @@ static int strint_search (const char *str, struct strint *tab, int n, int *iP)
     }
   return 0;
 }
+#endif
 
 #define AMPM_NONE 0
 #define AMPM_AM 1
@@ -302,6 +361,8 @@ static int scan_ampm (const char *str_ampm, int *ampmP)
 
 static int scan_wday (const char *str_wday, int *tm_wdayP)
 {
+  // ASCII-only names are listed once because Latin-X and UTF-8 are identical.
+  // Non-ASCII names are listed twice: legacy Latin-X bytes, then UTF-8 bytes.
   static struct strint wday_tab[] =
   {
 /* French */
@@ -327,21 +388,28 @@ static int scan_wday (const char *str_wday, int *tm_wdayP)
     {"freitag", 5},
     {"sa", 6},
     {"samstag", 6},
-/* Spanish */
+/* Spanish: ISO-8859-1 (Latin-1) + UTF-8 */
     {"domingo", 0},
     {"lunes", 1},
     {"martes", 2},
-    {"miércoles", 3},
+    {"mi\xE9rcoles", 3},              /* Latin-1 */
+    {"mi\xC3\xA9rcoles", 3},         /* UTF-8 */
     {"jueves", 4},
     {"viernes", 5},
-    {"sábado", 6},
-/* Italian */
+    {"s\xE1" "bado", 6},            /* Latin-1 */
+    {"s\xC3\xA1" "bado", 6},       /* UTF-8 */
+/* Italian: ISO-8859-1 (Latin-1) + UTF-8 */
     {"domenica", 0},
-    {"lunedì", 1},
-    {"martedì", 2},
-    {"mercoledì", 3},
-    {"giovedì", 4},
-    {"venerdì", 5},
+    {"luned\xEC", 1},                 /* Latin-1 */
+    {"luned\xC3\xAC", 1},            /* UTF-8 */
+    {"marted\xEC", 2},                /* Latin-1 */
+    {"marted\xC3\xAC", 2},           /* UTF-8 */
+    {"mercoled\xEC", 3},              /* Latin-1 */
+    {"mercoled\xC3\xAC", 3},         /* UTF-8 */
+    {"gioved\xEC", 4},                /* Latin-1 */
+    {"gioved\xC3\xAC", 4},           /* UTF-8 */
+    {"venerd\xEC", 5},                /* Latin-1 */
+    {"venerd\xC3\xAC", 5},           /* UTF-8 */
     {"sabato", 6},
 /* English */
     {"sun", 0},
@@ -358,13 +426,16 @@ static int scan_wday (const char *str_wday, int *tm_wdayP)
     {"friday", 5},
     {"sat", 6},
     {"saturday", 6},
-/* Polish */
+/* Polish: ISO-8859-2 (Latin-2) + UTF-8 */
     {"niedziela", 0},
-    {"poniedzia³ek", 1},
+    {"poniedzia\xB3" "ek", 1},       /* Latin-2 */
+    {"poniedzia\xC5\x82" "ek", 1},  /* UTF-8 */
     {"wtorek", 2},
-    {"¦roda", 3},
+    {"\xA6roda", 3},                  /* Latin-2: capital S-acute, as in original */
+    {"\xC5\x9Aroda", 3},             /* UTF-8: capital S-acute */
     {"czwartek", 4},
-    {"pi±tek", 5},
+    {"pi\xB1tek", 5},                 /* Latin-2 */
+    {"pi\xC4\x85tek", 5},            /* UTF-8 */
     {"sobota", 6}
   };
   static int sorted = 0;
@@ -372,48 +443,55 @@ static int scan_wday (const char *str_wday, int *tm_wdayP)
   if (!sorted)
     {
       (void) QSORT ( wday_tab, sizeof (wday_tab) / sizeof (struct strint),
-		     sizeof (struct strint), strint_compare);
+                     sizeof (struct strint), strint_compare);
       sorted = 1;
     }
   return strint_search (
   str_wday, wday_tab, sizeof (wday_tab) / sizeof (struct strint), tm_wdayP);
 }
 
+
 static int scan_mon (const char *str_mon, int *tm_monP)
 {
   // To be Extended as needed! NOTE: Entries NEED to be UNiQUE!
+  // ASCII-only names are listed once because Latin-X and UTF-8 are identical.
+  // Non-ASCII names are listed twice: legacy Latin-X bytes, then UTF-8 bytes.
   static struct strint mon_tab[] =
   {
-/* French */
+/* French: ISO-8859-1 (Latin-1) + UTF-8 */
 //  {"jan", 0},
-    {"fév", 1},
+    {"f\xE9v", 1},             /* Latin-1 */
+    {"f\xC3\xA9v", 1},        /* UTF-8 */
     {"mars", 2},
     {"avr", 3},
     {"mai", 4},
     {"juin", 5},
     {"juil", 6},
-    {"août", 7},
+    {"ao\xFBt", 7},            /* Latin-1 */
+    {"ao\xC3\xBBt", 7},       /* UTF-8 */
 //  {"sep", 8},
 //  {"oct", 9},
 //  {"nov", 10},
-    {"déc", 11},
+    {"d\xE9" "c", 11},        /* Latin-1 */
+    {"d\xC3\xA9" "c", 11},   /* UTF-8 */
     {"janvier", 0},
-    {"février", 1},
-    {"mars", 2},
+    {"f\xE9vrier", 1},         /* Latin-1 */
+    {"f\xC3\xA9vrier", 1},    /* UTF-8 */
     {"avril", 3},
-    {"juin", 5},
     {"juillet", 6},
-    {"août", 7},
     {"septembre", 8},
     {"octobre", 9},
     {"novembre", 10},
-    {"décembre", 11},
-/* German/Austrian */
-    {"jänner", 0},
+    {"d\xE9" "cembre", 11},   /* Latin-1 */
+    {"d\xC3\xA9" "cembre", 11}, /* UTF-8 */
+/* German/Austrian: ISO-8859-1 (Latin-1) + UTF-8 */
+    {"j\xE4nner", 0},          /* Latin-1 */
+    {"j\xC3\xA4nner", 0},     /* UTF-8 */
     {"januar", 0},
     {"feber", 1},
     {"februar", 1},
-    {"märz", 2},
+    {"m\xE4rz", 2},            /* Latin-1 */
+    {"m\xC3\xA4rz", 2},       /* UTF-8 */
 //  {"april", 3},
 //  {"mai", 4},
     {"juni", 5},
@@ -448,6 +526,7 @@ static int scan_mon (const char *str_mon, int *tm_monP)
     {"aug", 7},
     {"august", 7},
     {"sep", 8},
+    {"sept", 8},
     {"september", 8},
     {"oct", 9},
     {"october", 9},
@@ -455,28 +534,35 @@ static int scan_mon (const char *str_mon, int *tm_monP)
     {"november", 10},
     {"dec", 11},
     {"december", 11},
-/* Polish */
-    {"styczeñ", 0},
+/* Polish: ISO-8859-2 (Latin-2) + UTF-8 */
+    {"stycze\xF1", 0},         /* Latin-2 */
+    {"stycze\xC5\x84", 0},    /* UTF-8 */
     {"luty", 1},
     {"marzec", 2},
-    {"kwiecieñ", 3},
+    {"kwiecie\xF1", 3},        /* Latin-2 */
+    {"kwiecie\xC5\x84", 3},   /* UTF-8 */
     {"maj", 4},
     {"czerwiec", 5},
     {"lipiec", 6},
-    {"sierpieñ", 7},
-    {"wrzesieñ", 8},
-    {"pa¼dziernik", 9},
+    {"sierpie\xF1", 7},        /* Latin-2 */
+    {"sierpie\xC5\x84", 7},   /* UTF-8 */
+    {"wrzesie\xF1", 8},        /* Latin-2 */
+    {"wrzesie\xC5\x84", 8},   /* UTF-8 */
+    {"pa\xBC" "dziernik", 9}, /* Latin-2 */
+    {"pa\xC5\xBA" "dziernik", 9}, /* UTF-8 */
     {"listopad", 10},
-    {"grudzieñ", 11}
+    {"grudzie\xF1", 11},       /* Latin-2 */
+    {"grudzie\xC5\x84", 11}   /* UTF-8 */
   };
   static int sorted = 0;
 
   if (!sorted)
     {
       QSORT ( mon_tab, sizeof (mon_tab) / sizeof (struct strint),
-	sizeof (struct strint), strint_compare);
+        sizeof (struct strint), strint_compare);
       sorted = 1;
     }
+
   return strint_search (
       str_mon, mon_tab, sizeof (mon_tab) / sizeof (struct strint), tm_monP);
 }
@@ -807,6 +893,38 @@ bool SRCH_DATE::date_parse (const char *str)
 
       return true;
    }
+  else if (strcasecmp(str, "Tomorrow") == 0)
+    {
+       d_date =  ( now_tmP->tm_mday)*DAY_FACTOR + ( now_tmP->tm_mon + 1)*MONTH_FACTOR +
+        Normalize_tm_year(now_tmP->tm_year)*YEAR_FACTOR; 
+      SetPrecision (); 
+      this->Tomorrow();
+      return true;
+   }
+  else if (strcasecmp(str, "Overmorrow") == 0)
+    {
+       d_date =  ( now_tmP->tm_mday)*DAY_FACTOR + ( now_tmP->tm_mon + 1)*MONTH_FACTOR +
+        Normalize_tm_year(now_tmP->tm_year)*YEAR_FACTOR;
+      SetPrecision ();
+      this->PlusNdays(2);
+      return true;
+   }
+  else if (strcasecmp(str, "Yesterday") == 0)
+    {
+       d_date =  ( now_tmP->tm_mday)*DAY_FACTOR + ( now_tmP->tm_mon + 1)*MONTH_FACTOR +
+        Normalize_tm_year(now_tmP->tm_year)*YEAR_FACTOR;
+      SetPrecision ();
+      this->Yesterday();
+      return true;
+   }
+  else if (strcasecmp(str, "Ereyesterday") == 0)
+    {
+       d_date =  ( now_tmP->tm_mday)*DAY_FACTOR + ( now_tmP->tm_mon + 1)*MONTH_FACTOR +
+        Normalize_tm_year(now_tmP->tm_year)*YEAR_FACTOR;
+      SetPrecision ();
+      this->MinusNdays(2);
+      return true;
+   }
   else if (*str == '/' && SetTimeOfFile(str))
    {
       return true;
@@ -914,6 +1032,8 @@ bool SRCH_DATE::date_parse (const char *str)
   for (cp = str; *cp == ' ' || *cp == '\t'; ++cp)
     ;
 
+  const size_t length = strlen(cp);
+
   /* Handle NN Days/Months/Years */
   if (sscanf(cp, "%d %s", &tm_mday, str_mon) == 2)
     {
@@ -984,12 +1104,12 @@ bool SRCH_DATE::date_parse (const char *str)
       return false;
     }
   /* N mth CCYY HH:MM:SS ampm zone */
-  else if (((sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
+  else if (((sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
 		&tm_mday, str_mon, str_year, &tm_hour, &tm_min, &tm_sec,
 		str_ampm, str_gmtoff) == 8 &&
 	scan_year (str_year, &tm_year) &&
 	scan_ampm (str_ampm, &ampm)) ||
-       sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d:%d %[^: ]",
+       sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d:%d %[^: ]",
 	       &tm_mday, str_mon, str_year, &tm_hour, &tm_min, &tm_sec,
 	       str_gmtoff) == 7) &&
 	scan_year(str_year, &tm_year) &&
@@ -1007,12 +1127,12 @@ bool SRCH_DATE::date_parse (const char *str)
     }
 
   /* N mth CCYY HH:MM ampm zone */
-  else if (((sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d %[apmAPM] %[^: ]",
+  else if (((sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d %[apmAPM] %[^: ]",
 		   &tm_mday, str_mon, str_year, &tm_hour, &tm_min, str_ampm,
 		     str_gmtoff) == 7 &&
 	     scan_year (str_year, &tm_year) &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d %[^: ]",
+	    sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d %[^: ]",
 		    &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		    str_gmtoff) == 6) &&
 	     scan_year( str_year, &tm_year) &&
@@ -1029,12 +1149,12 @@ bool SRCH_DATE::date_parse (const char *str)
       got_zone   = 1;
     }
   /* N mth CCYY HH:MM:SS ampm */
-  else if (((sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d:%d %[apmAPM]",
+  else if (((sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d:%d %[apmAPM]",
 		     &tm_mday, str_mon, str_year, &tm_hour, &tm_min, &tm_sec,
 		     str_ampm) == 7 &&
 	     scan_year (str_year, &tm_year) &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%d %[a-zA-Z] %[0=9] %d:%d:%d",
+	    sscanf (cp, "%d %31[^0-9 ] %[0=9] %d:%d:%d",
 		    &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		    &tm_sec) == 6) &&
 	     scan_year (str_year, &tm_year) &&
@@ -1049,12 +1169,12 @@ bool SRCH_DATE::date_parse (const char *str)
       tm.tm_sec  = tm_sec;
     }
   /* N mth CCYY HH:MM ampm */
-  else if (((sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d %[apmAPM]",
+  else if (((sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d %[apmAPM]",
 		     &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		     str_ampm) == 6 &&
 	     scan_year (str_year, &tm_year) &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%d %[a-zA-Z] %[0-9] %d:%d",
+	    sscanf (cp, "%d %31[^0-9 ] %[0-9] %d:%d",
 		    &tm_mday, str_mon, str_year, &tm_hour, &tm_min) == 5) &&
 	   scan_year (str_year, &tm_year) &&
 	   scan_mon (str_mon, &tm_mon))
@@ -1150,12 +1270,12 @@ bool SRCH_DATE::date_parse (const char *str)
 
     }
   /* wdy, N mth CCYY HH:MM:SS ampm zone */
-  else if (((sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
+  else if (((sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
 		   str_wday, &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		     &tm_sec, str_ampm, str_gmtoff) == 9 &&
 	     scan_year (str_year, &tm_year) &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %[0-9] %d:%d:%d %[^: ]",
+	    sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %[0-9] %d:%d:%d %[^: ]",
 		    str_wday, &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		    &tm_sec, str_gmtoff) == 8) &&
 	   scan_wday (str_wday, &tm_wday) &&
@@ -1178,7 +1298,7 @@ bool SRCH_DATE::date_parse (const char *str)
 // "Wed, Dec 27 2000 10:15:55 GMT-0500"  
  /* wdy, mth N, CCYY HH:MM:SS ampm zone */
 // Tuesday, September 29, 1998 8:38:38 PM
-  else if ((sscanf (cp, "%[a-zA-Z], %[a-zA-Z] %d, %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
+  else if ((sscanf (cp, "%15[^0-9,], %15[^0-9 ] %d, %[0-9] %d:%d:%d %[apmAPM] %[^: ]",
                    str_wday, str_mon, &tm_mday, str_year, &tm_hour, &tm_min,
                      &tm_sec, str_ampm, str_gmtoff) >=8 &&
 	   (tm_mday > 0 && tm_mday < 32) &&
@@ -1209,7 +1329,7 @@ cerr << "GM offset = " << gmtoff << endl;
 // "Wed, Dec 27 2000 10:15:55 GMT-0500"
  /* wdy, mth N CCYY HH:MM:SS zone */
 // Tuesday, September 29, 1998 8:38:38 PM
-  else if ((sscanf (cp, "%[a-zA-Z], %[a-zA-Z] %d %[0-9] %d:%d:%d  %[^: ]",
+  else if ((sscanf (cp, "%15[^0-9,], %15[^0-9 ] %d %[0-9] %d:%d:%d  %[^: ]",
                    str_wday, str_mon, &tm_mday, str_year, &tm_hour, &tm_min,
                      &tm_sec, str_gmtoff) >=7 &&
            (tm_mday > 0 && tm_mday < 32)) &&
@@ -1235,11 +1355,11 @@ cerr << "GM offset = " << gmtoff << endl;
     }
 #endif
   /* wdy, N mth CCYY HH:MM ampm zone */
-  else if (((sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %d %d:%d %[apmAPM] %[^: ]",
+  else if (((sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %d %d:%d %[apmAPM] %[^: ]",
 		   str_wday, &tm_mday, str_mon, &tm_year, &tm_hour, &tm_min,
 		     str_ampm, str_gmtoff) == 8 &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %[0-9] %d:%d %[^: ]",
+	    sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %[0-9] %d:%d %[^: ]",
 		    str_wday, &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		    str_gmtoff) == 7) &&
 	   scan_wday (str_wday, &tm_wday) &&
@@ -1258,12 +1378,12 @@ cerr << "GM offset = " << gmtoff << endl;
       got_zone = 1;
     }
   /* wdy, N mth CCYY HH:MM:SS ampm */
-  else if (((sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %[0-9] %d:%d:%d %[apmAPM]",
+  else if (((sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %[0-9] %d:%d:%d %[apmAPM]",
 		   str_wday, &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		     &tm_sec, str_ampm) == 8 &&
 	     scan_year (str_year, &tm_year) &&
 	     scan_ampm (str_ampm, &ampm)) ||
-	    sscanf (cp, "%[a-zA-Z], %d %[a-zA-Z] %[0-9] %d:%d:%d",
+	    sscanf (cp, "%15[^0-9,], %d %15[^0-9 ] %[0-9] %d:%d:%d",
 		    str_wday, &tm_mday, str_mon, str_year, &tm_hour, &tm_min,
 		    &tm_sec) == 7) &&
 	   scan_wday (str_wday, &tm_wday) &&
@@ -1437,10 +1557,8 @@ cerr << "GM offset = " << gmtoff << endl;
       got_zone = 1;
     }
  /* Mth CCYY */
- else if ( strlen(cp) <= 9 &&
-        sscanf(cp,  "%[a-zA-Z]%c%[0-9]", str_mon, &ch, str_year) == 2 &&
-	(ch == ' ' || ispunct(ch)) &&
-	scan_mon(str_mon, &tm_mon) &&
+ else if ( length >= 8 && length < 15 && (sscanf(cp, "%15[^0-9 ]%c%4[0-9]", str_mon, &ch, str_year) == 3) 
+	&& (ch == ' ' || ispunct(ch)) && scan_mon(str_mon, &tm_mon) &&
 	isdigit(str_year[0]) && isdigit(str_year[1]) && isdigit(str_year[2]) && isdigit(str_year[3]) &&
 	scan_year(str_year, &tm_year) )
     {
@@ -1453,9 +1571,9 @@ cerr << "GM offset = " << gmtoff << endl;
       tm.tm_sec = 0;
       gmtoff = 0; /* Don't adjust */
       got_zone = 1;
-    }
+  }
   // mth N CCYY */
-  else if ((sscanf (cp, "%[a-zA-Z] %d %[0-9]", str_mon, &tm_mday, str_year) == 3) &&
+  else if ((sscanf (cp, "%15[^0-9 ] %d %[0-9]", str_mon, &tm_mday, str_year) == 3) &&
             scan_year(str_year, &tm_year) &&
             tm_mday < 32 && scan_mon (str_mon, &tm_mon))
     {
@@ -1470,7 +1588,7 @@ cerr << "GM offset = " << gmtoff << endl;
       got_zone = 1;
     }
   /* N, mth CCYY */
-  else if ((sscanf (cp, "%d, %[a-zA-Z] %[0-9]", &tm_mday, str_mon, str_year) == 3) &&
+  else if ((sscanf (cp, "%d, %15[^0-9 ] %[0-9]", &tm_mday, str_mon, str_year) == 3) &&
 	    scan_year(str_year, &tm_year) &&
             tm_mday < 32 && scan_mon (str_mon, &tm_mon))
     {
@@ -1611,7 +1729,7 @@ zone_it:
       int test = (cp[2] - '0')*10 + cp[3] - '0';
       if (( (test == 0) || (test > 12) ||
 	(cp[0] == '1' && cp[1] == '9') || (cp[0] == '2' && cp[1] == '0') ) 
-	&& strlen(cp) == 6)
+	&& length == 6)
 	{
 	  const int month  = (cp[4]-'0')*10 + cp[5]-'0';
 
@@ -1759,7 +1877,9 @@ zone_it:
       tm.tm_sec = 0;
     }
   else
-    return false;
+    {
+      return false;
+    }
 
   d_date = (tm.tm_year)*YEAR_FACTOR + (tm.tm_mon+1)*MONTH_FACTOR + (tm.tm_mday)*DAY_FACTOR;
 
@@ -4030,7 +4150,7 @@ bool DATERANGE::operator <=(const DATERANGE& Other) const
 
 bool DATERANGE::Ok() const
 {
-  return d_start.IsValidDate() && d_end.IsValidDate();
+  return d_start.IsValidDate() && d_end.IsValidDate() && (d_end >= d_start);
 }
 
 bool DATERANGE::Defined() const
@@ -4137,7 +4257,7 @@ MessageLogger _globalMessageLogger;
 int main(int argc, char **argv)
 {
 
- if (argc = 2) {
+ if (argc == 2) {
      SRCH_DATE Date (argv[1]);
      cerr << " --> " << Date << endl;
  }

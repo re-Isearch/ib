@@ -2709,20 +2709,16 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
   const auto FcLess =
     [](const FC& Left, const FC& Right) -> bool
     {
-      if (Left.GetFieldStart() <
-          Right.GetFieldStart())
+      if (Left.GetFieldStart() < Right.GetFieldStart())
         return true;
 
-      if (Right.GetFieldStart() <
-          Left.GetFieldStart())
+      if (Right.GetFieldStart() < Left.GetFieldStart())
         return false;
 
-      return Left.GetFieldEnd() <
-             Right.GetFieldEnd();
+      return Left.GetFieldEnd() < Right.GetFieldEnd();
     };
 
-  const auto SameFc =
-    [](const FC& Left, const FC& Right) -> bool
+  const auto SameFc = [](const FC& Left, const FC& Right) -> bool
     {
       return
         Left.GetFieldStart() ==
@@ -2741,22 +2737,18 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
         {
           opos1 = pos1;
 
-          IresultPtr =
-              Table + pos1 - 1;
+          IresultPtr = Table + pos1 - 1;
 
-          idx1 =
-              IresultPtr->GetIndex();
+          idx1 = IresultPtr->GetIndex();
         }
 
       if (pos2 != opos2)
         {
           opos2 = pos2;
 
-          OtherIresultPtr =
-              OtherTable + pos2 - 1;
+          OtherIresultPtr = OtherTable + pos2 - 1;
 
-          idx2 =
-              OtherIresultPtr->GetIndex();
+          idx2 = OtherIresultPtr->GetIndex();
         }
 
       if (idx1 == idx2)

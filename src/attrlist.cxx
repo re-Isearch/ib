@@ -25,7 +25,7 @@ static const char *c = "c"; // 64-bit/Numeric hash
 static const char *t = "t"; // Telephone number 
 static const char *v = "iin"; // Credit Card Number (Visa etc.) = issuer identification number (IIN) 
 static const char *i = "iban"; // IBAN (includes Checksum)
-static const char *_V = ""; // Hierarchical Navigable Small Worlds (HNSW)
+static const char *_V = "$"; // Hierarchical Navigable Small Worlds (HNSW)
 static const char *g = "g"; // Graph vector ANN algorithms (except HNSW)
 static const char *f = "f"; // Vector Flat algorithms
 static const char *x = "X"; // Embedded object/store (External)

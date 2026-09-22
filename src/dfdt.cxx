@@ -202,7 +202,8 @@ void DFDT::Write (PFILE fp) const
   ::Write((UINT2)TotalEntries, fp);
   for (size_t x = 0; x < TotalEntries; x++)
     {
-      ::Write((INT2)(Table[x].GetFileNumber ()), fp);
+      const UINT2 fn = Table[x].GetFileNumber ();
+      ::Write(fn, fp);
       Table[x].GetAttributesPtr()->Write(fp);
     }
   ::Write(Sorted, fp); 

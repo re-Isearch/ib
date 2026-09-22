@@ -90,7 +90,7 @@ public:
   SRCH_DATE& MinusNmonths(int months)   {return PlusNmonths(-months);};
   SRCH_DATE& MinusNyears(int years)     {return PlusNyears(-years);};
   // Some cases
-  SRCH_DATE& Tommorrow()                { return PlusNdays(1); };
+  SRCH_DATE& Tomorrow()                 { return PlusNdays(1); };
   SRCH_DATE& Yesterday()                { return MinusNdays(1); };
 
   SRCH_DATE& NextWeek()                 { return PlusNweeks(1); };
@@ -291,6 +291,11 @@ public:
 
   friend ostream &operator << (ostream &os, const DATERANGE &dt); // ISOdate
   friend STRING  &operator << (STRING &String, const DATERANGE &dt); // ISOdate
+
+  bool       IsYearPrecision() const {
+     return (Ok() && d_start.GetPrecision() == d_end.GetPrecision() &&
+	d_start.GetPrecision() == YEAR_PREC );
+  }
 
   SRCH_DATE  GetStart() const { return d_start; }
   SRCH_DATE  GetEnd()   const { return d_end; }
