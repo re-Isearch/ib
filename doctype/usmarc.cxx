@@ -555,7 +555,7 @@ USMARC::Present(const RESULT& ResultRecord, const STRING& ElementSet,
 
   } else if (RecordSyntax == HtmlRecordSyntax) {
     m = new MARC(myBuff);
-    if (ElementSet.Equals("B")) {
+    if (ElementSet.Equals(ELEMENT_Brief)) {
       m->SetDisplayFormat(MARC_FORMAT_TITLE);         // = 4
       m->Print(&outputBuff);
       delete m;
@@ -571,7 +571,7 @@ USMARC::Present(const RESULT& ResultRecord, const STRING& ElementSet,
 
   } else { // default to SUTRS, the Z39.50-compliant way to say "ASCII".
     m = new MARC(myBuff);
-    if (ElementSet.Equals("B")) {
+    if (ElementSet.Equals(ELEMENT_Brief)) {
       m->SetDisplayFormat(MARC_FORMAT_TITLE);         // = 4
     }
     m->Print(&outputBuff);

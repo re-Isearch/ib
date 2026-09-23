@@ -35,7 +35,7 @@ Runtime search options: LINES N to define to number of lines for the default hea
 // let DOCTYPE:: do the work
 void SIMPLE::Present(const RESULT& ResultRecord, const STRING& ElementSet, 
 		PSTRING StringBuffer) const {
-	if (ElementSet.Equals("B")) {
+	if (ElementSet.Equals(ELEMENT_Brief)) {
 		// Return first non-empty line of text
 		*StringBuffer = "";
 		STRING tmp;

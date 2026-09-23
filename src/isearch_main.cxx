@@ -501,9 +501,11 @@ static void HelpUsage(const char *progname)
 	"          " << prog << " -d NEWS  -rpn unix WITHIN:2006" << endl <<
 	"          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -rpn out spot PEER" << endl <<
         "          " << prog << " -d SHAKESPEARE  -P speech/speaker -P line/line  war court AND SIBLING
-	"Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short." << endl <<
-        "Additional \"Special\" elements: R for Raw, H for Highlight/Hits; and if they exist," << endl <<
-        "L for location/redirect and M for metadata." << endl << endl <<
+	"Note: \"Built-in\" Elements for -p and -headline: " << ELEMENT_Full << " for Full, " <<
+		ELEMENT_Brief << " for Brief and " << ELEMENT_Short << " for Short." << endl <<
+        "Additional \"Special\" elements: " << ELEMENT_Raw << "for Raw, " << ELEMENT_Highlight
+	<< " for Highlight/Hits; and if they exist," << endl <<
+        ELEMENT_Location << " for location/redirect and " << ELEMENT_Metadata << " for metadata." << endl << endl <<
 	"In the response one can select not just the record but also all elements of a specific field as" << endl <<
 	"well as specific contents where the hit occurs (similar to -P). Example:  1,speech/speech" << endl <<
         "to select the contents of a speech where the hit(s) in record #1 occurs." << endl << 
@@ -1811,7 +1813,7 @@ again:
 	  cout << n;
 	  if (!Negative_scores) cout << " non-negative scored";
 	  cout << " record" << ((n != 1) ? "s" : "")  << " displayed." << endl;
-	  if (!ElementSet.IsEmpty() && ElementSet!="B")
+	  if (!ElementSet.IsEmpty() && ElementSet!= BRIEF_MAGIC)
 	    cout << "HeadlineElement:= " << ElementSet << endl;
 
 	  cout << endl;

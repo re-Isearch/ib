@@ -297,7 +297,7 @@ if (firstNL == 0) {
 if (ElementSet.Equals("F")) {
    // do we want the File: and Node: line on a full present? I think so.
    }
-else if (ElementSet.Equals("B")) {
+else if (ElementSet.Equals(ELEMENT_Brief)) {
    myBuff.EraseAfter(firstNL);
    }
 

@@ -56,9 +56,9 @@ int main(int argc, char **argv)
    }
    last[0] = 0;
    compLength = (unsigned char)fgetc(inp);
-   printf("# StringCompLength = %d\n", compLength);
+   printf("# StringCompLength = %d\n", (int)compLength);
    charset = (unsigned char)fgetc(inp);
-   printf("# Character set id=%d\n", charset);
+   printf("# Character set id=%d\n", (int)charset);
    while ((len = fgetc(inp)) != EOF) {
      count++;
      fread(tmp, 1, compLength, inp);

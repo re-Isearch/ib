@@ -48,8 +48,8 @@ int main(int argc, char **argv)
    FILE *inp, *otp;
 
    if (argc == 1) {
-     printf("%s - Check %d-bit .sis files\nUsage is: %s sisfile\n",
-	argv[0], sizeof(GPTYPE)*8, argv[0]);
+     printf("%s - Check %u-bit .sis files\nUsage is: %s sisfile\n",
+	argv[0], (unsigned)sizeof(GPTYPE)*8, argv[0]);
      exit(1);
    }
 

@@ -56,6 +56,11 @@ int _ib_defaultTooManyRecordsThreshold  = DEFAULT_TOO_MANY_RECORDS_THRESHOLD;
 // NOTE: The default is to view the contents as a number and use the number
 long double (*_IB_parse_computed)(const char *doctype, const char *fieldname, const char *buffer, size_t len) = 0;
 
+// As above but default if exists for currency parses
+long double (*_IB_parse_currency)(const char *doctype, const char *fieldname, const char *buffer, size_t len) = 0;
+// This is special: SearchTime .. 
+long double (*_IB_search_currency)(const char *fieldname, const char *buffer, size_t len) = 0;
+
 
 // Hash Datatype
 // Args:

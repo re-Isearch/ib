@@ -335,7 +335,7 @@ MARCDUMP::PresentSutrs(const RESULT& ResultRecord, const STRING& ElementSet,
   STRING FieldName;
   bool Status;
 
-  if (ElementSet.CaseEquals("B")) {
+  if (ElementSet.CaseEquals(ELEMENT_Brief)) {
     FieldName = "245"; // Brief headline is "title"
     Status = Db->GetFieldData(ResultRecord, FieldName, StringBufferPtr);
     StringBufferPtr->EraseBefore(7);
@@ -356,7 +356,7 @@ MARCDUMP::PresentHtml(const RESULT& ResultRecord, const STRING& ElementSet,
   STRING FieldName;
   bool Status;
 
-  if (ElementSet.CaseEquals("B")) {
+  if (ElementSet.CaseEquals(ELEMENT_Brief)) {
     FieldName = "245"; // Brief headline is "title"
     Status = Db->GetFieldData(ResultRecord, FieldName, StringBufferPtr);
     StringBufferPtr->EraseBefore(7);

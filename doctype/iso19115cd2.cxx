@@ -1005,7 +1005,7 @@ ISO19115CD2::Present (const RESULT& ResultRecord,
 		      STRING* StringBufferPtr)
 {
   STRING ESet = ElementSet;
-  if (ElementSet.Equals("B")) {
+  if (ElementSet.Equals(ELEMENT_Brief)) {
     
     if (RecordSyntax.CaseEquals(XmlRecordSyntax)) {
       PresentBriefXml(ResultRecord,StringBufferPtr);

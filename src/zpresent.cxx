@@ -93,7 +93,7 @@ and improvements are welcomed." << endl << endl;
 
   SetGlobalCharset();
 
-  ESet = "B";
+  ESet = BRIEF_MAGIC;
   while (x < argc) {
     if (argv[x][0] == '-') {
       Flag = argv[x];

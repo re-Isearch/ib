@@ -103,7 +103,7 @@ main(int argc, char** argv) {
   GDT_BOOLEAN Synonyms=GDT_FALSE;
   GDT_BOOLEAN Error=GDT_FALSE;
 
-  ElementSet = "B";
+  ElementSet = BRIEF_MAGIC;
   while (x < argc) {
     if (argv[x][0] == '-') {
       Flag = argv[x];

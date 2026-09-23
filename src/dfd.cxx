@@ -75,7 +75,7 @@ bool  DFD::checkFieldName(const STRING& Fieldname) const
   static const char ReservedViolationError[] =
         "Fieldname '%s' is a reserved name. Record presentations MAY hang!!";
   static const char ReservedViolationWarning[] =
-        "Fieldname '%s' %s create problems. Single letter fields are reserved.";
+        "Fieldname '%s' %s create problems. Single letter_ fields are reserved.";
   static const char ReservedViolationFatal[] = 
 	"Fieldname '%s' contains a reserved character '%c'. Skipping.";
   int               pos = 0;
@@ -84,11 +84,12 @@ bool  DFD::checkFieldName(const STRING& Fieldname) const
     {
       return false;
     }
-  if (Fieldname == FULLTEXT_MAGIC)
+  // B and F are core Z39.50
+  if (Fieldname == FULLTEXT_MAGIC || Fieldname == BRIEF_MAGIC)
     {
       message_log (LOG_ERROR, ReservedViolationError, Fieldname.c_str());
     }
-  else if (Fieldname.GetLength() == 1)
+  else if (Fieldname.GetLength() == 2 && Fieldname[1] == '_')
     {
       // Install the ones we don't want to complain about
       switch (Fieldname[0]) {

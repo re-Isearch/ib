@@ -124,7 +124,10 @@ int (* const _ib_IsTermChr) (const unsigned char *) = 0;
   and followed by an alpha character are to be handled as part of a word */ 
 int _ib_isdot(const int ch)
 {
-#if (DOT_WORDS_SIGNATURE == 8)
+#if (DOT_WORDS_SIGNATURE == 9)
+/* Only & and ' are special O'Reily -> O'Reily and AT&T -> AT&T , M&Ms -> M&Ms */
+# define _IS_DOT_IN_WORD(_x) ((_x) == '@' ||  (_x) == '\'') 
+#elif (DOT_WORDS_SIGNATURE == 8)
   extern int ispunct(int c);
 # define _IST_DOT_IN_WORD(_x) ( ispunct(_x) )
 #elif (DOT_WORDS_SIGNATURE == 7)
@@ -147,7 +150,7 @@ int _ib_isdot(const int ch)
 # define _IS_DOT_IN_WORD(_x) ((_x) == '.' || (_x) == '_')
 #elif (DOT_WORDS_SIGNATURE == 1)
   /* Zimmermann_Edward as Zimmermann Edward and Zimmermann_Edward via literal */
-# define _IS_DOT_IN_WORD(_x) ((_x) == '.'))
+# define _IS_DOT_IN_WORD(_x) ((_x) == '.')
 #endif
   return _IS_DOT_IN_WORD(ch);
 }

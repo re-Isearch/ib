@@ -107,7 +107,7 @@ void FILENAME::Present(const RESULT& ResultRecord, const STRING& ElementSet,
 // First we see if the element set is "B", meaning they just want a file
 // name.  We're going to return the full file name for now.
 
-if (ElementSet.Equals("B")) {
+if (ElementSet.Equals(ELEMENT_Brief)) {
 	ResultRecord.GetRecordData(StringBufferPtr);
 	return;
 }

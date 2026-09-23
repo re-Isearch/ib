@@ -171,6 +171,7 @@ static bool _tagml_find_open_end(const UCHR *buf, size_t len,
   size_t squareDepth = 0;
   size_t objectDepth = 0;
   UCHR quote = 0;
+  bool inAnnotations = false;
 
   for (size_t p = start + 1; p < len; ++p)
     {
@@ -235,8 +236,17 @@ static bool _tagml_find_open_end(const UCHR *buf, size_t len,
           continue;
         }
 
+      if (squareDepth == 0 && objectDepth == 0 && _tagml_space(ch))
+        inAnnotations = true;
+
       if (ch == '>' && squareDepth == 0 && objectDepth == 0)
         {
+          // In an annotation list, the '>' in name->id is part of the
+          // reference operator, not the terminator of the opening markup.
+          if (inAnnotations && p > start + 1 && buf[p - 1] == '-' &&
+              !_tagml_escaped(buf, p - 1))
+            continue;
+
           *end = p;
           *milestone = false;
           return true;
@@ -353,11 +363,72 @@ static void _tagml_parse_annotations(const UCHR *buf,
         }
 
       // Nested objects, lists and rich-text annotation values are recognized
-      // by the outer token scanner, but not interpreted in v1.
+      // but not interpreted in v1.  Skip the complete balanced value so that
+      // subsequent simple annotations on the same markup are still parsed.
       if (!reference && (buf[p] == '{' || buf[p] == '['))
         {
           token->unsupportedAnnotations = true;
-          break;
+
+          size_t squareDepth = 0;
+          size_t objectDepth = 0;
+          UCHR quote = 0;
+          bool complete = false;
+
+          for (; p < end; ++p)
+            {
+              const UCHR ch = buf[p];
+
+              if (quote)
+                {
+                  if (ch == '\\' && p + 1 < end)
+                    {
+                      ++p;
+                      continue;
+                    }
+                  if (ch == quote)
+                    quote = 0;
+                  continue;
+                }
+
+              if (ch == '\\' && p + 1 < end)
+                {
+                  ++p;
+                  continue;
+                }
+
+              if (ch == '\'' || ch == '"')
+                {
+                  quote = ch;
+                  continue;
+                }
+
+              if (ch == '[')
+                ++squareDepth;
+              else if (ch == ']')
+                {
+                  if (squareDepth)
+                    --squareDepth;
+                }
+              else if (ch == '{')
+                ++objectDepth;
+              else if (ch == '}')
+                {
+                  if (objectDepth)
+                    --objectDepth;
+                }
+
+              if (squareDepth == 0 && objectDepth == 0)
+                {
+                  ++p;
+                  complete = true;
+                  break;
+                }
+            }
+
+          if (!complete)
+            break;
+
+          continue;
         }
 
       const size_t valueStart = p;
@@ -612,13 +683,13 @@ const char *TAGML::Description(PSTRLIST List) const
 
   return
     "TAGML (Text-As-Graph Markup Language) document type.\n"
-    "Maps TAGML markup ranges directly to internal field coordinates and\n"
-    "supports overlap, layers and suspend/resume discontinuity without imposing\n"
-    "an XML-style tree. Simple annotation values are indexed in TAG@ANNOTATION\n"
+    "Maps TAGML markup ranges directly to IB field coordinates and supports\n"
+    "overlap, layers and suspend/resume discontinuity without imposing an\n"
+    "XML-style tree. Simple annotation values are indexed in TAG@ANNOTATION\n"
     "fields; comments are indexed in COMMENTS by default. All fields are\n"
     "lexical text fields in this initial implementation.\n\n"
     "Multiple independent top-level TAGML markup regions in one file are\n"
-    "treated as separate records. Namespace declarations and comments do\n"
+    "treated as separate IB records. Namespace declarations and comments do\n"
     "not themselves start records.\n\n"
     "Text-variation branches and nested/list/rich-text annotation values are\n"
     "recognized but their higher-level semantics are not interpreted yet.\n\n"
