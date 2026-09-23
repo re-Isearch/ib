@@ -54,6 +54,5 @@ private:
 
 typedef MARKDOWN* PMARKDOWN;
 
+
 #endif /* MARKDOWN_HXX */
-
-

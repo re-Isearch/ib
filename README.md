@@ -33,6 +33,13 @@ For a play, that might be a speech. For a scientific article, an abstract or par
 
 ### NEWS
 
+Sept 2016
+
+We've added a few new doctypes. MarkDown, for example, is no longer using an external filter (Pandoc) but is now native: significantly faster and better controlled.
+
+We've also added support for TAGML (Text-As-Graph Markup Language). It is a specialized markup language designed to handle complex, multi-layered, and overlapping text structures that traditional hierarchical languages like XML cannot easily encode.  It is particularly suited for digital humanities, scholarly text editing, and complex document modeling where text doesn't fit into a strict, single hierarchy.
+See" <https://huygensing.github.io/TAG/TAGML/>
+
 August 21 2026
 
 Beyond many significant lexical speed-ups (some quite dramatic), new normalization algorithms (like BM25 to keep BEIR happy) we've added for agents several new binary operators to the CoreQuarry/IB query algebra: MAYBE, PROMOTE and DEMOTE

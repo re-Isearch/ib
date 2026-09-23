@@ -247,6 +247,7 @@ static struct {
 #endif
 #ifdef MARKDOWN_HXX
   {"md",  "MARKDOWN"},
+  {"mkd",  "MARKDOWN"},
   {"markdown", "MARKDOWN"},
 #endif
 #ifdef JSONDOC_HXX
