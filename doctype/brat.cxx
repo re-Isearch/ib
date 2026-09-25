@@ -32,10 +32,10 @@ character offsets.  Discontinuous spans are separated by semicolons:
     T1  Person    10 24
     T2  Location  40 45;52 60
 
-This implementation parses T records only.  BRAT relation/event/attribute/
-normalization/note records (R/E/A/M/N/#) are deliberately left for the next
-layer; their IDs matter once relations are persisted, but are not required for
-range search.
+This implementation indexes T records and projects BRAT A/M attributes onto
+the text range of their target.  Attributes attached to events inherit the
+event trigger range.  Relations, normalization and notes (R/N/#) remain
+outside the range layer for now.
 
 Interchange notes
 -----------------
@@ -107,6 +107,20 @@ struct BRAT_ANNOTATION {
   std::string id;
   std::string type;
   std::vector<BRAT_RANGE> ranges;
+};
+
+
+struct BRAT_EVENT {
+  std::string id;
+  std::string trigger;
+};
+
+
+struct BRAT_ATTRIBUTE {
+  std::string id;
+  std::string type;
+  std::string target;
+  std::string value;
 };
 
 
@@ -267,6 +281,81 @@ static bool _brat_parse_text_bound(const std::string& line,
     }
 
   return !annotation->type.empty() && !annotation->ranges.empty();
+}
+
+
+static bool _brat_parse_event(const std::string& line,
+                              BRAT_EVENT *event)
+{
+  if (!event || line.empty())
+    return false;
+
+  const size_t tab = line.find('\t');
+  if (tab == std::string::npos)
+    return false;
+
+  event->id = line.substr(0, tab);
+  if (event->id.empty() || event->id[0] != 'E')
+    return false;
+
+  std::istringstream in(line.substr(tab + 1));
+  std::string trigger;
+
+  if (!(in >> trigger))
+    return false;
+
+  const size_t colon = trigger.find(':');
+  if (colon == std::string::npos || colon == 0 || colon + 1 >= trigger.size())
+    return false;
+
+  event->trigger = trigger.substr(colon + 1);
+  return !event->trigger.empty();
+}
+
+
+static bool _brat_parse_attribute(const std::string& line,
+                                  BRAT_ATTRIBUTE *attribute)
+{
+  if (!attribute || line.empty())
+    return false;
+
+  const size_t tab = line.find('\t');
+  if (tab == std::string::npos)
+    return false;
+
+  attribute->id = line.substr(0, tab);
+  if (attribute->id.empty() ||
+      (attribute->id[0] != 'A' && attribute->id[0] != 'M'))
+    return false;
+
+  std::istringstream in(line.substr(tab + 1));
+  attribute->value.clear();
+
+  if (!(in >> attribute->type >> attribute->target))
+    return false;
+
+  std::string extra;
+  if (in >> attribute->value)
+    {
+      if (in >> extra)
+        return false;
+    }
+
+  return !attribute->type.empty() && !attribute->target.empty();
+}
+
+
+static STRING _brat_attribute_field_name(const BRAT_ATTRIBUTE& attribute)
+{
+  STRING name(attribute.type.c_str());
+
+  if (!attribute.value.empty())
+    {
+      name.Cat("@");
+      name.Cat(attribute.value.c_str());
+    }
+
+  return name;
 }
 
 
@@ -438,8 +527,10 @@ const char *BRAT::Description(PSTRLIST List) const
     "Indexes the primary text normally and maps BRAT T annotations to IB\n"
     "field coordinates. Overlapping spans map directly to overlapping FCs;\n"
     "discontinuous BRAT annotations map to one FCT containing several FCs.\n"
-    "The first implementation intentionally handles text-bound T records only.\n"
-    "Relations, events, attributes, normalization and notes are ignored.\n\n"
+    "BRAT A/M attributes are projected onto the target T range; attributes\n"
+    "on E events inherit the event trigger range. Binary attributes become\n"
+    "fields such as NEGATION; valued attributes use NAME@VALUE.\n"
+    "Relations, normalization and notes are currently ignored.\n\n"
     "The same range model is suitable for other stand-off systems, including\n"
     "W3C Web Annotation position selectors and TEI standOff export/import.\n\n"
     "Options:\n"
@@ -508,6 +599,8 @@ void BRAT::ParseFields(PRECORD NewRecord)
     }
 
   std::vector<BRAT_ANNOTATION> annotations;
+  std::vector<BRAT_EVENT> events;
+  std::vector<BRAT_ATTRIBUTE> attributes;
   std::string line;
   size_t lineNo = 0;
   size_t ignored = 0;
@@ -525,31 +618,60 @@ void BRAT::ParseFields(PRECORD NewRecord)
       if (line.empty())
         continue;
 
-      if (line[0] != 'T')
+      if (line[0] == 'T')
         {
-          ++ignored;
-          continue;
+          BRAT_ANNOTATION annotation;
+
+          if (!_brat_parse_text_bound(line, &annotation))
+            {
+              message_log(LOG_WARN,
+                          "%s: malformed BRAT text annotation at %s:%lu",
+                          Doctype.c_str(), AnnFile.c_str(),
+                          (unsigned long)lineNo);
+              continue;
+            }
+
+          annotations.push_back(annotation);
         }
-
-      BRAT_ANNOTATION annotation;
-
-      if (!_brat_parse_text_bound(line, &annotation))
+      else if (line[0] == 'E')
         {
-          message_log(LOG_WARN,
-                      "%s: malformed BRAT text annotation at %s:%lu",
-                      Doctype.c_str(), AnnFile.c_str(),
-                      (unsigned long)lineNo);
-          continue;
-        }
+          BRAT_EVENT event;
 
-      annotations.push_back(annotation);
+          if (!_brat_parse_event(line, &event))
+            {
+              message_log(LOG_WARN,
+                          "%s: malformed BRAT event annotation at %s:%lu",
+                          Doctype.c_str(), AnnFile.c_str(),
+                          (unsigned long)lineNo);
+              continue;
+            }
+
+          events.push_back(event);
+        }
+      else if (line[0] == 'A' || line[0] == 'M')
+        {
+          BRAT_ATTRIBUTE attribute;
+
+          if (!_brat_parse_attribute(line, &attribute))
+            {
+              message_log(LOG_WARN,
+                          "%s: malformed BRAT attribute annotation at %s:%lu",
+                          Doctype.c_str(), AnnFile.c_str(),
+                          (unsigned long)lineNo);
+              continue;
+            }
+
+          attributes.push_back(attribute);
+        }
+      else
+        ++ignored;
     }
 
   Db->ffclose(afp);
 
   if (ignored)
     message_log(LOG_DEBUG,
-                "%s: ignored %lu non-text-bound BRAT annotations in '%s'",
+                "%s: ignored %lu unsupported BRAT annotations in '%s'",
                 Doctype.c_str(), (unsigned long)ignored, AnnFile.c_str());
 
   if (annotations.empty())
@@ -605,6 +727,8 @@ void BRAT::ParseFields(PRECORD NewRecord)
 
   if (fileSize && recEnd == 0)
     recEnd = fileSize - 1;
+
+  std::map<std::string, FCT> targets;
 
   for (size_t i = 0; i < annotations.size(); ++i)
     {
@@ -662,7 +786,43 @@ void BRAT::ParseFields(PRECORD NewRecord)
           continue;
         }
 
+      targets[annotations[i].id] = fct;
       AddField(NewRecord, STRING(annotations[i].type.c_str()), fct);
     }
+
+  // Events do not have their own text span, but each event has a text-bound
+  // trigger. Resolve the event ID to that trigger so A/M attributes on events
+  // can be projected onto a meaningful source range.
+  for (size_t i = 0; i < events.size(); ++i)
+    {
+      std::map<std::string, FCT>::const_iterator target =
+          targets.find(events[i].trigger);
+
+      if (target != targets.end())
+        targets[events[i].id] = target->second;
+    }
+
+  size_t unresolvedAttributes = 0;
+
+  for (size_t i = 0; i < attributes.size(); ++i)
+    {
+      std::map<std::string, FCT>::const_iterator target =
+          targets.find(attributes[i].target);
+
+      if (target == targets.end())
+        {
+          ++unresolvedAttributes;
+          continue;
+        }
+
+      AddField(NewRecord, _brat_attribute_field_name(attributes[i]),
+               target->second);
+    }
+
+  if (unresolvedAttributes)
+    message_log(LOG_DEBUG,
+                "%s: ignored %lu BRAT attributes without a text-bound target in '%s'",
+                Doctype.c_str(), (unsigned long)unresolvedAttributes,
+                AnnFile.c_str());
 }
 
