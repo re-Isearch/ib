@@ -650,6 +650,39 @@ static void _tagml_blank(UCHR *buf, size_t start, size_t end)
     buf[p] = ' ';
 }
 
+
+// Render a TAGML fragment as compact plain text for brief/headline
+// presentation.  Unlike BlotSyntax(), presentation removes comments and
+// annotation values as well as the markup itself.
+static void _tagml_plain_text(STRING *text)
+{
+  if (!text || text->IsEmpty())
+    return;
+
+  const size_t len = text->GetLength();
+  std::vector<UCHR> buffer(len + 1);
+
+  memcpy(&buffer[0], text->c_str(), len);
+  buffer[len] = 0;
+
+  for (size_t p = 0; p < len; )
+    {
+      TAGML_TOKEN token;
+
+      if (!_tagml_parse_token(&buffer[0], len, p, &token))
+        {
+          ++p;
+          continue;
+        }
+
+      _tagml_blank(&buffer[0], token.start, token.end);
+      p = token.end + 1;
+    }
+
+  *text = reinterpret_cast<const char *>(&buffer[0]);
+  text->Pack();
+}
+
 } // namespace
 
 
@@ -695,6 +728,17 @@ const char *TAGML::Description(PSTRLIST List) const
     "recognized but their higher-level semantics are not interpreted yet.\n\n"
     "Options:\n"
     "  CommentField=<field>  (default COMMENTS)";
+}
+
+
+void TAGML::Present(const RESULT& ResultRecord,
+                    const STRING& ElementSet,
+                    PSTRING StringBufferPtr) const
+{
+  DOCTYPE::Present(ResultRecord, ElementSet, StringBufferPtr);
+
+  if (StringBufferPtr && ElementSet == BRIEF_MAGIC)
+    _tagml_plain_text(StringBufferPtr);
 }
 
 

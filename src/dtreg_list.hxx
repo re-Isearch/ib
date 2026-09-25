@@ -67,6 +67,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #include "../doctype/ejsondoc.hxx"
 #include "../doctype/markdown.hxx"
 #include "../doctype/tagml.hxx"
+#include "../doctype/brat.hxx"
 #include "../doctype/cglomd.hxx"
 
 #endif

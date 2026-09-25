@@ -33,12 +33,18 @@ For a play, that might be a speech. For a scientific article, an abstract or par
 
 ### NEWS
 
-Sept 2016
+Sept 2026
 
-We've added a few new doctypes. MarkDown, for example, is no longer using an external filter (Pandoc) but is now native: significantly faster and better controlled.
+We've added a few new doctypes.
 
-We've also added support for TAGML (Text-As-Graph Markup Language). It is a specialized markup language designed to handle complex, multi-layered, and overlapping text structures that traditional hierarchical languages like XML cannot easily encode.  It is particularly suited for digital humanities, scholarly text editing, and complex document modeling where text doesn't fit into a strict, single hierarchy.
-See" <https://huygensing.github.io/TAG/TAGML/>
+- MarkDown, for example, is no longer using an external filter (Pandoc) but is now native: significantly faster and better controlled.
+- TAGML (Text-As-Graph Markup Language). It is a specialized markup language designed to handle complex, multi-layered, and overlapping text structures that traditional hierarchical languages like XML cannot easily encode.  It is particularly suited for digital humanities, scholarly text editing, and complex document modeling where text doesn't fit into a strict, single hierarchy.
+See <https://huygensing.github.io/TAG/TAGML/>
+- BRAT (Brat Rapid Annotation Tool) Standoff format. Brat Rapid Annotation Tool is a popular web-based software used in natural language processing (NLP) to label and annotate text (such as identifying names, medical terms, or relationships between words).
+See <https://brat.nlplab.org/standoff.html>
+
+These formats are completely ingested without conversion.
+
 
 August 21 2026
 

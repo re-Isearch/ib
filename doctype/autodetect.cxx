@@ -779,6 +779,15 @@ void AUTODETECT::ParseRecords (const RECORD& FileRecord)
   else
 #endif
 
+#ifdef BRAT_HXX
+  if (FileExists(s + ".ann") || (FileExists(beforeExt + ".ann") && ext == "txt"))  {
+    doctype = "BRAT";
+  } else if (ext == "ann" && FileExists(beforeExt + ".txt")) {
+    message_log(LOG_INFO, "Skipping isolated annotation: %s", s.c_str());
+    return; // This is an annotation that we don't want to in isolation index
+  }
+#endif
+
 #ifdef BINARY_HXX
   // Binary type?
   if (FileExists (s + commaInfoXml))

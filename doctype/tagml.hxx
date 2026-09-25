@@ -28,6 +28,9 @@ public:
   INT GetTerm(const STRING& Filename, CHR *Buffer,
               off_t Offset, size_t Length);
 
+  void Present(const RESULT& ResultRecord, const STRING& ElementSet,
+               PSTRING StringBufferPtr) const;
+
   void SourceMIMEContent(PSTRING StringPtr) const;
 
   ~TAGML();

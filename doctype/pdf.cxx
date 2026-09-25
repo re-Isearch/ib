@@ -243,43 +243,62 @@ void ADOBE_PDFDOC::Present (const RESULT& ResultRecord,
          const STRING& ElementSet, const STRING& RecordSyntax,
          PSTRING StringBuffer) const
 {
+  const char * const title_tags[] = {
+    "Title",
+    "PDF.Title",
+    "XMP.dc.title",
+    "$Path",
+    NULL
+  };
+  
   StringBuffer->Clear();
   if (ElementSet.Equals(BRIEF_MAGIC))
     {
-      _VMEMODOC::Present(ResultRecord, "Title", RecordSyntax, StringBuffer);
+      for (size_t i = 0; title_tags[i] && StringBuffer->IsEmpty(); i++) { 
+        _VMEMODOC::Present(ResultRecord, title_tags[i], RecordSyntax, StringBuffer);
+      }
       if (StringBuffer->IsEmpty())
 	{
 	  STRING Fn (ResultRecord.GetFullFileName ());
 	  FILE  *fp = fopen(Fn, "rb");
 	  if (fp)
 	    {
-	      char  buf[BUFSIZ];
-	      char  headline[BUFSIZ];
-	      int   body = 0;
-	      headline[0] = '\0';
+	      char   buf[BUFSIZ];
+	      STRING headline;
+	      bool   body = false;
+
 	      while (fgets(buf, sizeof(buf)-1, fp))
-		{
-		  if (body && strlen(buf) > 10)
-		    {
-		      if (headline[0])
-			strcat(headline, " ");
-		      strcat(headline, buf);
-		      if (strlen(headline) > 256)
-			{
-			  char *ptr = headline + 128;
-			  while (isalnum(*ptr)) ptr++;
-			  *ptr = '\0';
-			  break;
-			}
-		    }
-		  if (strncmp(buf, "----", 4) == 0)
-		    body = 1; 
-		}
-	      fclose(fp);
+	        {
+	          const unsigned char *p = (const unsigned char *)buf;
+
+	          while (*p && isspace(*p)) ++p;
+	          if (!body)
+	            {
+	              // MEMODOC headers end at the first blank line.
+	              if (*p == '\0')
+	                body = true;
+
+	              continue;
+	            }
+
+	          // Body starts with the first non-blank line after the separator.
+	          if (*p == '\0')
+	            continue;
+
+	          if (headline.GetLength())
+	            headline.Cat(" ");
+
+	          headline.Cat((const char *)p);
+
+	          if (headline.GetLength() > 128)
+	            {
+	              headline.EraseAfter(123); 
+		      headline.Cat("...");
+	              break;
+	            }
+	        } // while
 	      *StringBuffer = headline;
 	    }
-	  if (StringBuffer->IsEmpty())
-	    _VMEMODOC::Present(ResultRecord, ElementSet, RecordSyntax, StringBuffer);
 	}
     }
   else if (ElementSet.Equals(FULLTEXT_MAGIC) || ElementSet.Equals(SOURCE_MAGIC))

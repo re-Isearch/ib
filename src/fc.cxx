@@ -14,11 +14,6 @@ Description:	Class FC - Field Coordinates
 
 #pragma ident  "@(#)fc.cxx  1.11 09/03/99 05:59:11 BSN"
 
-FC::FC ()
-{
-  FieldStart = FieldEnd = 0;
-}
-
 FC::FC (const GPTYPE Gp)
 {
   *this = Gp;
@@ -85,41 +80,54 @@ FC& FC::operator =(const GPTYPE Pair[2])
       FieldStart = Pair[0];
       FieldEnd = Pair[1];
     }
-  else FieldStart = FieldEnd = 0;
+  else Clear();
   return *this;
 }
 
 
 FC operator+(int offset, const FC& Fc)
 {
-  return FC(Fc.FieldStart+offset, Fc.FieldEnd+offset);
+  return Fc + offset;
 }
 
 FC operator-(int offset, const FC& Fc)
 {
-  return FC(offset - Fc.FieldStart, offset - Fc.FieldEnd);
+  FC result(offset, offset);
+  result -= Fc;
+  return result;
 }
 
 FC operator+(const FC& Fc, int offset)
 {
-  return FC(Fc.FieldStart+offset, Fc.FieldEnd+offset);
+  FC result(Fc);
+  result += offset;
+  return result;
 }
 
 FC operator-(const FC& Fc, int offset)
 {
-  return FC(Fc.FieldStart-offset, Fc.FieldEnd-offset);
+  FC result(Fc);
+  result -= offset;
+  return result;
 }
 
-
-FC& FC::operator+=(const GPTYPE Offset)
+FC& FC::operator+=(GPTYPE Offset)
 {
-  FieldStart += Offset;
-  FieldEnd   += Offset;
+  if (!IsEmpty()) {
+    FieldStart += Offset;
+    FieldEnd   += Offset;
+  }
   return *this;
 }
 
 FC& FC::operator+=(const FC& Fc)
 {
+  if (IsEmpty() || Fc.IsEmpty())
+    {
+      Clear();
+      return *this;
+    }
+
   FieldStart += Fc.FieldStart;
   FieldEnd   += Fc.FieldEnd;
   return *this;
@@ -127,13 +135,20 @@ FC& FC::operator+=(const FC& Fc)
 
 FC& FC::operator-=(const GPTYPE Offset)
 {
-  FieldStart -= Offset;
-  FieldEnd -= Offset;
+  if (!IsEmpty()) {
+    FieldStart -= Offset;
+    FieldEnd   -= Offset;
+  }
   return *this;
 }
 
 FC& FC::operator-=(const FC& Fc)
 { 
+ if (IsEmpty() || Fc.IsEmpty())
+    {
+      Clear();
+      return *this;
+    }
   FieldStart -= Fc.FieldStart;
   FieldEnd -= Fc.FieldEnd; 
   return *this; 
@@ -259,7 +274,7 @@ void FC::Write (PFILE fp) const
 bool FC::Read (PFILE fp)
 {
   bool result = false;
-  FieldStart = FieldEnd = 0;
+  Clear();
   if (!feof(fp))
     {
       ::Read(&FieldStart, fp);

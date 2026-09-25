@@ -138,6 +138,7 @@ enum Doctypes {
   _ESBULKNDJSON,
   _MARKDOWN,
   _TAGML,
+  _BRAT,
   _CGLOMD,
 
   _MAX_ID, // This is the "last real" doctype
@@ -220,6 +221,7 @@ static const struct {
   { "ESBULKNDJSON",_ESBULKNDJSON, true}, // ES Bulk Dumps (like CIRRUS but more general)
   { "MARKDOWN",    _MARKDOWN, true},
   { "TAGML",       _TAGML,   true},
+  { "BRAT",        _BRAT,    true},
   { "CGLOMD",      _CGLOMD,  true},
 
 
@@ -866,6 +868,8 @@ PDOCTYPE        DTREG::GetDocTypePtr(const DOCTYPE_ID& DoctypeId)
       return RegisterDocType (Ident, new MARKDOWN(Db, Name));
     case _TAGML:
       return RegisterDocType (Ident, new TAGML(Db, Name));
+    case _BRAT:
+      return RegisterDocType (Ident, new BRAT(Db, Name));
     case _CGLOMD:
       return RegisterDocType (Ident, new CGLOMD(Db, Name));
     case _PLUGIN:

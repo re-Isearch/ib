@@ -3247,6 +3247,16 @@ OPOBJ *atomicIRSET::WithinFile(const STRING& FileSpec)
 #endif
 }
 
+#if 0
+// Special
+OPOBJ *atomicIRSET::WithinLanguage(const STRING& LangSpec)
+{
+  // Maps the public string (e.g., "German", "deu") to the internal private ID
+  // and returns the raw matching record envelope directly from the parent index
+  return Parent ? (OPOBJ *)Parent->LanguageSearch(LangSpec) : NULL;
+}
+#endif
+
 // Special
 OPOBJ *atomicIRSET::WithKey(const STRING& KeySpec)
 {

@@ -13,7 +13,7 @@ Description:	Class FC - Field Coordinates
 class FC {
 friend class DFD_FC_RANGE;
 public:
-  FC();
+  FC() { Clear(); }
   FC(const FC& Fc);
   FC(const GPTYPE Gp);
   FC(const GPTYPE GpPair[2]);
@@ -25,11 +25,9 @@ public:
   GPTYPE GetFieldEnd() const { return FieldEnd;};
 
   // A FC should never end before it starts!
-  size_t Span() const      { return FieldEnd >= FieldStart ? FieldEnd-FieldStart : 0; }
-  size_t GetLength() const { return Span()+1; }
-
-  // Consequently, a real one-byte range at offset zero is not representable.
-  bool   IsEmpty() const   { return FieldStart == FieldEnd && FieldStart == 0; }
+  inline size_t Span() const { return FieldEnd >= FieldStart ?  static_cast<size_t>(FieldEnd - FieldStart) : 0; }
+  inline size_t GetLength() const { return IsEmpty() ? 0 : static_cast<size_t>(FieldEnd - FieldStart) + 1; }
+  inline bool   IsEmpty() const { return FieldStart == (GPTYPE)-1 || FieldStart > FieldEnd; }
 
   // Special kind of FC that goes from [0,length-1]
   bool IsWholeRange(GPTYPE length) const { return length != 0 && GetFieldStart() == 0
@@ -91,7 +89,7 @@ public:
 
 // Misc
   void FlipBytes();
-
+  inline void Clear() { FieldStart = (GPTYPE)-1; FieldEnd = (GPTYPE)-1; }
   ~FC();
 private:
   GPTYPE FieldStart;
