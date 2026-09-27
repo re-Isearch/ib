@@ -719,8 +719,8 @@ const char *TAGML::Description(PSTRLIST List) const
     "Maps TAGML markup ranges directly to IB field coordinates and supports\n"
     "overlap, layers and suspend/resume discontinuity without imposing an\n"
     "XML-style tree. Simple annotation values are indexed in TAG@ANNOTATION\n"
-    "fields; comments are indexed in COMMENTS by default. All fields are\n"
-    "lexical text fields in this initial implementation.\n\n"
+    "fields; comments are indexed in COMMENTS by default. Field types may\n"
+    "be set in the .ini. We don't guess fieldtypes in this initial implementation.\n\n"
     "Multiple independent top-level TAGML markup regions in one file are\n"
     "treated as separate IB records. Namespace declarations and comments do\n"
     "not themselves start records.\n\n"
@@ -781,7 +781,7 @@ void TAGML::AddField(PRECORD Record, const STRING& FieldName,
     {
       DFD dfd;
       dfd.SetFieldName(name);
-      dfd.SetFieldType(FIELDTYPE::text);
+      // dfd.SetFieldType(FIELDTYPE::text);
       Db->DfdtAddEntry(dfd);
     }
 }

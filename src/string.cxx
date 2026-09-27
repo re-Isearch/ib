@@ -2509,6 +2509,12 @@ bool STRING::IsFilePath() const
   return false;
 }
 
+
+// Detection is intentionally stricter than date parsing.
+// Require lexical date evidence: digitless relative/natural-language
+// expressions may be valid in an explicitly typed date field, but
+// must not cause an unknown field to become a date.
+
 bool STRING::IsDate() const
 {
   // Dates should have at least 6 characters and be not too long
@@ -2516,6 +2522,19 @@ bool STRING::IsDate() const
     {
       if (IsNumber()) {
 	return false;
+
+      bool hasDigit = false;
+      for (size_t i = 0; i < Len(); ++i)
+        {
+          if (isdigit((unsigned char)m_pchData[i]))
+            {
+              hasDigit = true;
+              break;
+            }
+        }
+
+      if (!hasDigit)
+        return false;
       }
       return SRCH_DATE(*this).Ok();
     }

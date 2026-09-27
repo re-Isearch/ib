@@ -785,7 +785,7 @@ NUMERICOBJ DOCTYPE::ParseComputed(const STRING& FieldName, const STRING& Buffer)
 MONETARYOBJ DOCTYPE::ParseCurrency(const STRING& FieldName, const STRING& Buffer) const
 {
   if (_IB_parse_currency)
-    return _IB_parse_computed(Doctype, FieldName, Buffer.c_str(), Buffer.GetLength());
+    return _IB_parse_currency(Doctype, FieldName, Buffer.c_str(), Buffer.GetLength());
   return MONETARYOBJ(Buffer);
 }
 

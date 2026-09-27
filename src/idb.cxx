@@ -1036,7 +1036,7 @@ bool IDB::SetLocale (const CHR *Locale)
 	      if ((def_charset = getenv ("LC_ALL")) == NULL || *def_charset == '\0')
 		def_charset = "iso_8859_1";      // Latin-1 is default
 	    }
-	  if (def_lang == NULL || *def_lang)
+	  if (def_lang == NULL || *def_lang == '\0')
 	    def_lang = "en";
 	  LocaleName.form ("%s.%s", def_lang, def_charset);
 	}

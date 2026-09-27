@@ -841,8 +841,9 @@ add_library(ibDoc
     ${DOCTYPE_DIR}/filter2.cxx      ${DOCTYPE_DIR}/pandoc.cxx
     ${DOCTYPE_DIR}/pdf.cxx          ${DOCTYPE_DIR}/markdown.cxx
     ${DOCTYPE_DIR}/cglomd.cxx       ${DOCTYPE_DIR}/jsondoc.cxx
-    ${DOCTYPE_DIR}/jsonlddoc.cxx     ${DOCTYPE_DIR}/ejsondoc.cxx
-    ${DOCTYPE_DIR}/tagml.cxx 
+    ${DOCTYPE_DIR}/jsonlddoc.cxx    ${DOCTYPE_DIR}/ejsondoc.cxx
+    ${DOCTYPE_DIR}/tagml.cxx        ${DOCTYPE_DIR}/brat.cxx 
+
 )
 ib_common_includes(ibDoc)
 target_link_libraries(ibDoc PUBLIC ibUtils ibLocal)

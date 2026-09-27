@@ -339,8 +339,731 @@ MONETARYOBJ::MONETARYOBJ (const STRING& s)
   Set(s);
 }
 
+
 #if 1
 
+/*
+"123.45"          -> 123.45
+"1.230"           -> 1.230
+"12.250"          -> 12.250
+
+"123.456.000"     -> 123456000
+"1,234,567"       -> 1234567
+"12,12,123"       -> 1212123
+
+"123.456,99"      -> 123456.99
+"123,456.99"      -> 123456.99
+
+"1 234,56"        -> 1234.56
+"1 234,56"        -> 1234.56
+"1 234,56"        -> 1234.56
+"1'234.56"        -> 1234.56
+"1’234.56"        -> 1234.56
+
+"₹1,234"          -> 1234
+"$1,234"          -> 1234
+"€1,234"          -> 1.234
+
+*/
+
+enum MONEY_FORMAT_HINT {
+  MONEY_FORMAT_UNKNOWN,
+  MONEY_FORMAT_DOT_DECIMAL
+};
+
+
+static inline bool MoneyDigit(unsigned char c)
+{
+  return c >= '0' && c <= '9';
+}
+
+
+// Unicode whitespace which can occur as numeric grouping.
+// Returns number of UTF-8 bytes consumed.
+static size_t MoneySpaceLen(const unsigned char *p, const unsigned char *end)
+{
+  if (p >= end)
+    return 0;
+
+  // ASCII whitespace
+  if (*p == ' ' || (*p >= '\t' && *p <= '\r'))
+    return 1;
+
+  // Legacy single-byte NBSP.
+  if (*p == 0xA0)
+    return 1;
+
+  // U+00A0 NO-BREAK SPACE
+  if (end - p >= 2 &&
+      p[0] == 0xC2 && p[1] == 0xA0)
+    return 2;
+
+  if (end - p >= 3)
+    {
+      // U+2000 .. U+200A
+      // includes EN SPACE, EM SPACE, THIN SPACE, HAIR SPACE, etc.
+      if (p[0] == 0xE2 && p[1] == 0x80 &&
+          p[2] >= 0x80 && p[2] <= 0x8A)
+        return 3;
+
+      // U+202F NARROW NO-BREAK SPACE
+      if (p[0] == 0xE2 && p[1] == 0x80 && p[2] == 0xAF)
+        return 3;
+
+      // U+205F MEDIUM MATHEMATICAL SPACE
+      if (p[0] == 0xE2 && p[1] == 0x81 && p[2] == 0x9F)
+        return 3;
+
+      // U+3000 IDEOGRAPHIC SPACE
+      if (p[0] == 0xE3 && p[1] == 0x80 && p[2] == 0x80)
+        return 3;
+    }
+
+  return 0;
+}
+
+
+static void SkipMoneySpaces(const unsigned char *&p, const unsigned char *end)
+{
+  size_t n;
+
+  while ((n = MoneySpaceLen(p, end)) != 0)
+    p += n;
+}
+
+static void TrimMoneySpaces(const unsigned char *begin, const unsigned char *&end)
+{
+  for (;;)
+    {
+      if (end <= begin)
+        return;
+
+      // ASCII / legacy single-byte space.
+      if (end[-1] == ' ' ||
+          (end[-1] >= '\t' && end[-1] <= '\r') ||
+          end[-1] == 0xA0)
+        {
+          --end;
+          continue;
+        }
+
+      if (end - begin >= 2 &&
+          end[-2] == 0xC2 && end[-1] == 0xA0)
+        {
+          end -= 2;
+          continue;
+        }
+
+      if (end - begin >= 3)
+        {
+          if (end[-3] == 0xE2 && end[-2] == 0x80 &&
+              end[-1] >= 0x80 && end[-1] <= 0x8A)
+            {
+              end -= 3;
+              continue;
+            }
+
+          if (end[-3] == 0xE2 && end[-2] == 0x80 &&
+              end[-1] == 0xAF)
+            {
+              end -= 3;
+              continue;
+            }
+
+          if (end[-3] == 0xE2 && end[-2] == 0x81 &&
+              end[-1] == 0x9F)
+            {
+              end -= 3;
+              continue;
+            }
+
+          if (end[-3] == 0xE3 && end[-2] == 0x80 &&
+              end[-1] == 0x80)
+            {
+              end -= 3;
+              continue;
+            }
+        }
+
+      return;
+    }
+}
+
+
+// Numeric grouping other than '.' and ','.
+static size_t MoneyGroupingLen(const unsigned char *p, const unsigned char *end)
+{
+  size_t n = MoneySpaceLen(p, end);
+
+  if (n)
+    return n;
+
+  if (p >= end)
+    return 0;
+
+  // ASCII apostrophe -- common Swiss representation.
+  if (*p == '\'')
+    return 1;
+
+  // U+2018 / U+2019
+  if (end - p >= 3 &&
+      p[0] == 0xE2 && p[1] == 0x80 &&
+      (p[2] == 0x98 || p[2] == 0x99))
+    return 3;
+
+  // U+02BC MODIFIER LETTER APOSTROPHE
+  if (end - p >= 2 &&
+      p[0] == 0xCA && p[1] == 0xBC)
+    return 2;
+
+  // U+FF07 FULLWIDTH APOSTROPHE
+  if (end - p >= 3 &&
+      p[0] == 0xEF && p[1] == 0xBC && p[2] == 0x87)
+    return 3;
+
+  return 0;
+}
+
+
+// Consume one leading currency symbol.
+//
+// The hint is deliberately weak.  It is only used to resolve a single
+// comma such as "$1,234" or "₹1,234".  A single '.' always remains
+// decimal, even for these currencies.
+static bool ConsumeCurrencySymbol(const unsigned char *&p, const unsigned char *end, MONEY_FORMAT_HINT *hint)
+{
+  if (p >= end)
+    return false;
+
+  switch (*p)
+    {
+    case '$':
+      ++p;
+      if (hint) *hint = MONEY_FORMAT_DOT_DECIMAL;
+      return true;
+
+    case 163:                       // £ legacy
+    case 165:                       // ¥ legacy
+      ++p;
+      if (hint) *hint = MONEY_FORMAT_DOT_DECIMAL;
+      return true;
+
+    case 164:                       // ¤ / € in ISO-8859-15
+      ++p;
+      return true;
+    }
+
+  // UTF-8 £
+  if (end - p >= 2 && p[0] == 0xC2 && p[1] == 0xA3)
+    {
+      p += 2;
+      if (hint) *hint = MONEY_FORMAT_DOT_DECIMAL;
+      return true;
+    }
+
+  // UTF-8 ¤
+  if (end - p >= 2 && p[0] == 0xC2 && p[1] == 0xA4)
+    {
+      p += 2;
+      return true;
+    }
+
+  // UTF-8 ¥
+  if (end - p >= 2 && p[0] == 0xC2 && p[1] == 0xA5)
+    {
+      p += 2;
+      if (hint) *hint = MONEY_FORMAT_DOT_DECIMAL;
+      return true;
+    }
+
+  // Unicode Currency Symbols U+20A0 .. U+20BF.
+  if (end - p >= 3 &&
+      p[0] == 0xE2 && p[1] == 0x82 &&
+      p[2] >= 0xA0 && p[2] <= 0xBF)
+    {
+      // U+20A8 RUPEE SIGN, U+20B9 INDIAN RUPEE SIGN
+      if (hint && (p[2] == 0xA8 || p[2] == 0xB9))
+        *hint = MONEY_FORMAT_DOT_DECIMAL;
+
+      p += 3;
+      return true;
+    }
+
+  return false;
+}
+
+
+static bool ConsumeCentSuffix(const unsigned char *&end, const unsigned char *begin)
+{
+  // Legacy ¢.
+  if (end > begin && end[-1] == 162)
+    {
+      --end;
+      return true;
+    }
+
+  // UTF-8 U+00A2 ¢
+  if (end - begin >= 2 && end[-2] == 0xC2 && end[-1] == 0xA2)
+    {
+      end -= 2;
+      return true;
+    }
+
+  return false;
+}
+
+
+// Validate grouping in the integer part.
+//
+// Accepted:
+//
+//   1,234,567
+//   123.456.789
+//   12,34,567
+//   1'234'567
+//   1 234 567
+//
+// Separators may be mixed.  Messy source data is preferable to data loss.
+static bool ValidMoneyGrouping(const unsigned char *p, const unsigned char *end)
+{
+  if (p == end)
+    return true;                    // ".99"
+
+  size_t separators = 0;
+
+  for (const unsigned char *q = p; q < end; )
+    {
+      if (MoneyDigit(*q))
+        {
+          ++q;
+          continue;
+        }
+
+      size_t n = 0;
+
+      if (*q == '.' || *q == ',')
+        n = 1;
+      else
+        n = MoneyGroupingLen(q, end);
+
+      if (!n)
+        return false;
+
+      ++separators;
+      q += n;
+    }
+
+  if (!separators)
+    {
+      for (const unsigned char *q = p; q < end; ++q)
+        if (!MoneyDigit(*q))
+          return false;
+
+      return true;
+    }
+
+  const size_t groups = separators + 1;
+  size_t group = 0;
+  size_t digits = 0;
+
+  bool western = true;
+  bool indian  = true;
+
+  for (const unsigned char *q = p; ; )
+    {
+      bool atEnd = q >= end;
+      size_t n = 0;
+
+      if (!atEnd)
+        {
+          if (MoneyDigit(*q))
+            {
+              ++digits;
+              ++q;
+              continue;
+            }
+
+          if (*q == '.' || *q == ',')
+            n = 1;
+          else
+            n = MoneyGroupingLen(q, end);
+
+          if (!n)
+            return false;
+        }
+
+      // Empty group: ",123", "123,,456", "123,"
+      if (digits == 0)
+        return false;
+
+      if (group == 0)
+        {
+          if (digits < 1 || digits > 3)
+            western = false;
+
+          if (digits < 1 || digits > 2)
+            indian = false;
+        }
+      else
+        {
+          if (digits != 3)
+            western = false;
+
+          if (group == groups - 1)
+            {
+              if (digits != 3)
+                indian = false;
+            }
+          else if (digits != 2)
+            indian = false;
+        }
+
+      ++group;
+      digits = 0;
+
+      if (atEnd)
+        break;
+
+      q += n;
+    }
+
+  return western || indian;
+}
+
+
+bool MONETARYOBJ::Set(const STRING& s)
+{
+  Invalidate();
+
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(s.c_str());
+
+  const unsigned char *end = p + s.GetLength();
+
+  SkipMoneySpaces(p, end);
+  TrimMoneySpaces(p, end);
+
+  if (p == end)
+    return false;
+
+  MONEY_FORMAT_HINT hint = MONEY_FORMAT_UNKNOWN;
+
+  // Optional leading currency symbol.
+  ConsumeCurrencySymbol(p, end, &hint);
+  SkipMoneySpaces(p, end);
+
+  if (p == end)
+    return false;
+
+  // Current representation is unsigned.
+  if (*p == '-')
+    return false;
+
+  if (*p == '+')
+    {
+      ++p;
+      SkipMoneySpaces(p, end);
+
+      if (p == end)
+        return false;
+    }
+
+  // Legacy / Unicode cent suffix.
+  bool cents = false;
+
+  {
+    const unsigned char *e = end;
+
+    if (ConsumeCentSuffix(e, p))
+      {
+        cents = true;
+        end = e;
+        TrimMoneySpaces(p, end);
+
+        // A cent expression naturally uses dot-decimal/comma-grouping
+        // conventions when we have to disambiguate a single comma.
+        hint = MONEY_FORMAT_DOT_DECIMAL;
+      }
+  }
+
+  if (p == end)
+    return false;
+
+
+  //
+  // First pass: classify '.' and ','.
+  //
+  unsigned dots = 0;
+  unsigned commas = 0;
+
+  const unsigned char *lastDot = NULL;
+  const unsigned char *lastComma = NULL;
+
+  bool sawDigit = false;
+
+  for (const unsigned char *q = p; q < end; )
+    {
+      if (MoneyDigit(*q))
+        {
+          sawDigit = true;
+          ++q;
+          continue;
+        }
+
+      if (*q == '.')
+        {
+          ++dots;
+          lastDot = q++;
+          continue;
+        }
+
+      if (*q == ',')
+        {
+          ++commas;
+          lastComma = q++;
+          continue;
+        }
+
+      const size_t n = MoneyGroupingLen(q, end);
+
+      if (!n)
+        return false;
+
+      q += n;
+    }
+
+  if (!sawDigit)
+    return false;
+
+
+  //
+  // Determine decimal separator.
+  //
+  const unsigned char *decimal = NULL;
+
+  if (dots && commas)
+    {
+      // 123.456,78
+      // 123,456.78
+      //
+      // Structural evidence wins: rightmost separator is decimal.
+      decimal = lastDot > lastComma ? lastDot : lastComma;
+    }
+  else if (dots == 1)
+    {
+      // Canonical monetary representation.
+      //
+      // Never infer grouping merely because three digits follow:
+      // 1.230 is a perfectly legitimate unit price.
+      decimal = lastDot;
+    }
+  else if (commas == 1)
+    {
+      decimal = lastComma;
+
+      // For currencies whose normal convention strongly uses comma
+      // grouping, first see whether the whole token is a valid grouped
+      // integer:
+      //
+      //   $1,234  -> 1234
+      //   ₹1,234  -> 1234
+      //
+      // but:
+      //
+      //   $12,34  -> 12.34
+      //
+      if (hint == MONEY_FORMAT_DOT_DECIMAL &&
+          ValidMoneyGrouping(p, end))
+        decimal = NULL;
+    }
+
+  // Multiple '.' alone or multiple ',' alone are grouping.
+  // Thus "123.456.000" becomes 123456000.
+
+
+  //
+  // Validate the integer/grouping portion.
+  //
+  const unsigned char *integerEnd = decimal ? decimal : end;
+
+  if (!ValidMoneyGrouping(p, integerEnd))
+    return false;
+
+
+  //
+  // Build the whole part exactly.  No floating point involved.
+  //
+  UINT8 whole = 0;
+
+  for (const unsigned char *q = p; q < integerEnd; )
+    {
+      if (MoneyDigit(*q))
+        {
+          const UINT8 digit = *q - '0';
+          const UINT8 maxValue = ~(UINT8)0;
+
+          if (whole > (maxValue - digit) / 10)
+            return false;
+
+          whole = whole * 10 + digit;
+          ++q;
+          continue;
+        }
+
+      size_t n;
+
+      if (*q == '.' || *q == ',')
+        n = 1;
+      else
+        n = MoneyGroupingLen(q, integerEnd);
+
+      if (!n)
+        return false;
+
+      q += n;
+    }
+
+
+  //
+  // Convert fractional decimal digits directly to monetary ticks.
+  //
+  // CURRENCY_MODULO == 50000 == 5 * 10^4.
+  //
+  // Therefore the first five decimal digits are sufficient to round
+  // exactly to the nearest 1/50000:
+  //
+  //      .12345 * 50000 = 6172.5  -> 6173
+  //
+  // and all values through four decimal places are exact.
+  //
+  // For a cent suffix the scale is 500 ticks/cent, so the same
+  // observation applies using the first three fractional digits.
+  //
+  UINT4 fractionScaled = 0;
+
+  if (decimal)
+    {
+      const unsigned char *q = decimal + 1;
+
+      if (q == end)
+        return false;               // "123."
+
+      const unsigned needed = cents ? 3 : 5;
+
+      UINT4 firstDigits = 0;
+      unsigned got = 0;
+
+      for (; q < end; ++q)
+        {
+          if (!MoneyDigit(*q))
+            return false;
+
+          if (got < needed)
+            {
+              firstDigits = firstDigits * 10 + (*q - '0');
+              ++got;
+            }
+        }
+
+      if (got == 0)
+        return false;
+
+      while (got < needed)
+        {
+          firstDigits *= 10;
+          ++got;
+        }
+
+      // Exact equivalent of floor(x + 0.5) at our fixed resolution.
+      fractionScaled = (firstDigits + 1) / 2;
+    }
+
+
+  //
+  // Convert to the canonical 1/50000 representation.
+  //
+  // Ordinary monetary input:
+  //       whole * 50000 + fraction
+  //
+  // Cent input:
+  //       cents * 500 + fractional-cent ticks
+  //
+  const UINT8 scale = cents ? 500 : CURRENCY_MODULO;
+
+  const UINT8 maxAmount = (UINT4)~(UINT4)0;
+  const UINT8 maxTicks = maxAmount * (UINT8)CURRENCY_MODULO + (CURRENCY_MODULO - 1);
+
+  if (whole > maxTicks / scale)
+    return false;
+
+  UINT8 ticks = whole * scale;
+
+  if ((UINT8)fractionScaled > maxTicks - ticks)
+    return false;
+
+  ticks += fractionScaled;
+
+  Amount = (UINT4)(ticks / CURRENCY_MODULO);
+  Fract  = (UINT2)(ticks % CURRENCY_MODULO);
+
+  return true;
+}
+
+#else
+
+static bool
+ConsumeCurrencySymbol(const unsigned char *&p, const unsigned char *end)
+{
+    if (p >= end)
+        return false;
+
+    switch (*p) {
+    case '$':
+    case 163: // £
+    case 164: // ¤ / legacy €
+    case 165: // ¥
+        ++p;
+        return true;
+    }
+
+    static const unsigned char euro[]   = { 0xE2, 0x82, 0xAC };
+    static const unsigned char rupee[]  = { 0xE2, 0x82, 0xB9 };
+    static const unsigned char rupee2[] = { 0xE2, 0x82, 0xA8 };
+    static const unsigned char won[]    = { 0xE2, 0x82, 0xA9 };
+    static const unsigned char shekel[] = { 0xE2, 0x82, 0xAA };
+    static const unsigned char dong[]   = { 0xE2, 0x82, 0xAB };
+    static const unsigned char peso[]   = { 0xE2, 0x82, 0xB1 };
+    static const unsigned char hryvnia[]= { 0xE2, 0x82, 0xB4 };
+    static const unsigned char lira[]   = { 0xE2, 0x82, 0xBA };
+    static const unsigned char ruble[]  = { 0xE2, 0x82, 0xBD };
+
+    struct CurrencySymbol {
+        const unsigned char *bytes;
+        size_t length;
+    };
+
+    static const CurrencySymbol symbols[] = {
+        { euro,    sizeof(euro)    },
+        { rupee,   sizeof(rupee)   },
+        { rupee2,  sizeof(rupee2)  },
+        { won,     sizeof(won)     },
+        { shekel,  sizeof(shekel)  },
+        { dong,    sizeof(dong)    },
+        { peso,    sizeof(peso)    },
+        { hryvnia, sizeof(hryvnia) },
+        { lira,    sizeof(lira)    },
+        { ruble,   sizeof(ruble)   }
+    };
+
+    for (const auto& symbol : symbols) {
+        if (static_cast<size_t>(end - p) >= symbol.length &&
+            memcmp(p, symbol.bytes, symbol.length) == 0) {
+            p += symbol.length;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 bool MONETARYOBJ::Set(const STRING& s)
 {
@@ -348,7 +1071,7 @@ bool MONETARYOBJ::Set(const STRING& s)
   Fract  = BAD_CURRENCY_VAL;
 
   const unsigned char *p =
-      (const unsigned char *)s.c_str();
+    reinterpret_cast<const unsigned char *>(s.c_str());
   const unsigned char *end = p + s.GetLength();
 
   while (p < end && isspace(*p))
@@ -360,18 +1083,8 @@ bool MONETARYOBJ::Set(const STRING& s)
   if (p == end)
     return false;
 
-  const unsigned char money = 164; // currency sign / Euro in ISO-8859-15
-  const unsigned char yen   = 165;
-  const unsigned char pound = 163;
-  const unsigned char cent  = 162;
-
   // Optional leading currency sign.
-  if (*p == '$' || *p == money || *p == yen || *p == pound)
-    {
-      ++p;
-      while (p < end && isspace(*p))
-        ++p;
-    }
+  ConsumeCurrencySymbol(p, end);
 
   if (p == end)
     return false;
@@ -440,68 +1153,8 @@ bool MONETARYOBJ::Set(const STRING& s)
 
   return Set(value);
 }
-
-#else
-
-bool MONETARYOBJ::Set(const STRING& s)
-{
-  const char *ptr = s.c_str();
-
-  while (isspace(*ptr)) ptr++;
-
-  const size_t len  = strlen(ptr);
-
-  // Largest number: 18446744073709551615
-  if (len < 2 || len >= 64) return false;
-
-  char dup[64];
-
-  memcpy(dup, ptr, len+1);
-
-  char *tcp = dup + len; // End of field
-  const char  money = (char)164; // Also EURO in 8859-15
-  const char  yen   = (char)165;
-  const char  pound = (char)163;
-  const char  cent  = (char)162;
-  size_t cents = 0;
-
-  ptr = dup;
-  if (*ptr == '$' || *ptr == yen || *ptr == pound || *ptr == money) ptr++;
-  while (isspace(*ptr)) ptr++;
-
-  for ( ; *tcp != '.' && *tcp != ',' && tcp >= ptr ; tcp--)
-    {
-      if (*tcp == cent)
-	{
-	  cents++;
-          break; // value is in cents
-	}
-    }
-  {long double rest;
-  if ((*tcp == '.' || *tcp == ',') && *(tcp+1) && (rest = (long double)atof (tcp + 1)) < 100.0)
-    {
-      long double r = rest*CURRENCY_MODULO;
-      // 50000 = 100 cents -> 500 = 1 cent
-      // 5000*x = 0.1
-      Fract = (UINT2)r;
-      *tcp = '\0';
-    }
-  else
-    Fract = 0;
-  }
-
-  if ((Amount = atol (ptr)) == 0)
-    {
-       if (!_ib_isdigit(*ptr))
-	Fract = BAD_CURRENCY_VAL;
-    }
-  else if (Fract == 0 && cents)
-    {
-      Set( Amount/100.0 );
-    }
-  return Ok();
-}
 #endif
+
 
 MONETARYOBJ::MONETARYOBJ (const NUMBER x)
 {
