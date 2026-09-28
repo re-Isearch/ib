@@ -14,7 +14,7 @@ Description:	Class ATTRLIST - Attribute List
 
 class FIELDTYPE {
 public:
-  enum datatypes { unknown=-1, any = 0, text, numerical, computed, numericalrange,
+  enum datatypes { unknown=-1, any = 0, text, integer, numerical, computed, numericalrange,
 	date, daterange, gpoly, box, time, ttl, ttl_expires, boolean, currency,
 	dotnumber, phonhash, phonhash2, metaphone, metaphone2, hash, casehash,
 	lexi, smiles, privhash, isbn, telnumber, creditcardnum, iban, bic,

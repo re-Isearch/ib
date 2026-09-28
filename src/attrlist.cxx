@@ -14,6 +14,7 @@ Description:	Class ATTRLIST - Attribute List
 #pragma ident  "@(#)attrlist.cxx"
 
 static const char *n = "n"; // Numeric
+static const char *in = "i"; // Integer
 static const char *B = "0"; // Boolean
 static const char *r = "r"; // Num Range
 static const char *d = "d"; // Date
@@ -29,6 +30,7 @@ static const char *_V = ".hix"; // Hierarchical Navigable Small Worlds (HNSW)
 static const char *g = "g"; // Graph vector ANN algorithms (except HNSW)
 static const char *f = "f"; // Vector Flat algorithms
 static const char *x = "X"; // Embedded object/store (External)
+static const char *m = "$"; // Currency, decimal
 static const char *_s = "";
 
 extern "C" long double (*_IB_private_hash)(const char *, const char *, size_t );
@@ -51,6 +53,7 @@ static struct DataType {
 } DataTypes[] = {
   {"any",       "", FIELDTYPE::any, "Any"},  // 2022 EXPERIMENTAL  
   {"string",    "", FIELDTYPE::text, "String (full text)"},
+  {"integer",   in, FIELDTYPE::integer, "128-bit signed integer" },
   {"numerical", n,  FIELDTYPE::numerical, "Numerical IEEE floating"},
   {"computed",  n,  FIELDTYPE::computed,  "Computed Numerical"},
   {"range",     r,  FIELDTYPE::numericalrange, "Range of Numerbers"},
@@ -62,7 +65,7 @@ static struct DataType {
   {"ttl",       n,  FIELDTYPE::ttl, "Numeric computed value for time-to-live in seconds."},
   {"expires",   d,  FIELDTYPE::ttl_expires, "Numeric computed ttl value as date of expiration."},
   {"boolean",   B,  FIELDTYPE::boolean, "Boolean type"},
-  {"currency",  "$",FIELDTYPE::currency, "Non-negative monetary value (fixed precision)"},
+  {"currency",  m,  FIELDTYPE::currency, "Non-negative monetary value (fixed precision)"},
   {"dotnumber", n,  FIELDTYPE::dotnumber, "Dot number (Internet v4/v6 Addresses, UIDs etc)"},
   {"phonetic",  h,  FIELDTYPE::phonhash, "Computed phonetic hash applied to each word (for names)"},
   {"phone2",    h,  FIELDTYPE::phonhash2, "Phonetic hash applied to the whole field"},
@@ -154,19 +157,21 @@ static struct DataType {
   {"xs:normalizedString",  _s,  FIELDTYPE::text,      NULL},
   // integer types
   {"xs:boolean",            B,  FIELDTYPE::boolean,   NULL},
-  {"xs:decimal",            n,  FIELDTYPE::numerical, NULL},
-  {"xs:integer",            n,  FIELDTYPE::numerical, NULL},
+  {"xs:integer",            in,  FIELDTYPE::integer, NULL},
+  {"xs:float",              n,   FIELDTYPE::numerical, NULL},
+  {"xs:double",             n,   FIELDTYPE::numerical, NULL},
+  {"xs:decimal",            m,   FIELDTYPE::currency, NULL}, // Close enough
   // derived integer types
-  {"xs:long",               n,  FIELDTYPE::numerical, NULL},
-  {"xs:int",                n,  FIELDTYPE::numerical, NULL},
-  {"xs:short",              n,  FIELDTYPE::numerical, NULL},
-  {"xs:unsignedLong",       n,  FIELDTYPE::numerical, NULL},
-  {"xs:unsignedInt",        n,  FIELDTYPE::numerical, NULL},
-  {"xs:unsignedShort",      n,  FIELDTYPE::numerical, NULL},
-  {"xs:positiveInteger",    n,  FIELDTYPE::numerical, NULL},
-  {"xs:nonNegativeInteger", n,  FIELDTYPE::numerical, NULL},
-  {"xs:negativeInteger",    n,  FIELDTYPE::numerical, NULL},
-  {"xs:positiveInteger",    n,  FIELDTYPE::numerical, NULL},
+  {"xs:long",               in,  FIELDTYPE::integer, NULL},
+  {"xs:int",                in,  FIELDTYPE::integer, NULL},
+  {"xs:short",              in,  FIELDTYPE::integer, NULL},
+  {"xs:unsignedLong",       in,  FIELDTYPE::integer, NULL},
+  {"xs:unsignedInt",        in,  FIELDTYPE::integer, NULL},
+  {"xs:unsignedShort",      in,  FIELDTYPE::integer, NULL},
+  {"xs:positiveInteger",    in,  FIELDTYPE::integer, NULL},
+  {"xs:nonNegativeInteger", in,  FIELDTYPE::integer, NULL},
+  {"xs:negativeInteger",    in,  FIELDTYPE::integer, NULL},
+  {"xs:positiveInteger",    in,  FIELDTYPE::integer, NULL},
   // 
   {"xs:dateTime", d,  FIELDTYPE::date,      NULL},
   {"xs:time",     d,  FIELDTYPE::time,      NULL}

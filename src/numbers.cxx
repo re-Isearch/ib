@@ -1312,39 +1312,532 @@ inline bool Read(BOOLEANOBJ *p, FILE *Fp)
 #endif
 
 
+// We now will support 128-bit integers
 bool INTEGEROBJ::Set(const STRING& s)
 {
   valid = false;
-  val = 0;
+  val   = 0;
 
   const char *p   = s.c_str();
   const char *end = p + s.GetLength();
 
-  while (p < end &&
-         (*p == ' ' || (*p >= '\t' && *p <= '\r')))
-    ++p;
+  /*
+   * Return the byte length of a whitespace character we are willing
+   * to treat as presentation/grouping whitespace.
+   */
+  const auto space_len = [](const char *q, const char *last) -> size_t
+  {
+    if (q >= last)
+      return 0;
 
-  while (end > p &&
-         (end[-1] == ' ' ||
-          (end[-1] >= '\t' && end[-1] <= '\r')))
-    --end;
+    const unsigned char c0 = (unsigned char)q[0];
+
+    // ASCII whitespace
+    if (c0 == ' ' || (c0 >= '\t' && c0 <= '\r'))
+      return 1;
+
+    // Legacy single-byte NBSP
+    if (c0 == 0xA0)
+      return 1;
+
+    // U+00A0 NO-BREAK SPACE
+    if (last - q >= 2 &&
+        c0 == 0xC2 &&
+        (unsigned char)q[1] == 0xA0)
+      return 2;
+
+    if (last - q >= 3) {
+      const unsigned char c1 = (unsigned char)q[1];
+      const unsigned char c2 = (unsigned char)q[2];
+
+      // U+2000..U+200A
+      if (c0 == 0xE2 && c1 == 0x80 &&
+          c2 >= 0x80 && c2 <= 0x8A)
+        return 3;
+
+      // U+202F NARROW NO-BREAK SPACE
+      if (c0 == 0xE2 && c1 == 0x80 && c2 == 0xAF)
+        return 3;
+
+      // U+205F MEDIUM MATHEMATICAL SPACE
+      if (c0 == 0xE2 && c1 == 0x81 && c2 == 0x9F)
+        return 3;
+
+      // U+3000 IDEOGRAPHIC SPACE
+      if (c0 == 0xE3 && c1 == 0x80 && c2 == 0x80)
+        return 3;
+    }
+
+    return 0;
+  };
+
+
+  /*
+   * Punctuation which, for an INTEGER field, may simply be ignored
+   * as grouping/presentation noise.
+   */
+  const auto grouping_len = [&](const char *q, const char *last) -> size_t
+  {
+    if (q >= last)
+      return 0;
+
+    const unsigned char c0 = (unsigned char)q[0];
+
+    if (c0 == '.' || c0 == ',' || c0 == '\'')
+      return 1;
+
+    if (const size_t n = space_len(q, last))
+      return n;
+
+    // U+02BC MODIFIER LETTER APOSTROPHE
+    if (last - q >= 2 &&
+        c0 == 0xCA &&
+        (unsigned char)q[1] == 0xBC)
+      return 2;
+
+    if (last - q >= 3) {
+      const unsigned char c1 = (unsigned char)q[1];
+      const unsigned char c2 = (unsigned char)q[2];
+
+      // U+2018 / U+2019
+      if (c0 == 0xE2 && c1 == 0x80 &&
+          (c2 == 0x98 || c2 == 0x99))
+        return 3;
+
+      // U+FF07 FULLWIDTH APOSTROPHE
+      if (c0 == 0xEF && c1 == 0xBC && c2 == 0x87)
+        return 3;
+    }
+
+    return 0;
+  };
+
+
+  /*
+   * Trim presentation whitespace.
+   */
+  while (p < end) {
+    const size_t n = space_len(p, end);
+    if (!n)
+      break;
+    p += n;
+  }
 
   if (p == end)
     return false;
 
-  // std::from_chars does not accept leading '+'.
+  /*
+   * Find the end excluding trailing Unicode whitespace.
+   */
+  {
+    const char *last_nonspace = p;
+
+    for (const char *q = p; q < end; ) {
+      const size_t n = space_len(q, end);
+
+      if (n) {
+        q += n;
+      } else {
+        ++q;
+        last_nonspace = q;
+      }
+    }
+
+    end = last_nonspace;
+  }
+
+  if (p == end)
+    return false;
+
+
+  /*
+   * std::from_chars does not accept leading '+'.
+   *
+   * Do not accidentally accept "+-123".
+   */
   if (*p == '+') {
+    ++p;
+
+    if (p == end || *p == '+' || *p == '-')
+      return false;
+  }
+
+
+  /*
+   * FAST PATH
+   *
+   * This should handle the overwhelming majority of integer metadata:
+   *
+   *     123
+   *     -123
+   *     +123
+   */
+  {
+    INT16 value;
+
+    const auto result = std::from_chars(p, end, value, 10);
+
+    if (result.ec == std::errc() && result.ptr == end) {
+      val   = value;
+      valid = true;
+      return true;
+    }
+  }
+
+
+  /*
+   * From here on we interpret the value according to INTEGER semantics.
+   */
+  bool negative = false;
+
+  if (*p == '-') {
+    negative = true;
+
     if (++p == end)
       return false;
   }
 
-  INT8 value;
-  const auto result = std::from_chars(p, end, value, 10);
 
-  if (result.ec != std::errc() || result.ptr != end)
+  /*
+   * Signed 128-bit magnitude limits.
+   *
+   * Positive:  2^127 - 1
+   * Negative:  2^127
+   */
+  const UINT16 sign_bit = ((UINT16)1 << 127);
+  const UINT16 limit    = negative ? sign_bit : sign_bit - 1;
+
+
+  /*
+   * Install an already validated magnitude.
+   */
+  const auto commit = [&](UINT16 magnitude) -> bool
+  {
+    if (magnitude > limit)
+      return false;
+
+    if (negative) {
+      if (magnitude == sign_bit) {
+        // Construct INT128_MIN without overflowing signed arithmetic.
+        val = -((INT16)(sign_bit - 1)) - 1;
+      } else {
+        val = -(INT16)magnitude;
+      }
+    } else {
+      val = (INT16)magnitude;
+    }
+
+    valid = true;
+    return true;
+  };
+
+
+  /*
+   * Is this scientific notation?
+   *
+   * Presence of e/E changes the meaning of '.' and ',':
+   *
+   *     1.2e6
+   *     1,2e6
+   *
+   * both have an unambiguous decimal mantissa.
+   */
+  const char *epos = nullptr;
+
+  for (const char *q = p; q < end; ++q) {
+    if (*q == 'e' || *q == 'E') {
+      if (epos != nullptr)
+        return false;               // 1e2e3
+
+      epos = q;
+    }
+  }
+
+
+  /*
+   * ORDINARY INTEGER
+   *
+   * Once the field is declared INTEGER, punctuation between digits
+   * is merely presentation noise:
+   *
+   *     1,234,567
+   *     1.234.567
+   *     12,34,567
+   *     12'235,678
+   *     1.0000
+   *
+   * We intentionally do not attempt to validate grouping conventions.
+   */
+  if (epos == nullptr) {
+    UINT16 magnitude = 0;
+    bool seen_digit  = false;
+    bool after_group = false;
+
+    for (const char *q = p; q < end; ) {
+      const unsigned char c = (unsigned char)*q;
+
+      if (c >= '0' && c <= '9') {
+        const unsigned digit = c - '0';
+
+        if (magnitude > (limit - digit) / 10)
+          return false;
+
+        magnitude = magnitude * 10 + digit;
+
+        seen_digit  = true;
+        after_group = false;
+        ++q;
+        continue;
+      }
+
+      const size_t n = grouping_len(q, end);
+
+      if (!n || !seen_digit)
+        return false;
+
+      /*
+       * We even allow mixtures such as:
+       *
+       *     12'235,678
+       *     1, 234
+       *
+       * but not leading/trailing grouping garbage.
+       */
+      after_group = true;
+      q += n;
+    }
+
+    if (!seen_digit || after_group)
+      return false;
+
+    return commit(magnitude);
+  }
+
+
+  /*
+   * SCIENTIFIC NOTATION
+   *
+   * Mantissa permits exactly one '.' OR ','.
+   *
+   *     1.2e6      OK
+   *     1,2e6      OK
+   *     .5e3       OK
+   *     1.e3       OK
+   *
+   *     1.2,3e7    INVALID
+   *     1,2.3e7    INVALID
+   *     1.2.3e7    INVALID
+   */
+  if (epos == p)
     return false;
 
-  val = value;
-  valid = true;
-  return true;
+  bool   decimal_seen     = false;
+  bool   mantissa_digit   = false;
+  bool   mantissa_nonzero = false;
+  size_t total_digits     = 0;
+  size_t fractional_digits = 0;
+
+  for (const char *q = p; q < epos; ++q) {
+    const unsigned char c = (unsigned char)*q;
+
+    if (c >= '0' && c <= '9') {
+      mantissa_digit = true;
+
+      if (c != '0')
+        mantissa_nonzero = true;
+
+      ++total_digits;
+
+      if (decimal_seen)
+        ++fractional_digits;
+
+      continue;
+    }
+
+    if (c == '.' || c == ',') {
+      if (decimal_seen)
+        return false;
+
+      decimal_seen = true;
+      continue;
+    }
+
+    return false;
+  }
+
+  if (!mantissa_digit)
+    return false;
+
+
+  /*
+   * Parse exponent.
+   */
+  const char *q = epos + 1;
+
+  if (q == end)
+    return false;
+
+  bool exponent_negative = false;
+
+  if (*q == '+' || *q == '-') {
+    exponent_negative = (*q == '-');
+
+    if (++q == end)
+      return false;
+  }
+
+  UINT8 exponent = 0;
+  bool exponent_overflow = false;
+
+  const UINT8 max_uint8 = (UINT8)-1;
+
+  for (; q < end; ++q) {
+    const unsigned char c = (unsigned char)*q;
+
+    if (c < '0' || c > '9')
+      return false;
+
+    const unsigned digit = c - '0';
+
+    if (!exponent_overflow) {
+      if (exponent > (max_uint8 - digit) / 10) {
+        exponent_overflow = true;
+      } else {
+        exponent = exponent * 10 + digit;
+      }
+    }
+  }
+
+
+  /*
+   * An exponent too large even for UINT8 is necessarily much larger
+   * than any physically representable input string.
+   */
+  if (exponent_overflow) {
+    if (!mantissa_nonzero)
+      return commit(0);
+
+    if (exponent_negative)
+      return commit(0);
+
+    return false;
+  }
+
+
+  /*
+   * Accumulate the first N mantissa digits, ignoring the decimal marker.
+   *
+   * This is important: for a negative effective decimal exponent we
+   * don't need to construct the complete coefficient and then divide it.
+   * We simply retain the digits which survive truncation toward zero.
+   */
+  const auto accumulate = [&](size_t keep, UINT16 *result) -> bool
+  {
+    UINT16 magnitude = 0;
+    size_t count = 0;
+
+    for (const char *r = p; r < epos && count < keep; ++r) {
+      const unsigned char c = (unsigned char)*r;
+
+      if (c < '0' || c > '9')
+        continue;
+
+      const unsigned digit = c - '0';
+
+      if (magnitude > (limit - digit) / 10)
+        return false;
+
+      magnitude = magnitude * 10 + digit;
+      ++count;
+    }
+
+    *result = magnitude;
+    return true;
+  };
+
+
+  UINT16 magnitude = 0;
+
+
+  /*
+   * Negative exponent:
+   *
+   *   coefficient × 10^-(exponent + fractional_digits)
+   *
+   * Drop the appropriate number of trailing coefficient digits.
+   */
+  if (exponent_negative) {
+
+    if (exponent >= total_digits)
+      return commit(0);
+
+    const size_t remaining =
+        total_digits - (size_t)exponent;
+
+    if (fractional_digits >= remaining)
+      return commit(0);
+
+    const size_t keep =
+        remaining - fractional_digits;
+
+    if (!accumulate(keep, &magnitude))
+      return false;
+
+    return commit(magnitude);
+  }
+
+
+  /*
+   * Positive exponent.
+   */
+  if (exponent < fractional_digits) {
+
+    /*
+     * Some fractional digits remain and are simply discarded.
+     *
+     *     1.25e1  -> 12
+     */
+    const size_t drop =
+        fractional_digits - (size_t)exponent;
+
+    if (drop >= total_digits)
+      return commit(0);
+
+    const size_t keep =
+        total_digits - drop;
+
+    if (!accumulate(keep, &magnitude))
+      return false;
+
+    return commit(magnitude);
+  }
+
+
+  /*
+   * Decimal point has moved past all existing coefficient digits.
+   *
+   *     1.25e2 -> 125
+   *     1.2e6  -> 1200000
+   */
+  if (!accumulate(total_digits, &magnitude))
+    return false;
+
+  const UINT8 zeros =
+      exponent - (UINT8)fractional_digits;
+
+  /*
+   * Any nonzero 128-bit integer with more than 38 appended decimal
+   * zeros must overflow.
+   */
+  if (magnitude != 0 && zeros > 38)
+    return false;
+
+  for (UINT8 i = 0; i < zeros; ++i) {
+    if (magnitude > limit / 10)
+      return false;
+
+    magnitude *= 10;
+  }
+
+  return commit(magnitude);
 }

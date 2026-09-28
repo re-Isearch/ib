@@ -364,4 +364,34 @@ private:
   UINT2 Fract; // nearlest 1/500 th cent, e.g. Amount/500*100 = 50,000
 };
 
+
+class INTEGEROBJ {
+public:
+  INTEGEROBJ() : val(0), valid(false) {}
+  INTEGEROBJ(INT8 x) : val(x), valid(true) {}
+  INTEGEROBJ(const STRING& s) : val(0), valid(false) { Set(s); }
+
+  bool Set(const STRING& s);
+  bool Set(INT8 x) {
+    val = x;
+    valid = true;
+    return true;
+  }
+
+  bool Ok() const { return valid; }
+
+  operator INT8() const { return val; }
+
+  bool operator==(const INTEGEROBJ& x) const { return val == x.val; }
+  bool operator!=(const INTEGEROBJ& x) const { return val != x.val; }
+  bool operator< (const INTEGEROBJ& x) const { return val <  x.val; }
+  bool operator<=(const INTEGEROBJ& x) const { return val <= x.val; }
+  bool operator> (const INTEGEROBJ& x) const { return val >  x.val; }
+  bool operator>=(const INTEGEROBJ& x) const { return val >= x.val; }
+
+private:
+  INT16 val;
+  bool valid;
+};
+
 #endif

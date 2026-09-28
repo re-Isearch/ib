@@ -88,7 +88,6 @@ typedef UINT4* PUINT4;
 typedef INT8*  PINT8;
 typedef UINT8* PUINT8;
 
-
 #define UINT8_low_part(_x)	((UINT4)(_x))
 #define UINT8_high_part(_x)	((UINT4)((UINT8)(_x)>>32))
 #define INT8_low_part(_x)	((INT4)(_x))
@@ -167,6 +166,35 @@ typedef int  GDT_BOOLEAN;
 
 const GDT_BOOLEAN GDT_FALSE = (1==0);
 const GDT_BOOLEAN GDT_TRUE = (1==1);
+
+
+#if defined(__SIZEOF_INT128__) && (__SIZEOF_INT128__ == 16)
+
+typedef __int128          INT16;
+typedef unsigned __int128 UINT16;
+
+typedef INT16*  PINT16;
+typedef UINT16* PUINT16;
+
+#define UINT16_low_part(_x)   ((UINT8)((UINT16)(_x)))
+#define UINT16_high_part(_x)  ((UINT8)((UINT16)(_x) >> 64))
+#define cons_UINT16(hi, lo) \
+  ((((UINT16)(hi)) << 64) | (UINT16)(UINT8)(lo))
+
+#define MAX_UINT16 ((UINT16)-1)
+#define MAX_INT16  ((INT16)(MAX_UINT16 >> 1))
+#define MIN_INT16  (-MAX_INT16 - 1)
+
+#else
+# error "CoreQuarry requires native 128-bit integer support"
+#endif
+
+
+#define UINT16_low_part(_x)   ((UINT8)((UINT16)(_x)))
+#define UINT16_high_part(_x)  ((UINT8)((UINT16)(_x) >> 64))
+
+#define cons_UINT16(hi, lo) \
+  ((((UINT16)(hi)) << 64) | (UINT16)(UINT8)(lo))
 
 
 #endif /* GDT_SYS_H */

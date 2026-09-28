@@ -1073,7 +1073,7 @@ int _Isearch_main (int argc, char **argv)
 	   {
 	     if (FilenameOnly)
 	       message_log (LOG_WARN, "%s: headline (\"B\") over-ride for filename", Flag.c_str());
-	     Headline = "B";
+	     Headline = BRIEF_MAGIC;
 	     ShowHeadline = true;
 	     FilenameOnly = false;
 	     Terse = true;
@@ -1091,7 +1091,7 @@ int _Isearch_main (int argc, char **argv)
 	  else if (Flag.Equals("-tab"))
 	   {
 	     if (Headline.IsEmpty())
-		Headline = "B";
+		Headline = BRIEF_MAGIC;
              ShowHeadline = true;
              // Terse = true;
              LastUsed = x ;
@@ -1934,9 +1934,9 @@ again:
 	    {
 	      if (ShowHeadline)
 		{
-		  if (Headline == "H")
+		  if (Headline == HIGHLIGHT_MAGIC)
 		    pdb->HighlightedRecord(result, Before, After, &BriefString);
-		  else if (Headline == "B")
+		  else if (Headline == BRIEF_MAGIC)
 		    pdb->Headline(result, RecordSyntax, &BriefString);
 		  else
 		    pdb->Present (result, Headline, RecordSyntax, &BriefString);
@@ -2019,7 +2019,7 @@ again:
 		  cout << endl;
 		}
 	    }
-	  if (!ShowHeadline || (ElementSet != "B")) {
+	  if (!ShowHeadline || (ElementSet != BRIEF_MAGIC)) {
 	    TempElementSet = ElementSet;
 	    while (!TempElementSet.IsEmpty()) {
 	      Element = TempElementSet;
@@ -2032,11 +2032,11 @@ again:
 		{
 		  TempElementSet.Clear();
 		}
-	      if (ElementSet == "H")
+	      if (ElementSet == HIGHLIGHT_MAGIC)
 		{
 		  pdb->HighlightedRecord(result, Before, After, &BriefString);
 		}
-	      else if (Element == "B")
+	      else if (Element == BRIEF_MAGIC)
 		pdb->Headline(result, RecordSyntax, &BriefString);
 	      else
 		pdb->Present (result, Element, RecordSyntax, &BriefString);
@@ -2044,7 +2044,7 @@ again:
 		{
 		  if (ShowXML)
 		    {
-		      if (Element == "B")
+		      if (Element == BRIEF_MAGIC)
 			{
 			  cout << "<HEADLINE>";
 			  Element = "HEADLINE";
@@ -2345,9 +2345,9 @@ again:
 	      Full.Cat (tcp);
 	    }
 	  } else if (Pager && isatty(fileno(stdout)))
-	    Full = "h";
+	    Full = HIGHLIGHT_MAGIC;
 	  else
-	    Full = "F";
+	    Full = FULLTEXT_MAGIC;
 
 	  int pos;
 	  if ((pos = Full.Search("/")) > 0)
@@ -2368,7 +2368,7 @@ again:
 	    }
 	  else if (TermPrefix.IsEmpty() && TermSuffix.IsEmpty())
 	    {
-	      if (Full == "h")
+	      if (Full == HIGHLIGHT_MAGIC)
 		pdb->HighlightedRecord(result, Before, After, &Buf);
 	      else
 		pdb->DocPresent (result, Full, RecordSyntax, &Buf);
@@ -3491,9 +3491,13 @@ static void HelpUsageText( const char *progname, std::ostream& out)
 	"          " << prog << " -d NEWS -rpn AMD GPU NVIDIA MAYBE PROMOTE\n"
         "          " << prog << " -d NEWS  -rpn xLSTM WITHIN:2026\n" 
         "          " << prog << " -d SHAKESPEARE -P SPEECH/SPEAKER -P speech/line  -rpn out spot PEER\n" << 
-        "Note: \"Built-in\" Elements for -p and -headline: F for Full, B for Brief and S for Short.\n" 
-        "Additional \"Special\" elements: R for Raw, C for context, H for Highlight/Hits; and if they\n"
-	"exist, L for location/redirect and M for metadata." << endl << endl <<
+
+
+      "Note: \"Built-in\" Elements for -p and -headline: " << ELEMENT_Full << " for Full, " <<
+                ELEMENT_Brief << " for Brief and " << ELEMENT_Short << " for Short." << endl <<
+        "Additional \"Special\" elements: " << ELEMENT_Raw << "for Raw, " << ELEMENT_Highlight
+        << " for Highlight/Hits; and if they exist," << endl << ELEMENT_Location <<
+	" for location/redirect and " << ELEMENT_Metadata << " for metadata." << endl << endl <<    
         "In the response one can select not just the record but also all elements of a specific field\n"
         "well as specific contents where the hit occurs (similar to -P). Example:  1,speech/speech\n"
         "to select the contents of a speech where the hit(s) in record #1 occurs.\n" 
@@ -3501,7 +3505,5 @@ static void HelpUsageText( const char *progname, std::ostream& out)
         "By contrast 1,speech returns ALL the speeches in record #1.\n" 
         "The above 'special' elements may also be specified, e.g. 1,H" << endl << endl;
 }
-
-
 
 #endif
