@@ -6,6 +6,8 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include "common.hxx"
 #include "numbers.hxx"
 
+#include <charconv>
+
 static DOUBLE BAD_NUMBER = 1.17549435e-38F;
 
 NUMERICOBJ::NUMERICOBJ ()
@@ -1309,3 +1311,40 @@ inline bool Read(BOOLEANOBJ *p, FILE *Fp)
 
 #endif
 
+
+bool INTEGEROBJ::Set(const STRING& s)
+{
+  valid = false;
+  val = 0;
+
+  const char *p   = s.c_str();
+  const char *end = p + s.GetLength();
+
+  while (p < end &&
+         (*p == ' ' || (*p >= '\t' && *p <= '\r')))
+    ++p;
+
+  while (end > p &&
+         (end[-1] == ' ' ||
+          (end[-1] >= '\t' && end[-1] <= '\r')))
+    --end;
+
+  if (p == end)
+    return false;
+
+  // std::from_chars does not accept leading '+'.
+  if (*p == '+') {
+    if (++p == end)
+      return false;
+  }
+
+  INT8 value;
+  const auto result = std::from_chars(p, end, value, 10);
+
+  if (result.ec != std::errc() || result.ptr != end)
+    return false;
+
+  val = value;
+  valid = true;
+  return true;
+}
