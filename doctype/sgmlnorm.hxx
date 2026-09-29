@@ -39,6 +39,8 @@ public:
   virtual DATERANGE   ParseDateRange(const STRING& Buffer) const;
   virtual NUMERICOBJ  ParsePhonhash(const STRING& Buffer) const;
   virtual NUMERICOBJ  ParseNumeric(const STRING& Buffer) const;
+  virtual INTEGEROBJ  ParseInteger(const STRING& Buffer) const;
+
   virtual bool ParseRange(const STRING& Buffer, const STRING& FieldName,
         DOUBLE* fStart, DOUBLE* fEnd) const;
   virtual int         ParseGPoly(const STRING& Buffer, GPOLYFLD* gpoly) const;

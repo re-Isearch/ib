@@ -1905,6 +1905,11 @@ NUMERICOBJ SGMLNORM::ParseNumeric(const STRING& Buffer) const
   return DOCTYPE::ParseNumeric(_cleanBuffer(Buffer));
 }
 
+INTEGEROBJ SGMLNORM::ParseInteger(const STRING& Buffer) const
+{
+  return DOCTYPE::ParseInteger(_cleanBuffer(Buffer));
+}
+
 MONETARYOBJ SGMLNORM::ParseCurrency(const STRING& FieldName, const STRING& Buffer) const
 {
   return DOCTYPE::ParseCurrency(FieldName, _cleanBuffer(Buffer));
