@@ -59,6 +59,7 @@ public:
 			IsCaseHash() || IsPrivHash() || IsLexiHash(); }
   bool    IsNumeric() const { return Type == numerical || Type == computed || Type == currency || Type == dotnumber; }
   bool    IsNumerical() const{ return Type == numerical || Type == dotnumber || Type == ttl; }
+  bool    IsInteger() const  { return Type == integer; }
   bool    IsComputed() const { return Type == computed;  }
   bool    IsNumericalRange() const { return Type == numericalrange; }
   bool    IsDate() const     { return Type == date || Type == time || Type == ttl_expires; }

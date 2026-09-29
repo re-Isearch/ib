@@ -758,3 +758,185 @@ size_t INDEX::NumericalScan(SCANLIST *Scanlist, const STRING& FieldName, size_t 
   return total;
 }
 
+
+
+PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation)
+{
+  if (Parent == NULL)
+    return NULL;
+
+  PIRSET pirset = new IRSET(Parent);
+
+#ifdef FIELD_WILD_MATCH
+  STRING pattern(FieldName);
+  const DFDT *dfdtp = Parent->GetMainDfdt();
+
+  if (!pattern.IsPlain() && dfdtp)
+  {
+    IRSET *result = NULL;
+
+    const size_t total = dfdtp->GetTotalEntries();
+
+    for (size_t i = 0; i < total; ++i)
+    {
+      const STRING field = dfdtp->GetFieldName(i + 1);
+      const FIELDTYPE type = Parent->GetFieldType(field);
+
+      if (!type.IsInteger())
+        continue;
+
+      if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
+      {
+        IRSET *part = IntegerSearch(Key, field, Relation);
+
+        if (part)
+        {
+          if (result)
+          {
+            result->Or(*part);
+            delete part;
+          }
+          else
+            result = part;
+        }
+      }
+    }
+
+    if (result)
+    {
+      delete pirset;
+      return result;
+    }
+  }
+#endif
+
+  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
+
+  if (!ft.IsInteger())
+  {
+    Parent->SetErrorCode(113);
+    message_log(LOG_DEBUG,
+                "Can't search integer value in field '%s' of type '%s'",
+                FieldName.c_str(), ft.c_str());
+    return pirset;
+  }
+
+  STRING Fn;
+  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
+  {
+    Parent->SetErrorCode(1);
+    message_log(LOG_PANIC,
+                "Could not create integer table name for field '%s'",
+                FieldName.c_str());
+    return pirset;
+  }
+
+  if (!FileExists(Fn))
+  {
+    Parent->SetErrorCode(113);
+    return pirset;
+  }
+
+  STRING TextFn;
+  if (!Parent->DfdtGetFileName(FieldName, &TextFn))
+    TextFn.Clear();
+
+  INTEGERLIST List;
+
+  //
+  // != remains "find equality then complement", exactly as NumericSearch.
+  //
+  const ZRelation_t searchRelation =
+      Relation == ZRelNE ? ZRelEQ : (ZRelation_t)Relation;
+
+  IRESULT iresult;
+  iresult.SetVirtualIndex((UCHR)Parent->GetVolume(NULL));
+  iresult.SetMdt(Parent->GetMainMdt());
+  iresult.SetHitCount(1);
+  iresult.SetAuxCount(1);
+  iresult.SetScore(0);
+
+  FILE *fp = TextFn.GetLength() ? ffopen(TextFn, "rb") : NULL;
+
+  size_t old_w = 0;
+  bool isDeleted = false;
+  SRCH_DATE rec_date;
+
+  size_t matches = 0;
+
+  const bool found = List.VisitMatches(Fn, Key, searchRelation, [&](GPTYPE gp)
+      {
+        ++matches;
+
+        const size_t w = Parent->GetMainMdt()->LookupByGp(gp);
+        if (w == 0)
+          return;
+
+        //
+        // Preserve NumericSearch's date filtering behavior.
+        //
+        if (DateRange.Defined() && Relation != ZRelNE)
+        {
+          if (w != old_w)
+          {
+            MDTREC mdtrec;
+
+            if (Parent->GetMainMdt()->GetEntry(w, &mdtrec))
+            {
+              rec_date  = mdtrec.GetDate();
+              isDeleted = mdtrec.GetDeleted();
+            }
+            else
+              isDeleted = true;
+
+            old_w = w;
+          }
+
+          if (isDeleted)
+            return;
+
+          if (rec_date.Ok() && !DateRange.Contains(rec_date))
+            return;
+        }
+
+        iresult.SetMdtIndex(w);
+
+        if (Relation != ZRelNE)
+        {
+          IRESULT::hit_type fc = FieldCache->FcInField(gp, fp);
+          iresult.SetHitTable(fc);
+        }
+
+        pirset->FastAddEntry(iresult);
+      });
+
+  if (fp)
+    ffclose(fp);
+
+  if (!found || matches == 0)
+  {
+    if (Relation == ZRelNE)
+    {
+      if (ClippingThreshold > 0 ||
+          Parent->GetTotalRecords() <= TooManyRecordsThreshold)
+      {
+        pirset->Not(FieldName);
+      }
+      else
+      {
+        Parent->SetErrorCode(12);
+      }
+    }
+
+    return pirset;
+  }
+
+  pirset->MergeEntries(true);
+
+  if (Relation == ZRelNE)
+    pirset->Not(FieldName);
+
+  return pirset;
+}
+
+

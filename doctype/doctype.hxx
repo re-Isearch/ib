@@ -59,6 +59,7 @@ public:
 
   virtual NUMERICOBJ ParsePhonhash(const STRING& Buffer) const;
   virtual NUMERICOBJ ParseNumeric(const STRING& Buffer) const;
+  virtual INTEGEROBJ ParseInteger(const STRING& Buffer) const { return Buffer; }
   virtual bool ParseRange(const STRING& Buffer, const STRING& FieldName,
 	DOUBLE* fStart, DOUBLE* fEnd) const;
 

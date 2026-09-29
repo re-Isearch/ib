@@ -22,6 +22,7 @@ Description:	Class INDEX
 #include "scan.hxx"
 #include "numbers.hxx"
 #include "intlist.hxx"
+#include "integerlist.hxx"
 #include "gpolylist.hxx"
 #include "bboxlist.hxx"
 #include "fuzzy.hxx"
@@ -163,6 +164,7 @@ public:
   //size_t TermFrequency(const STRING& Term, const STRING& Fieldname = NulString) const;
 
   PIRSET Search(const QUERY& SearchQuery);
+  PIRSET IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation= ZRelEQ);
   PIRSET NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET HashSearch(const STRING& Contents, const STRING& FieldName, INT4 Relation = ZRelEQ, bool useCase = true);

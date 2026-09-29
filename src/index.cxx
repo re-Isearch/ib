@@ -29,7 +29,7 @@ TODO:
 # define DEFAULT_TOO_MANY_RECORDS_THRESHOLD  10000
 #endif
 
-
+#define HAVE_INTEGER 1
 
 extern int _ib_defaultMaxCPU_ticks;
 extern int _ib_defaultMaxQueryCPU_ticks;
@@ -1343,6 +1343,11 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	case FIELDTYPE::boolean:
 	  fp = NUMERICLIST().OpenForAppend(FileName);
 	  break;
+#if HAVE_INTEGER
+	case FIELDTYPE::integer:
+	  fp = INTEGERLIST().OpenForAppend(FileName);
+	  break;
+#endif
 	case FIELDTYPE::db_hnsw:
 #ifdef VECTOR_INDEX
 	case FIELDTYPE::db_hnsw2:
@@ -1792,6 +1797,26 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
                 } 
 	      break;
 	    }
+#if HAVE_INTEGER
+	   case FIELDTYPE::integer:
+	    {
+	      STRING           sValue ( Buffer.c_ustr() );
+              const INTEGEROBJ val (  DocTypePtr->ParseInteger(sValue) );
+              if (val.Ok())
+                {
+                  INTEGERFLD(gp, val).Write(fp);
+                  items++;
+                }
+              else message_log (LOG_WARN,
+#ifdef _WIN32
+                        "In '%s' \"%s\" not integer (%I64d) // %ld",
+#else
+                        "In '%s' \"%s\" not integer (%lld) // %ld",
+#endif
+                        FieldName.c_str(), sValue.Trim().c_str(), (long long)gp, (long)val);
+	      break;
+	    }
+#endif
 	    case FIELDTYPE::dotnumber:
             case FIELDTYPE::numerical:
             {
@@ -4262,6 +4287,18 @@ PIRSET INDEX::Search (const QUERY& Query)
                     Structure=ZStructDateRange;
                   NewIrset=DoDateSearch(Term,FieldName,Relation,Structure);
                 }
+#if HAVE_INTEGER
+              else if (FieldType.IsInteger() || aFieldType.IsInteger())
+                {
+		  // INTEGER -> INTEGEROBJ -> INT16 -> INTEGERLIST
+                  if (gotRelation==false) Relation=ZRelEQ;
+		  INTEGEROBJ value(Term);
+		  if (value.Ok())
+		    NewIrset = IntegerSearch((INT16)value, FieldName, Relation);
+		  else
+		    NewIrset = new IRSET(Parent);
+                }
+#endif
               else if (FieldType.IsNumerical() || FieldType.IsComputed() ||
                        ((aFieldType.IsNumerical() || aFieldType.IsComputed()) && gotRelation && Term.IsNumber()))
                 {
