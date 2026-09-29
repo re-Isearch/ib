@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <vector>
+#include <utility>
 
 #include "defs.hxx"
 #include "string.hxx"
@@ -290,35 +291,6 @@ public:
   }
 
 
-  bool WriteIndex(const STRING& FileName)
-  {
-    //
-    // Preserve the GP stream before value sorting. Normally it is
-    // already monotonically increasing.
-    //
-    std::vector<field_type> gp_table(table);
-
-    if (!std::is_sorted(gp_table.begin(), gp_table.end(),
-          [](const field_type& a, const field_type& b)
-          {
-            return Traits::GlobalStart(a) <
-                   Traits::GlobalStart(b);
-          }))
-      {
-        std::sort(gp_table.begin(), gp_table.end(),
-          [](const field_type& a, const field_type& b)
-          {
-            return Traits::GlobalStart(a) <
-                   Traits::GlobalStart(b);
-          });
-      }
-
-    Sort();
-
-    return Traits::WriteIndex(FileName, table, gp_table);
-  }
-
-
   template <class Visitor>
   bool VisitMatches(const STRING& FileName, value_type Key, ZRelation_t Relation, Visitor&& visitor)
   {
@@ -334,6 +306,42 @@ public:
       visitor(Traits::GlobalStart(table[i]));
 
     return true;
+  }
+
+  FILE *OpenForAppend(const STRING& FileName)
+  {
+    return Traits::OpenForAppend(FileName);
+  }
+
+
+  bool WriteIndex(const STRING& FileName)
+  {
+    std::vector<field_type> gp_table;
+
+    if (!Traits::LoadRawBlock(FileName, &gp_table))
+      return false;
+
+    //
+    // GP order is expected to be monotonic. Sort only as recovery.
+    //
+    if (!std::is_sorted(gp_table.begin(), gp_table.end(),
+        [](const field_type& a, const field_type& b)
+        {
+          return Traits::GlobalStart(a) <
+                 Traits::GlobalStart(b);
+        }))
+    {
+      std::sort(gp_table.begin(), gp_table.end(), [](const field_type& a, const field_type& b)
+      {
+        return Traits::GlobalStart(a) <
+               Traits::GlobalStart(b);
+      });
+    }
+
+    table = gp_table;
+    Sort();
+
+    return Traits::WriteIndex(FileName, table, gp_table);
   }
 
 private:

@@ -36,6 +36,9 @@ struct INTEGER_INDEX_TRAITS
     return field.GetGlobalStart();
   }
 
+
+  static FILE *OpenForAppend(const STRING&);
+  static bool LoadRawBlock( const STRING&, std::vector<field_type>*);
   static bool LoadValueBlock( const STRING&, std::vector<field_type>*);
 
   static bool WriteIndex( const STRING&,

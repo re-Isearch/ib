@@ -760,6 +760,7 @@ add_library(ibSearch
     ${SRC_DIR}/numsearch.cxx    ${SRC_DIR}/datesearch.cxx
     ${SRC_DIR}/dsearch.cxx      ${SRC_DIR}/geosearch.cxx
     ${SRC_DIR}/nlist.cxx        ${SRC_DIR}/dlist.cxx
+    ${SRC_DIR}/integerlist.cxx
     ${SRC_DIR}/nfldmgr.cxx      ${SRC_DIR}/intlist.cxx
     ${SRC_DIR}/intfield.cxx     ${SRC_DIR}/gpolylist.cxx
     ${SRC_DIR}/gpolyfield.cxx   ${SRC_DIR}/bboxfield.cxx
