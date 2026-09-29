@@ -2812,6 +2812,8 @@ memory_allocation: // This is where we try to get memory
   if (MemoryData)  { delete[]MemoryData; MemoryData = NULL; }
   if (MemoryIndex) { delete[]MemoryIndex; MemoryIndex = NULL; }
 
+  CloseActiveFieldStreams(); // Added
+
   if (DebugMode) message_log (LOG_INFO, "Sort numeric field data...");
   SortNumericFieldData();
 
@@ -2856,7 +2858,7 @@ memory_allocation: // This is where we try to get memory
         }
     }
 
-  FlushActiveFieldStreams();
+  // FlushActiveFieldStreams();
 
   ActiveIndexing = false;
   return Error? false : true;
