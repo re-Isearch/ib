@@ -96,10 +96,9 @@ void INDEX::SortNumericFieldData()
 
     message_log (LOG_INFO, "Creating %s [%s]", DfdRecord.GetFieldName().c_str(), FieldType.c_str());
 
-//  bool    IsNumeric() const { return Type == numerical || Type == computed || Type == currency || Type == dotnumber; }
-//  bool    IsNumerical() const{ return Type == numerical || Type == ttl; }
-
-    if (FieldType.IsNumerical() || FieldType.Equals(FIELDTYPE::boolean) ||
+    if (FieldType.IsInteger()) {
+      INTEGERLIST().WriteIndex(Fn);
+    } else if (FieldType.IsNumerical() || FieldType.Equals(FIELDTYPE::boolean) ||
 		FieldType.IsComputed() || FieldType.IsPhonetic() ||
 		FieldType.IsHash() || FieldType.IsCaseHash() || FieldType.IsPrivHash() ||
 		FieldType.IsCurrency() || FieldType.IsLexiHash() || FieldType.IsSMILES() ) {

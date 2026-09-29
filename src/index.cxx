@@ -7670,6 +7670,11 @@ INDEX::~INDEX ()
 
   CloseActiveFieldStreams();
 
+  if (DebugMode) message_log(LOG_INFO, "Sort numeric field data...");
+
+  SortNumericFieldData();
+
+
   message_log (LOG_DEBUG, "Disposed of INDEX instance of '%s'", IndexFileName.c_str());
 }
 
