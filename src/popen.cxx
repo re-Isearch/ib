@@ -14,7 +14,6 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 
 #include "platform.h"
 
-
 #if defined(_MSDOS) || defined(_WIN32)
 #include <stdlib.h>
 #include <stdio.h>
@@ -149,6 +148,10 @@ FILE *_IB_popen(const char *Command, const char *type)
 
   while (isspace(*Command) || *Command == ';') Command++;
 
+# if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wvla-cxx-extension"
+# endif
 #ifdef NO_ALLOCA
   char       cmd[4098];
 #else
@@ -161,6 +164,7 @@ FILE *_IB_popen(const char *Command, const char *type)
 #endif 
    memcpy(cmd, Command, len);
 #endif
+
 
   char *tcp = (char *)cmd;
   int   quote = 0;

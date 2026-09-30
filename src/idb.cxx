@@ -3006,6 +3006,25 @@ bool IDB::DfdtGetFileName (const STRING& FieldName, const FIELDTYPE& FieldType,
   else
     name = FieldName;
 
+
+#if 1
+{
+   STRING p;
+   const bool cached = FileNames.GetValue(name, &p);
+   int filenumber = MainDfdt->GetFileNumber (FieldName);
+   const STRING expected = ComposeDbFn(filenumber) + typ;
+   if (cached && p != expected) {
+cerr << "Field    = " << FieldName << endl;
+cerr << "Type     = " << FieldType << endl;
+cerr << "Key      = " << name << endl;
+cerr << "P        = " << p << endl;
+cerr << "Expected = " << expected << endl;
+   }
+
+}
+
+#endif
+
   if (FileNames.GetValue(name, &path) == 0)
     {
       // Look up..

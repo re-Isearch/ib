@@ -314,6 +314,12 @@ STRING::STRING(const long double LongDoubleValue)
   *this = LongDoubleValue;
 }
 
+STRING::STRING(const INT16 Value)
+{
+  Init();
+  *this = Value;
+}
+
 
 // takes nLength elements of psz starting at nPos
 void STRING::InitWith(const char *psz, size_t nPos, size_t nLength)
@@ -1836,10 +1842,20 @@ STRING& STRING::operator+=(int val)
 
 STRING& STRING::operator+=(long val)
 {
-  if (IsNumber())
-    *this = GetDouble() + val;
+  if (IsIntegralNumber())
+    {
+      const INT16 x = GetInteger() + val;
+      *this = x;
+    }
+  else if (IsNumber())
+    {
+      *this = GetDouble() + val;
+    }
   else
-    *this += STRING(val);
+    {
+      *this += STRING(val);
+    }
+
   return *this;
 }
 
@@ -2350,6 +2366,35 @@ bool STRING::IsHexadecimal(size_t length) const
   return len >= 2 && (len % 2) == 0;
 }
 #endif
+
+
+bool STRING::IsInteger() const
+{
+  return GetInteger(NULL);
+}
+
+
+bool STRING::IsIntegralNumber() const
+{
+  const unsigned char *s = (const unsigned char *)c_str();
+
+  while (*s && isspace(*s))
+    ++s;
+
+  if (*s == '+' || *s == '-')
+    ++s;
+
+  if (!_ib_isdigit(*s))
+    return false;
+
+  while (_ib_isdigit(*s))
+    ++s;
+
+  while (*s && isspace(*s))
+    ++s;
+
+  return *s == '\0';
+}
 
 
 bool STRING::IsNumber() const
@@ -4433,4 +4478,76 @@ bool STRING::IsContiguousBlob() const {
     }
 
     return true;
+}
+
+
+bool STRING::GetInteger(PINT16 value) const
+{
+  INTEGEROBJ integer(*this);
+
+  if (!integer.Ok())
+    return false;
+
+  if (value)
+    *value = (INT16)integer;
+
+  return true;
+}
+
+
+INT16 STRING::GetInteger() const
+{
+  INT16 value = 0;
+
+  GetInteger(&value);
+
+  return value;
+}
+
+STRING& STRING::operator=(const INT16 value)
+{
+  //
+  // INT128 decimal:
+  //
+  //   max =  170141183460469231731687303715884105727
+  //   min = -170141183460469231731687303715884105728
+  //
+  // 39 digits + sign + '\0'.
+  //
+  char buf[41];
+  char *end = buf + sizeof(buf);
+  char *p   = end;
+
+  UINT16 magnitude;
+
+  if (value < 0)
+    {
+      //
+      // Obtain the magnitude in unsigned arithmetic so INT128_MIN
+      // is handled without signed overflow.
+      //
+      const UINT16 bits = (UINT16)value;
+      magnitude = (~bits) + 1;
+    }
+  else
+    magnitude = (UINT16)value;
+
+  if (magnitude == 0)
+    *--p = '0';
+  else
+    {
+      while (magnitude)
+        {
+          const unsigned digit =
+              (unsigned)(magnitude % 10);
+
+          *--p = (char)('0' + digit);
+          magnitude /= 10;
+        }
+    }
+
+  if (value < 0)
+    *--p = '-';
+
+  return Assign(p, static_cast<unsigned>(end - p));
 }

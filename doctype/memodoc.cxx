@@ -86,6 +86,9 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
       if (autoFieldTypes && Contents.GetLength() < 512)
 	{
 	  if (Contents.IsGeoBoundedBox())      ft = FIELDTYPE::box;
+#ifdef VECTOR_INDEX
+          else if (is_encoded_embedding(Contents)) ft = FIELDTYPE::db_hnsw;
+#endif
 	  else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
 	  else if (Contents.IsNumberRange())   ft = FIELDTYPE::numericalrange;
 	  else if (Contents.IsIntegralNumber())

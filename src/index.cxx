@@ -231,7 +231,7 @@ static const char *_lock = ".lock";
 inline int putGPTYPE(const GPTYPE c, PFILE fp) { return Write(c, fp); }
 
 #define AWWW 1
-#define INDEX_VERSION 2 /* Supports up to version 15 */
+#define INDEX_VERSION 3 /* Supports up to version 15 */
 
 // Should we ever need to go beyond version 15 we need a new encoding!!!!
 // see how we write the 2-byte encoding magic below
@@ -1804,8 +1804,16 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
               const INTEGEROBJ val (  DocTypePtr->ParseInteger(sValue) );
               if (val.Ok())
                 {
-                  INTEGERFLD(gp, val).Write(fp);
-                  items++;
+                  if (INTEGERFLD(gp, val).Write(fp))
+		    {
+		      items++;
+		    }
+		  else
+		    {
+		      message_log(LOG_ERROR | LOG_ERRNO,
+			"Failed writing INTEGER field '%s' at GP %lld", FieldName.c_str(), (long long)gp);
+		      errors++;
+		    }
                 }
               else message_log (LOG_WARN,
 #ifdef _WIN32

@@ -133,15 +133,50 @@ bool INTEGER_INDEX_TRAITS::LoadRawBlock(
     return false;
   }
 
-  const off_t bytes =
-      file_size - (off_t)INTEGER_HEADER_SIZE;
+  const off_t bytes = file_size - (off_t)INTEGER_HEADER_SIZE;
 
-  const size_t count =
-      (size_t)(bytes / INTEGERFLD::DISK_SIZE);
+  const size_t count = (size_t)(bytes / INTEGERFLD::DISK_SIZE);
 
-  const size_t remainder =
-      (size_t)(bytes % INTEGERFLD::DISK_SIZE);
+  const size_t remainder = (size_t)(bytes % INTEGERFLD::DISK_SIZE);
 
+
+#if 0 /* DEBUG */
+
+if (remainder != 0)
+{
+  const off_t tail =
+      (off_t)INTEGER_HEADER_SIZE +
+      (off_t)(count * INTEGERFLD::DISK_SIZE);
+
+  std::array<BYTE, INTEGER_HEADER_SIZE> extra {};
+
+  if (remainder == INTEGER_HEADER_SIZE &&
+      fseek(fp, tail, SEEK_SET) == 0 &&
+      fread(extra.data(), 1, extra.size(), fp) == extra.size())
+  {
+    message_log(LOG_WARN,
+        "INTEGER tail: "
+        "%02x %02x %02x %02x "
+        "%02x %02x %02x %02x "
+        "%02x %02x %02x %02x "
+        "%02x %02x %02x %02x",
+        extra[0], extra[1], extra[2], extra[3],
+        extra[4], extra[5], extra[6], extra[7],
+        extra[8], extra[9], extra[10], extra[11],
+        extra[12], extra[13], extra[14], extra[15]);
+  }
+
+  message_log(LOG_WARN,
+      "INTEGER raw index '%s': size=%lld, records=%lu, "
+      "record_size=%lu, trailing=%lu",
+      FileName.c_str(),
+      (long long)file_size,
+      (unsigned long)count,
+      (unsigned long)INTEGERFLD::DISK_SIZE,
+      (unsigned long)remainder);
+}
+
+#else
   if (remainder != 0)
   {
     message_log(LOG_WARN,
@@ -149,6 +184,7 @@ bool INTEGER_INDEX_TRAITS::LoadRawBlock(
                 FileName.c_str(),
                 (unsigned long)remainder);
   }
+#endif
 
   result->reserve(count);
 

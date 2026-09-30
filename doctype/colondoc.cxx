@@ -84,23 +84,25 @@ FIELDTYPE METADOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	  else if (is_encoded_embedding(Contents)) ft = FIELDTYPE::db_hnsw;
 #endif
           else if (Contents.IsNumberRange())   ft = FIELDTYPE::numericalrange;
-          else if (Contents.IsDate())          ft = FIELDTYPE::date;
-          else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
-	  else if (Contents.IsNumber()) 
+	  else if (Contents.IsDateRange())      ft = FIELDTYPE::daterange;
+	  else if (Contents.IsIntegralNumber())
 	    {
-	      // CCYYMMDD
-	      if (Contents.GetLong() > 19000101)
-		{
-		  // Number can also be date?
-		  SRCH_DATE date (Contents);
-		  if (date.Ok() && date.IsDayDate())
-		    ft = FIELDTYPE::date;
-		  else
-		    ft = FIELDTYPE::numerical;
-		}
-	      else
-		ft = FIELDTYPE::numerical;
-            }
+	        INT16 val;
+
+	        if (Contents.GetInteger(&val))
+	          {
+	            const bool compactDateCandidate = Contents.GetLength() == 8 && val >= 19000101 && val <= 20501231;
+	            if (compactDateCandidate)
+	              {
+	                SRCH_DATE date(Contents);
+
+	                ft = (date.Ok() && date.IsDayDate()) ? FIELDTYPE::date : FIELDTYPE::integer;
+		      }
+		    else ft = FIELDTYPE::integer;
+		  }
+	    }
+	  else if (Contents.IsNumber()) ft = FIELDTYPE::numerical;
+	  else if (Contents.IsDate()) ft = FIELDTYPE::date;
 	  // else if (Contents.IsDate())          ft = FIELDTYPE::date;
 	  // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
 	  // else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
@@ -109,12 +111,12 @@ FIELDTYPE METADOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	  else ft = FIELDTYPE::text;
 	  message_log (LOG_INFO, "%s: Field '%s' autotyped as '%s'", Doctype.c_str(), FieldName.c_str(), ft.c_str());
 	}
-#ifdef VECTOR_INDEX
-     else if (fLen >= 1024 && is_encoded_embedding(Contents)) {
-        ft = FIELDTYPE::db_hnsw;
-        message_log (LOG_INFO, "%s: Field '%s' autotyped as '%s'", Doctype.c_str(), FieldName.c_str(), ft.c_str());
-     }
-#endif
+//#ifdef VECTOR_INDEX
+//     else if (fLen >= 1024 && is_encoded_embedding(Contents)) {
+//        ft = FIELDTYPE::db_hnsw;
+//        message_log (LOG_INFO, "%s: Field '%s' autotyped as '%s'", Doctype.c_str(), FieldName.c_str(), ft.c_str());
+//     }
+//#endif
       else ft = FIELDTYPE::text;
       Db->AddFieldType(FieldName, ft);
       return ft;

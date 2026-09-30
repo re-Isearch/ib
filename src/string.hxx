@@ -147,6 +147,7 @@ public:
   STRING(const float FloatValue);
   STRING(const double DoubleValue);
   STRING(const long double LongDoubleValue);
+  STRING(const INT16 Value);
  ~STRING();
   //@}
 
@@ -157,6 +158,8 @@ public:
   //@{
   // Explicit..
   bool GetBool() const;
+  INT16  GetInteger() const;
+  bool   GetInteger(PINT16 value) const;
   short  GetShort(int base=0) const  { return (short)GetLong(base); }
   int    GetInt(int base=0) const    { return (int)GetLong(base);   }
   long   GetLong(int base=0) const   { return strtol(m_pchData, NULL, base); }
@@ -208,6 +211,9 @@ public:
   bool IsAscii() const;
     /// Is Plain Word (no numbers, spaces or ..)
   bool IsPlainWord() const;
+    /// Is an integer
+  bool IsInteger() const;
+  bool IsIntegralNumber() const; // lexically an integer; no decimal fraction
     /// Is a number
   bool IsNumber() const;
     /// Is a dot number (xxx.xxx.xxx)
@@ -368,6 +374,8 @@ public:
   STRING& operator=(const INT4 *IntVector);
     ///
   STRING& operator=(const INT2 *IntVector);
+   ///
+  STRING& operator=(const INT16 Value); 
   //@}
 
   STRING& Cat(const STRING&);
