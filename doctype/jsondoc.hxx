@@ -71,6 +71,8 @@ public:
   GPTYPE ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
 	GPTYPE DataOffset, GPTYPE* GpBuffer, GPTYPE GpLength);
 
+  MONETARYOBJ ParseCurrency(const STRING& FieldName, const STRING& Buffer) const;
+
   INT GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length);
   INT ReadFile(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Length) const;
   INT ReadFile(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) const;

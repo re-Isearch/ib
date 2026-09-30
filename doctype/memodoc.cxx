@@ -88,17 +88,30 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	  if (Contents.IsGeoBoundedBox())      ft = FIELDTYPE::box;
 	  else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
 	  else if (Contents.IsNumberRange())   ft = FIELDTYPE::numericalrange;
+	  else if (Contents.IsIntegralNumber())
+	    {
+	      INT16 val;
+
+	      if (Contents.GetInteger(&val))
+	        {
+		  const bool compactDateCandidate = Contents.GetLength() == 8 &&
+			val >= 19000101 && val <= 20501231;
+	          if (compactDateCandidate)
+	            {
+	              //
+	              // Could be CCYYMMDD.  Only call it a date if the
+	              // date parser agrees that it is an actual day date.
+	              //
+	              SRCH_DATE date(Contents);
+
+	              ft = (date.Ok() && date.IsDayDate()) ? FIELDTYPE::date : FIELDTYPE::integer;
+		    }
+		  else ft = FIELDTYPE::integer;
+		}
+	    }
 	  else if (Contents.IsNumber())
 	    {
-	      // Number can also be date?
-	      // CCYYMMDD
-	      if (Contents.GetLong() > 19000101)
-		{
-cerr << "CHECKING IF REALLAY A DATE" << endl;
-	          SRCH_DATE date (Contents);
-	          ft = (date.Ok() && date.IsDayDate()) ? FIELDTYPE::date : FIELDTYPE::numerical;
-		}
-	      else ft = FIELDTYPE::numerical;
+	      ft = FIELDTYPE::numerical;
 	    }
           else if (Contents.IsDate())          ft = FIELDTYPE::date;
          // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;

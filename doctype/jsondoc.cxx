@@ -25,6 +25,13 @@ COLONDOC does for the text following a colon tag.
 #include "doc_conf.hxx"
 
 
+
+extern "C" {
+extern long double (*_IB_parse_computed)(const char *doctype, const char *fieldname, const char *buffer, size_t len);
+extern long double (*_IB_parse_currency)(const char *doctype, const char *fieldname, const char *buffer, size_t len);
+}
+
+
 // ---------------------------------------------------------------------------
 // Detector (Determine the flavour of JSON, e.g. which Doctype to use)
 // --------------------------------------------------------------------------
@@ -1813,3 +1820,17 @@ INT JSONDOC::GetRecordData(FILE *Fp, STRING *StringPtr, off_t Offset, size_t Len
 }
 */
 
+
+
+MONETARYOBJ JSONDOC::ParseCurrency(const STRING& FieldName, const STRING& Buffer) const
+{
+  STRING money = Buffer.c_str();
+  const GPTYPE n = money.Length();
+  char *buf = money.stealData();
+  ResolveJSONUnicodeEscapes((unsigned char *)buf, n, ' ');
+  Entities.normalize(buf, n);
+
+  if (_IB_parse_currency)
+    return _IB_parse_currency(Doctype, FieldName, buf, n);
+  return MONETARYOBJ(buf);
+}
