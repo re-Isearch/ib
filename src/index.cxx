@@ -4304,9 +4304,21 @@ PIRSET INDEX::Search (const QUERY& Query)
                   if (gotRelation==false) Relation=ZRelEQ;
 		  INTEGEROBJ value(Term);
 		  if (value.Ok())
-		    NewIrset = IntegerSearch((INT16)value, FieldName, Relation);
+		    {
+		      NewIrset = IntegerSearch((INT16)value, FieldName, Relation);
+		    }
 		  else
-		    NewIrset = new IRSET(Parent);
+		    {
+		      // Lexical fall back ..
+		      if (Relation == ZRelLT || Relation == ZRelLE)
+			NewIrset = GlobSearch("*" + Term, FieldName);
+		      else if (Relation == ZRelGT || Relation == ZRelGE)
+			NewIrset = GlobSearch(Term + "*", FieldName);
+		      else if (Term.IsWild())
+			NewIrset = GlobSearch(Term, FieldName);
+		      else
+		        NewIrset = TermSearch(Term, FieldName, Exact);
+		    }
                 }
 #endif
               else if (FieldType.IsNumerical() || FieldType.IsComputed() ||
