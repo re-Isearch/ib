@@ -842,12 +842,6 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
 
   INTEGERLIST List;
 
-  //
-  // != remains "find equality then complement", exactly as NumericSearch.
-  //
-  const ZRelation_t searchRelation =
-      Relation == ZRelNE ? ZRelEQ : (ZRelation_t)Relation;
-
   IRESULT iresult;
   iresult.SetVirtualIndex((UCHR)Parent->GetVolume(NULL));
   iresult.SetMdt(Parent->GetMainMdt());
@@ -857,40 +851,66 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
 
   FILE *fp = TextFn.GetLength() ? ffopen(TextFn, "rb") : NULL;
 
-  size_t old_w = 0;
+  PMDT mdt = Parent->GetMainMdt();
+
+  size_t current_w = 0;
+  FC current_record;
+
   bool isDeleted = false;
   SRCH_DATE rec_date;
 
   size_t matches = 0;
 
-  const bool found = List.VisitMatches(Fn, Key, searchRelation, [&](GPTYPE gp)
+  const bool found = List.VisitMappedMatches(
+      Fn,
+      Key,
+      (ZRelation_t)Relation,
+      IntegerColumnMaps,
+      [&](GPTYPE gp)
       {
         ++matches;
 
-        const size_t w = Parent->GetMainMdt()->LookupByGp(gp);
-        if (w == 0)
-          return;
-
         //
-        // Preserve NumericSearch's date filtering behavior.
+        // VisitMappedMatches() emits every supported relation in GP order:
+        // equality is GP ordered within the equal-value slice, inequalities
+        // sort their selected GPs, and != walks the GP-sorted block directly.
         //
-        if (DateRange.Defined() && Relation != ZRelNE)
+        // Reuse the current MDT span while the next hit remains in it.
+        //
+        if (current_w == 0 || !current_record.Contains(gp))
         {
-          if (w != old_w)
+          FC record;
+          const size_t w = mdt->LookupByGp(gp, &record);
+
+          if (w == 0)
+          {
+            current_w = 0;
+            current_record = FC();
+            return;
+          }
+
+          current_w      = w;
+          current_record = record;
+
+          if (DateRange.Defined())
           {
             MDTREC mdtrec;
 
-            if (Parent->GetMainMdt()->GetEntry(w, &mdtrec))
+            if (mdt->GetEntry(current_w, &mdtrec))
             {
               rec_date  = mdtrec.GetDate();
               isDeleted = mdtrec.GetDeleted();
             }
             else
+            {
+              rec_date.Clear();
               isDeleted = true;
-
-            old_w = w;
+            }
           }
+        }
 
+        if (DateRange.Defined())
+        {
           if (isDeleted)
             return;
 
@@ -898,9 +918,14 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
             return;
         }
 
-        iresult.SetMdtIndex(w);
+        iresult.SetMdtIndex(current_w);
+        iresult.ClearHitTable();
 
-        if (Relation != ZRelNE)
+        //
+        // != is a real field predicate, not a complement operation, so its
+        // qualifying occurrences carry field coordinates like the others.
+        //
+        if (fp)
         {
           IRESULT::hit_type fc = FieldCache->FcInField(gp, fp);
           iresult.SetHitTable(fc);
@@ -913,27 +938,14 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
     ffclose(fp);
 
   if (!found || matches == 0)
-  {
-    if (Relation == ZRelNE)
-    {
-      if (ClippingThreshold > 0 ||
-          Parent->GetTotalRecords() <= TooManyRecordsThreshold)
-      {
-        pirset->Not(FieldName);
-      }
-      else
-      {
-        Parent->SetErrorCode(12);
-      }
-    }
-
     return pirset;
-  }
 
+  //
+  // Hits arrive in record order and FastAddEntry() already merges adjacent
+  // occurrences from the same record.  Keep the final merge for now as a
+  // conservative invariant check; it can be benchmarked away later.
+  //
   pirset->MergeEntries(true);
-
-  if (Relation == ZRelNE)
-    pirset->Not(FieldName);
 
   return pirset;
 }
