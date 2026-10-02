@@ -434,6 +434,11 @@ private:
   FCACHE              *FieldCache;
   FCACHE              *PeerFieldCache;
 
+  // Persistent query-side INTEGER column mappings.  Keep this pool
+  // separate from FCACHE's pool because MultiMMapSession returns raw,
+  // unpinned pointers and another FCACHE mapping could evict them.
+  MultiMMapSession      IntegerColumnMaps;
+
   volatile Dictionary  *NumFieldCache;
 
   MMAP_TABLE *MemorySISCache; // The SIS cache
