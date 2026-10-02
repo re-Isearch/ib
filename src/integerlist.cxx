@@ -1,6 +1,7 @@
 // integerlist.cxx
 
 #include <array>
+#include <limits>
 
 #include "common.hxx"
 #include "integerlist.hxx"
@@ -27,6 +28,25 @@ struct INTEGER_HEADER
 };
 
 
+bool ParseHeader(const BYTE *buf, size_t bytes, INTEGER_HEADER *header)
+{
+  if (buf == NULL || header == NULL || bytes < INTEGER_HEADER_SIZE)
+    return false;
+
+  if (buf[0] != (BYTE)objINTEGERLIST)
+    return false;
+
+  header->version     = buf[1];
+  header->layout      = buf[2];
+  header->flags       = buf[3];
+  header->record_size = getINT4(buf, 4);
+  header->count       = getINT8(buf, 8);
+
+  return header->version == INTEGER_VERSION &&
+         header->record_size == INTEGERFLD::DISK_SIZE;
+}
+
+
 bool ReadHeader(FILE *fp, INTEGER_HEADER *header)
 {
   if (fp == NULL || header == NULL)
@@ -40,17 +60,7 @@ bool ReadHeader(FILE *fp, INTEGER_HEADER *header)
   if (fread(buf.data(), 1, buf.size(), fp) != buf.size())
     return false;
 
-  if (buf[0] != (BYTE)objINTEGERLIST)
-    return false;
-
-  header->version     = buf[1];
-  header->layout      = buf[2];
-  header->flags       = buf[3];
-  header->record_size = getINT4(buf.data(), 4);
-  header->count       = getINT8(buf.data(), 8);
-
-  return header->version == INTEGER_VERSION &&
-         header->record_size == INTEGERFLD::DISK_SIZE;
+  return ParseHeader(buf.data(), buf.size(), header);
 }
 
 
@@ -278,6 +288,78 @@ bool INTEGER_INDEX_TRAITS::LoadValueBlock(
   return true;
 }
 
+
+
+bool INTEGER_INDEX_TRAITS::MapIndexed(
+    const STRING& FileName,
+    MultiMMapSession& Sessions,
+    mapped_type *view)
+{
+  if (view == NULL)
+    return false;
+
+  *view = mapped_type{};
+
+  //
+  // Deliberately MapNormal.  Query selectivity is unknown here: equality
+  // touches only a few pages, while inequalities may consume a substantial
+  // contiguous slice.  Let the VM use its normal heuristics.
+  //
+  const unsigned char *base =
+      Sessions.GetMemoryBase(FileName, MapNormal);
+
+  if (base == NULL)
+    return false;
+
+  const size_t bytes = Sessions.Size(FileName);
+
+  INTEGER_HEADER header;
+
+  if (!ParseHeader(base, bytes, &header) ||
+      header.layout != INTEGER_LAYOUT_INDEXED)
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t count = static_cast<size_t>(header.count);
+
+  if (static_cast<UINT8>(count) != header.count)
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t max_size = std::numeric_limits<size_t>::max();
+
+  if (count >
+      (max_size - INTEGER_HEADER_SIZE) /
+      (2 * INTEGERFLD::DISK_SIZE))
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t block_bytes = count * INTEGERFLD::DISK_SIZE;
+  const size_t expected =
+      INTEGER_HEADER_SIZE + 2 * block_bytes;
+
+  if (bytes < expected)
+    {
+      message_log(LOG_ERROR,
+                  "Truncated INTEGER index '%s'",
+                  FileName.c_str());
+
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  view->value_block = base + INTEGER_HEADER_SIZE;
+  view->gp_block    = view->value_block + block_bytes;
+  view->count       = count;
+
+  return true;
+}
 
 
 bool INTEGER_INDEX_TRAITS::WriteIndex(
