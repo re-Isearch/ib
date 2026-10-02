@@ -28,6 +28,30 @@ public:
   void SetGlobalStart(GPTYPE gp) { GlobalStart = gp; }
   void SetValue(INT16 value)     { Value = value; }
 
+  static GPTYPE DecodeGlobalStart(const BYTE *p)
+  {
+    return getGPTYPE(p, 0);
+  }
+
+  static INT16 DecodeValue(const BYTE *p)
+  {
+    const UINT8 hi = getINT8(p, sizeof(GPTYPE));
+    const UINT8 lo = getINT8(p, sizeof(GPTYPE) + 8);
+
+    const UINT16 bits = cons_UINT16(hi, lo);
+    const UINT16 sign = ((UINT16)1 << 127);
+
+    if ((bits & sign) == 0)
+      return (INT16)bits;
+
+    const UINT16 magnitude = (~bits) + 1;
+
+    if (magnitude == sign)
+      return -((INT16)(sign - 1)) - 1;
+
+    return -(INT16)magnitude;
+  }
+
   bool Write(FILE *fp) const
   {
     if (fp == NULL)
@@ -56,28 +80,8 @@ public:
     if (fread(buf.data(), 1, buf.size(), fp) != buf.size())
       return false;
 
-    GlobalStart = getGPTYPE(buf.data(), 0);
-
-    const UINT8 hi = getINT8(buf.data(), sizeof(GPTYPE));
-
-    const UINT8 lo = getINT8(buf.data(), sizeof(GPTYPE) + 8);
-
-    const UINT16 bits = cons_UINT16(hi, lo);
-    const UINT16 sign = ((UINT16)1 << 127);
-
-    if ((bits & sign) == 0)
-    {
-      Value = (INT16)bits;
-    }
-    else
-    {
-      const UINT16 magnitude = (~bits) + 1;
-
-      if (magnitude == sign)
-        Value = -((INT16)(sign - 1)) - 1;
-      else
-        Value = -(INT16)magnitude;
-    }
+    GlobalStart = DecodeGlobalStart(buf.data());
+    Value       = DecodeValue(buf.data());
 
     return true;
   }
