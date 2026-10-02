@@ -1345,6 +1345,9 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	  break;
 #if HAVE_INTEGER
 	case FIELDTYPE::integer:
+	  // OpenForAppend may rewrite an optimized INTEGER sidecar back to
+	  // RAW form, so any cached mapping must be dropped first.
+	  IntegerColumnMaps.Invalidate(FileName);
 	  fp = INTEGERLIST().OpenForAppend(FileName);
 	  break;
 #endif
