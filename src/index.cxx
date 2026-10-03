@@ -1807,16 +1807,29 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
               const INTEGEROBJ val (  DocTypePtr->ParseInteger(sValue) );
               if (val.Ok())
                 {
-                  if (INTEGERFLD(gp, val).Write(fp))
-		    {
-		      items++;
-		    }
-		  else
-		    {
-		      message_log(LOG_ERROR | LOG_ERRNO,
-			"Failed writing INTEGER field '%s' at GP %lld", FieldName.c_str(), (long long)gp);
-		      errors++;
-		    }
+                  const FC integerFc(gp, gp + flen - 1);
+                  const INTEGERFLD field(integerFc, val);
+
+                  if (!field.HasValidSpan())
+                    {
+                      message_log(LOG_ERROR,
+                        "INTEGER field '%s' at GP %lld has span %lu; maximum stored span is %lu",
+                        FieldName.c_str(), (long long)gp,
+                        (unsigned long)integerFc.Span(),
+                        (unsigned long)INTEGERFLD::MaxSpan());
+                      errors++;
+                    }
+                  else if (field.Write(fp))
+                    {
+                      items++;
+                    }
+                  else
+                    {
+                      message_log(LOG_ERROR | LOG_ERRNO,
+                        "Failed writing INTEGER field '%s' at GP %lld",
+                        FieldName.c_str(), (long long)gp);
+                      errors++;
+                    }
                 }
               else message_log (LOG_WARN,
 #ifdef _WIN32

@@ -14,6 +14,7 @@ struct INTEGER_INDEX_TRAITS
 {
   using value_type = INT16;
   using field_type = INTEGERFLD;
+  using span_type  = field_type::span_type;
 
   struct mapped_type
   {
@@ -59,6 +60,12 @@ struct INTEGER_INDEX_TRAITS
       block + i * INTEGERFLD::DISK_SIZE);
   }
 
+  static span_type MappedSpanAt(const BYTE *block, size_t i)
+  {
+    return INTEGERFLD::DecodeSpan(
+      block + i * INTEGERFLD::DISK_SIZE);
+  }
+
   static FILE *OpenForAppend(const STRING&);
   static bool LoadRawBlock(const STRING&, std::vector<field_type>*);
   static bool LoadValueBlock(const STRING&, std::vector<field_type>*);
@@ -78,6 +85,7 @@ class INTEGERLIST : public ORDEREDLIST<INTEGER_INDEX_TRAITS>
 public:
   using base_type   = ORDEREDLIST<INTEGER_INDEX_TRAITS>;
   using value_type  = INTEGER_INDEX_TRAITS::value_type;
+  using span_type   = INTEGER_INDEX_TRAITS::span_type;
   using mapped_type = INTEGER_INDEX_TRAITS::mapped_type;
 
   using base_type::OpenForAppend;
@@ -110,8 +118,9 @@ public:
             if (!INTEGER_INDEX_TRAITS::Equal(
                   INTEGER_INDEX_TRAITS::MappedValueAt(view.gp_block, i),
                   Key))
-              visitor(INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
-                  view.gp_block, i));
+              visitor(
+                  INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.gp_block, i),
+                  INTEGER_INDEX_TRAITS::MappedSpanAt(view.gp_block, i));
           }
 
         return true;
@@ -127,8 +136,9 @@ public:
     if (Relation == ZRelEQ)
       {
         for (size_t i = lower; i < upper; ++i)
-          visitor(INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
-              view.value_block, i));
+          visitor(
+              INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
+              INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
 
         return true;
       }
@@ -165,17 +175,29 @@ public:
     if (first >= last)
       return true;
 
-    std::vector<GPTYPE> gps;
-    gps.reserve(last - first);
+    struct HITPOS
+    {
+      GPTYPE    gp;
+      span_type span;
+    };
+
+    std::vector<HITPOS> hits;
+    hits.reserve(last - first);
 
     for (size_t i = first; i < last; ++i)
-      gps.push_back(INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
-          view.value_block, i));
+      hits.push_back({
+          INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
+          INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i)
+      });
 
-    std::sort(gps.begin(), gps.end());
+    std::sort(hits.begin(), hits.end(),
+      [](const HITPOS& a, const HITPOS& b)
+      {
+        return a.gp < b.gp;
+      });
 
-    for (GPTYPE gp : gps)
-      visitor(gp);
+    for (const HITPOS& hit : hits)
+      visitor(hit.gp, hit.span);
 
     return true;
   }

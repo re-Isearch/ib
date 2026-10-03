@@ -14,7 +14,7 @@ enum : UCHR {
   INTEGER_LAYOUT_INDEXED = 1
 };
 
-static constexpr UCHR INTEGER_VERSION = 1;
+static constexpr UCHR INTEGER_VERSION = 2;
 static constexpr size_t INTEGER_HEADER_SIZE = 16;
 
 

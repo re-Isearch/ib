@@ -836,10 +836,6 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
     return pirset;
   }
 
-  STRING TextFn;
-  if (!Parent->DfdtGetFileName(FieldName, &TextFn))
-    TextFn.Clear();
-
   INTEGERLIST List;
 
   IRESULT iresult;
@@ -848,8 +844,6 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
   iresult.SetHitCount(1);
   iresult.SetAuxCount(1);
   iresult.SetScore(0);
-
-  FILE *fp = TextFn.GetLength() ? ffopen(TextFn, "rb") : NULL;
 
   PMDT mdt = Parent->GetMainMdt();
 
@@ -866,7 +860,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
       Key,
       (ZRelation_t)Relation,
       IntegerColumnMaps,
-      [&](GPTYPE gp)
+      [&](GPTYPE gp, INTEGERFLD::span_type span)
       {
         ++matches;
 
@@ -919,23 +913,10 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
         }
 
         iresult.SetMdtIndex(current_w);
-        iresult.ClearHitTable();
-
-        //
-        // != is a real field predicate, not a complement operation, so its
-        // qualifying occurrences carry field coordinates like the others.
-        //
-        if (fp)
-        {
-          IRESULT::hit_type fc = FieldCache->FcInField(gp, fp);
-          iresult.SetHitTable(fc);
-        }
+        iresult.SetHitTable(FC(gp, gp + span));
 
         pirset->FastAddEntry(iresult);
       });
-
-  if (fp)
-    ffclose(fp);
 
   if (!found || matches == 0)
     return pirset;
