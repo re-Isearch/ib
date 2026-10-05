@@ -913,7 +913,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
         }
 
         iresult.SetMdtIndex(current_w);
-        iresult.SetHitTable(FC(gp, gp + span));
+        iresult.SetHitTable(FCHIT(FC(gp, gp + span)));
 
         pirset->FastAddEntry(iresult);
       });
