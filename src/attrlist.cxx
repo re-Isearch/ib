@@ -103,6 +103,7 @@ static struct DataType {
 #endif
   {"nsg",        g, FIELDTYPE::db_nsg,    "Spread Out Graph ANNS algorithms (NSG) // NOT YET"}, 
   {"ivfflat",    f, FIELDTYPE::db_IVFFlat,"IVFFlat Vectors // NOT YET"},
+  {"image",     _V, FIELDTYPE::db_image, "Image embeddings (Contrastive Language-Image Pre-training)  // NOT YET"},
   {"special",   _s, FIELDTYPE::special,   "Special text (reserved)"},
 #define MAX_DATATYPE (int)(FIELDTYPE::special) 
   // Aliases
@@ -145,6 +146,7 @@ static struct DataType {
   {"ipv4",           n,   FIELDTYPE::dotnumber,     NULL},
   {"ipv6",           n,   FIELDTYPE::dotnumber,     NULL},
   {"flat",           f,   FIELDTYPE::db_IVFFlat,    NULL},
+  {"clip",          _V,   FIELDTYPE::db_image,      NULL},
   {"sog",            g,   FIELDTYPE::db_nsg,        NULL},
   {"hnsw1",         _V,   FIELDTYPE::db_hnsw,       NULL},
   {"vector",        _V,   FIELDTYPE::db_hnsw,       NULL},

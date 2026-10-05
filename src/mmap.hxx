@@ -92,6 +92,7 @@ public:
 
       // ======================================================================
       // HARDWARE FORCE: Explicitly Pre-Fault Every Memory Page 
+      // (We are going to be reading the whole thing at least twice)
       // ======================================================================
       if (flag == MapSequential && m_BaseAddress && fileSize > 0) {
         // Volatile prevents the compiler from optimizing out the read loop

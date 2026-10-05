@@ -25,7 +25,9 @@ class FCLIST;
 # define _TRACK_TERM_IDENTITY 1
 #endif
 
-typedef UINT8 FCSOURCE;
+using FCSOURCE = UINT8;
+
+static constexpr FCSOURCE FCSOURCE_NONE = 0;
 
 struct FcLess
 {
@@ -55,10 +57,16 @@ struct FcLess
 class FCHIT : public FC
 {
 public:
-  FCHIT() : SourceId(0) { }
 
-  FCHIT(const FC& fc, FCSOURCE sourceId = 0)
-    : FC(fc), SourceId(sourceId) { }
+
+  FCHIT() : SourceId(FCSOURCE_NONE) { }
+
+  FCHIT(const FC& fc, FCSOURCE sourceId) : FC(fc), SourceId(sourceId) { }
+
+  FCHIT(GPTYPE start, GPTYPE end, FCSOURCE sourceId) : FC(start, end), SourceId(sourceId) { }
+
+  // Coordinate-only hit: explicitly non-lexical.
+  explicit FCHIT(const FC& fc) : FC(fc), SourceId(FCSOURCE_NONE) { }
 
   FCSOURCE GetSourceId() const
   {

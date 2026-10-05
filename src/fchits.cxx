@@ -110,15 +110,17 @@ void FCHITS::Assign(const FCLIST& list)
   bool unique = true;
   const FcLess less;
 
-  for (const hit_type& fc : list)
+  for (const FC& fc : list)
     {
+      const hit_type hit(fc, FCSOURCE_NONE);
+
       if (!replacement.empty())
         {
           const hit_type& previous = replacement.back();
 
-          if (unique && previous == fc)
+          if (unique && previous == hit)
 	    unique = false;
-	  if (sorted && less(fc, previous)) {
+	  if (sorted && less(hit, previous)) {
             sorted = false;
 	    unique = false; // Can't tell
 	  }
@@ -126,7 +128,7 @@ void FCHITS::Assign(const FCLIST& list)
 
       // Preserve the FCLIST exactly. AddEntryFast() intentionally
       // suppresses adjacent duplicates and therefore is not used here.
-      replacement.push_back(fc);
+      replacement.push_back( std::move(hit) );
     }
 
   Buffer.swap(replacement);
@@ -168,10 +170,10 @@ void FCHITS::Append(const FCHITS& other)
 
 void FCHITS::Append(const FCT& other)
 {
-  Reserve(Buffer.size() + other.GetTotalEntries());
+    Reserve(Buffer.size() + other.GetTotalEntries());
 
-  for (const FC& fc : other)
-    AddEntryFast(fc);
+    for (const FC& fc : other)
+        AddEntryFast(hit_type(fc, FCSOURCE_NONE));
 }
 
 
@@ -199,18 +201,17 @@ void FCHITS::RecalculateState()
     }
 }
 
-
 void FCHITS::Assign(const FCT& table)
-  {
+{
     container_type replacement;
     replacement.reserve(table.GetTotalEntries());
-  
+
     for (const FC& fc : table)
-      replacement.push_back(fc);
-      
+        replacement.emplace_back(fc, FCSOURCE_NONE);
+
     Buffer.swap(replacement);
-    RecalculateState(); 
-  }   
+    RecalculateState();
+}
 
 
 FCHITS& FCHITS::operator=(const hit_type& fc)

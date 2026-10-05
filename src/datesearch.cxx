@@ -987,10 +987,8 @@ PIRSET INDEX::DateSearch(const DOUBLE fKey, const STRING& FieldName,
           }
 	} // Date Range defined
 	iresult.SetMdtIndex(w);
-	IRESULT::hit_type Fc =  FieldCache->FcInField(Gp, fp);
-	// No source of lexical truth
-	iresult.SetHitTable ( Fc );
-
+	IRESULT::hit_type Fc(FieldCache->FcInField(Gp, fp));
+	iresult.SetHitTable ( Fc ); // Don't have a lexical source of truth
 	pirset->FastAddEntry(iresult);
       }
   }
