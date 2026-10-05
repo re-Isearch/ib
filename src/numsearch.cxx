@@ -846,6 +846,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
   iresult.SetScore(0);
 
   PMDT mdt = Parent->GetMainMdt();
+  MDT::GP_CURSOR gpCursor(*mdt);
 
   size_t current_w = 0;
   FC current_record;
@@ -874,7 +875,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
         if (current_w == 0 || !current_record.Contains(gp))
         {
           FC record;
-          const size_t w = mdt->LookupByGp(gp, &record);
+          const size_t w = gpCursor.Lookup(gp, &record);
 
           if (w == 0)
           {
