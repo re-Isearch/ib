@@ -1808,6 +1808,197 @@ void MDT::SortGpIndex ()
     }
 }
 
+
+MDT::GP_CURSOR::GP_CURSOR(MDT& owner)
+  : Owner(owner),
+    Position(0),
+    LastGp(0),
+    Positioned(false),
+    HaveLastGp(false)
+{
+  if (!Owner.GpIndexSorted)
+    Owner.SortGpIndex();
+}
+
+
+void MDT::GP_CURSOR::Reset()
+{
+  Position = 0;
+  LastGp = 0;
+  Positioned = false;
+  HaveLastGp = false;
+}
+
+
+size_t MDT::GP_CURSOR::Lookup(const GPTYPE gp, PFC FcPtr)
+{
+  errno = 0;
+
+  if (Owner.TotalEntries == 0 || Owner.GpIndex == NULL)
+    {
+      errno = EIDRM;
+      return 0;
+    }
+
+  if (!Owner.GpIndexSorted)
+    {
+      Owner.SortGpIndex();
+      Reset();
+    }
+
+  const auto startAt = [this](size_t pos) -> GPTYPE
+    {
+      return NTOHL(Owner.GpIndex[pos].GpStart);
+    };
+
+  const auto endAt = [this](size_t pos) -> GPTYPE
+    {
+      return NTOHL(Owner.GpIndex[pos].GpEnd);
+    };
+
+  const auto accept = [this, FcPtr, &startAt, &endAt](size_t pos) -> size_t
+    {
+      const GPTYPE start = startAt(pos);
+      const GPTYPE end = endAt(pos);
+
+      Position = pos;
+      Positioned = true;
+
+      if (FcPtr)
+        {
+          FcPtr->SetFieldStart(start);
+          FcPtr->SetFieldEnd(end);
+        }
+
+      const _index_id_t encoded = NTOHL(Owner.GpIndex[pos].Index);
+      if (DELETED_MASK(encoded))
+        {
+          errno = ENOENT;
+          return 0;
+        }
+
+      return INDEX_MASK(encoded);
+    };
+
+  if (HaveLastGp && gp < LastGp)
+    Positioned = false;
+
+  LastGp = gp;
+  HaveLastGp = true;
+
+  if (Positioned)
+    {
+      const GPTYPE start = startAt(Position);
+      const GPTYPE end = endAt(Position);
+
+      if (gp >= start && gp <= end)
+        return accept(Position);
+
+      if (gp > end)
+        {
+          const size_t first = Position + 1;
+
+          if (first >= Owner.TotalEntries)
+            {
+              errno = EIDRM;
+              return 0;
+            }
+
+          const GPTYPE firstStart = startAt(first);
+          if (gp < firstStart)
+            {
+              errno = EIDRM;
+              return 0;
+            }
+
+          if (gp <= endAt(first))
+            return accept(first);
+
+          //
+          // The next record did not contain gp.  Exponentially bracket the
+          // target in the remaining GP-sorted suffix, then binary-search only
+          // that bracket.  This is aimed at monotonically increasing query
+          // streams where successive hits are usually near one another.
+          //
+          size_t lo = first;
+          size_t hi = Owner.TotalEntries;
+          size_t step = 1;
+
+          while (step < Owner.TotalEntries - first)
+            {
+              const size_t probe = first + step;
+
+              if (startAt(probe) > gp)
+                {
+                  hi = probe;
+                  break;
+                }
+
+              lo = probe;
+
+              if (step > (Owner.TotalEntries - first) / 2)
+                break;
+
+              step <<= 1;
+            }
+
+          size_t left = lo + 1;
+          size_t right = hi;
+
+          while (left < right)
+            {
+              const size_t mid = left + (right - left) / 2;
+
+              if (startAt(mid) <= gp)
+                left = mid + 1;
+              else
+                right = mid;
+            }
+
+          const size_t candidate = left - 1;
+          if (gp <= endAt(candidate))
+            return accept(candidate);
+
+          errno = EIDRM;
+          return 0;
+        }
+
+      // The stream moved backwards relative to the current record.
+      Positioned = false;
+    }
+
+  //
+  // Cold lookup (or a backwards-moving stream): find the last record whose
+  // start is <= gp, then perform one containment check against its end.
+  //
+  size_t lo = 0;
+  size_t hi = Owner.TotalEntries;
+
+  while (lo < hi)
+    {
+      const size_t mid = lo + (hi - lo) / 2;
+
+      if (startAt(mid) <= gp)
+        lo = mid + 1;
+      else
+        hi = mid;
+    }
+
+  if (lo == 0)
+    {
+      errno = EIDRM;
+      return 0;
+    }
+
+  const size_t candidate = lo - 1;
+  if (gp <= endAt(candidate))
+    return accept(candidate);
+
+  errno = EIDRM;
+  return 0;
+}
+
+
 #if 0
 size_t MDT::LookupByGp (const GPTYPE Gp, SRCH_DATE *Date)
 {
