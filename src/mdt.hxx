@@ -71,6 +71,25 @@ friend class MDTREC;
   size_t GetMdtRecord (const STRING& Key, MDTREC *MdtrecPtr);
   size_t GetMdtRecord (const GPTYPE gp, MDTREC *MdtrecPtr);
   size_t LookupByGp (const GPTYPE Gp, PFC FcPtr = NULL);
+
+  // Query-local cursor for nondecreasing GP streams.  It keeps traversal
+  // state out of MDT::lastIndex and exploits locality between successive
+  // record lookups while remaining correct if the stream moves backwards.
+  class GP_CURSOR {
+  public:
+    explicit GP_CURSOR(MDT& owner);
+
+    size_t Lookup(GPTYPE gp, PFC FcPtr = NULL);
+    void Reset();
+
+  private:
+    MDT&   Owner;
+    size_t Position;
+    GPTYPE LastGp;
+    bool   Positioned;
+    bool   HaveLastGp;
+  };
+
 //INT GetMdtIndex(const GPTYPE gp);       // Use LookupByGp() instead
 
   GPTYPE GetNameByGlobal(GPTYPE gp, STRING *Path, GPTYPE *Size, GPTYPE *LS, DOCTYPE_ID *Doctype);
