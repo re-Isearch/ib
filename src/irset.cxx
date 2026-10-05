@@ -3665,7 +3665,6 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
   if (Parent)
     {
       unsigned hits, misses;
-      FC myFC;
       IRESULT iresult;
       for (size_t x=1; x <= TotalEntries; x++)
 	{
@@ -3674,11 +3673,11 @@ OPOBJ *atomicIRSET::Within(const STRING& FieldName)
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
-	  for (const FC& myFC : MyHits) 
+	  for (const IRESULT::hit_type& hit : MyHits)
 	    {
-	      if (Parent->GetFieldCache()->ValidateInField(  myFC, FieldName ))
+	      if (Parent->GetFieldCache()->ValidateInField(hit, FieldName))
 		{
-		  iresult.AddToHitTable(myFC);
+		  iresult.AddToHitTable(hit);
 		  hits++;
 		}
 	       else
@@ -3775,15 +3774,14 @@ OPOBJ *atomicIRSET::XWithin(const STRING& FieldName)
   if (Parent)
     {
       unsigned hits;
-      FC myFC;
       IRESULT iresult;
       for (size_t x=1; x <= TotalEntries; x++)
 	{
 	  hits = 0;
 	  GetEntry(x, &iresult);
 	  const auto MyHits    = iresult.GetHitTable ();
-	  for (const FC& myFC : MyHits) {
-	      if (Parent->GetFieldCache()->ValidateInField(myFC, FieldName))
+	  for (const IRESULT::hit_type& hit : MyHits) {
+	      if (Parent->GetFieldCache()->ValidateInField(hit, FieldName))
 		{
 		  hits++;
 		  break;
@@ -3883,7 +3881,6 @@ OPOBJ *atomicIRSET::Inclusive(const STRING& FieldName)
   if (Parent)
     {
       unsigned hits, misses;
-      FC myFC;
       IRESULT iresult;
       for (size_t x=1; x <= TotalEntries; x++)
 	{
@@ -3892,11 +3889,11 @@ OPOBJ *atomicIRSET::Inclusive(const STRING& FieldName)
 	  iresult.ClearHitTable();
 	  hits = 0;
 	  misses = 0;
-	  for (const FC myFC : MyHits)
+	  for (const IRESULT::hit_type& hit : MyHits)
 	    {
-	      if (Parent->GetFieldCache()->ValidateInField(myFC, FieldName))
+	      if (Parent->GetFieldCache()->ValidateInField(hit, FieldName))
 		{
-		  iresult.AddToHitTable(myFC);
+		  iresult.AddToHitTable(hit);
 		  hits++;
 		}
 	       else
