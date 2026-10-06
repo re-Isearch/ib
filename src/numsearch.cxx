@@ -838,14 +838,16 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
 
   INTEGERLIST List;
 
+  const UCHR virtualIndex = (UCHR)Parent->GetVolume(NULL);
+  PMDT mdt = Parent->GetMainMdt();
+
   IRESULT iresult;
-  iresult.SetVirtualIndex((UCHR)Parent->GetVolume(NULL));
-  iresult.SetMdt(Parent->GetMainMdt());
+  iresult.SetVirtualIndex(virtualIndex);
+  iresult.SetMdt(mdt);
   iresult.SetHitCount(1);
   iresult.SetAuxCount(1);
   iresult.SetScore(0);
 
-  PMDT mdt = Parent->GetMainMdt();
   MDT::GP_CURSOR gpCursor(*mdt);
 
   size_t current_w = 0;
@@ -920,8 +922,8 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
 
         // FastAddEntry(rvalue) may move the backing HITTABLE into the IRSET.
         // Re-prime the reusable producer state for the next occurrence.
-        iresult.SetVirtualIndex((UCHR)Parent->GetVolume(NULL));
-        iresult.SetMdt(Parent->GetMainMdt());
+        iresult.SetVirtualIndex(virtualIndex);
+        iresult.SetMdt(mdt);
         iresult.SetHitCount(1);
         iresult.SetAuxCount(1);
         iresult.SetScore(0);
@@ -930,13 +932,8 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
   if (!found || matches == 0)
     return pirset;
 
-  //
-  // Hits arrive in record order and FastAddEntry() already merges adjacent
-  // occurrences from the same record.  Keep the final merge for now as a
-  // conservative invariant check; it can be benchmarked away later.
-  //
-  pirset->MergeEntries(true);
-
+  // VisitMappedMatches() emits in GP order and the rvalue FastAddEntry()
+  // merges adjacent hits for the same MDT record while preserving ByIndex.
   return pirset;
 }
 
