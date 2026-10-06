@@ -916,7 +916,15 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
         iresult.SetMdtIndex(current_w);
         iresult.SetHitTable(FCHIT(FC(gp, gp + span)));
 
-        pirset->FastAddEntry(iresult);
+        pirset->FastAddEntry(std::move(iresult));
+
+        // FastAddEntry(rvalue) may move the backing HITTABLE into the IRSET.
+        // Re-prime the reusable producer state for the next occurrence.
+        iresult.SetVirtualIndex((UCHR)Parent->GetVolume(NULL));
+        iresult.SetMdt(Parent->GetMainMdt());
+        iresult.SetHitCount(1);
+        iresult.SetAuxCount(1);
+        iresult.SetScore(0);
       });
 
   if (!found || matches == 0)
