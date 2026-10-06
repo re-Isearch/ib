@@ -714,6 +714,88 @@ void atomicIRSET::FastAddEntry(const IRESULT& ResultRecord)
     Table[TotalEntries++] = ResultRecord;
 }
 
+
+void atomicIRSET::FastAddEntry(IRESULT&& ResultRecord)
+{
+  HitTotal = 0;
+
+  if (TotalEntries > 0)
+    {
+      const INDEX_ID index = ResultRecord.GetIndex();
+
+      if (Table[TotalEntries - 1].GetIndex() == index)
+        {
+          Table[TotalEntries - 1].IncHitCount(ResultRecord.GetHitCount());
+          Table[TotalEntries - 1].AddToHitTable(ResultRecord);
+
+          if (ComputedS > NoNormalization)
+            {
+              const DOUBLE score =
+                Table[TotalEntries - 1].IncScore(ResultRecord.GetScore());
+
+              if (score < MinScore) MinScore = score;
+              if (score > MaxScore) MaxScore = score;
+            }
+
+          return;
+        }
+
+      if (Sort == ByIndex && Table[TotalEntries - 1].GetIndex() > index)
+        {
+          // With one existing entry, the incoming result can be inserted
+          // without a general sort by moving the old entry one slot right.
+          if (TotalEntries == 1)
+            {
+              if (TotalEntries == MaxEntries)
+                Expand();
+
+              if (TotalEntries < MaxEntries)
+                {
+                  Table[1] = std::move(Table[0]);
+                  Table[0] = std::move(ResultRecord);
+                  ++TotalEntries;
+
+                  if (ComputedS > NoNormalization)
+                    {
+                      const DOUBLE score = Table[0].GetScore();
+                      if (score < MinScore) MinScore = score;
+                      if (score > MaxScore) MaxScore = score;
+                    }
+                }
+
+              return;
+            }
+
+          message_log(LOG_DEBUG,
+                      "atomicIRSET::FastAddEntry(rvalue) new record out of index order");
+          Sort = Unsorted;
+        }
+    }
+
+  if (ComputedS > NoNormalization)
+    {
+      const DOUBLE score = ResultRecord.GetScore();
+
+      if (score < MinScore) MinScore = score;
+      if (score > MaxScore) MaxScore = score;
+
+      if (Sort == ByScore &&
+          TotalEntries &&
+          Table[TotalEntries - 1].GetScore() < score)
+        Sort = Unsorted;
+    }
+
+  if (TotalEntries == MaxEntries)
+    Expand();
+
+  // Move the result into the table.  In particular this transfers the
+  // HITTABLE backing store instead of sharing it and forcing a COW detach on
+  // the producer's next mutation.
+  if (TotalEntries < MaxEntries)
+    Table[TotalEntries++] = std::move(ResultRecord);
+}
+
+
 size_t atomicIRSET::FindByMdtIndex(size_t Index) const
 {
   if (Sort == ByIndex && TotalEntries > 3)
