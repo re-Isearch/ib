@@ -122,6 +122,7 @@ public:
 
   void AddEntry (const IRESULT& ResultRecord, const bool AddHitCounts);
   void FastAddEntry(const IRESULT& ResultRecord);
+  void FastAddEntry(IRESULT&& ResultRecord);
 
   bool GetEntry (const size_t Index, PIRESULT ResultRecord) const override;
   IRESULT     GetEntry (const size_t Index) const;
