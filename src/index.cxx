@@ -4562,7 +4562,10 @@ PIRSET INDEX::Search (const QUERY& Query)
 		      {
 			message_log(LOG_DEBUG, "Computing scores");
 			TermWeight = Attrlist.AttrGetTermWeight ();
-			NewIrset->ComputeScores (TermWeight, Method);
+			if (Method == HybridNormalization)
+			  NewIrset->ComputeScoresHybridNormalization(TermWeight, FieldName);
+			else
+			  NewIrset->ComputeScores (TermWeight, Method);
 		      }
                 }
               else {

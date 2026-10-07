@@ -18,6 +18,7 @@ Description:	Class IRSET - Internal Search Result Set
 #include "magic.hxx"
 #include "lang-codes.hxx"
 #include "index.hxx"
+#include "hybridcalibration.hxx"
 
 #include <float.h>
 #ifndef MAXFLOAT
@@ -63,7 +64,13 @@ STRING atomicIRSET::Description()
   "[E2]\n"
   "CoverageFloor = <float>  # how important completeness is (e.g. 0.5)\n"
   "ProximityGain = <float>  # how important compactness is (e.g. 1.0)\n"
-  "ProximityScale := what \"close\" means (see ranking.c)\n\n";
+  "ProximityScale := what \"close\" means (see ranking.c)\n\n"
+  "[Hybrid] # optional per-field overrides in [Hybrid:<field>]\n"
+  "VectorNoise=0.5  # source score with zero semantic evidence\n"
+  "VectorStrong=1.0 # source score with full semantic evidence\n"
+  "VectorFloor=0.0  # set 0.4 for the historical lexical score envelope\n"
+  "VectorCDFMin=0.0\nVectorCDFMax=1.0\n"
+  "VectorCDF=<uniform histogram cumulative counts, starting with 0>\n\n";
 } 
 
 
@@ -5766,28 +5773,76 @@ void atomicIRSET::Clear()
 
 OPOBJ *atomicIRSET::ComputeScoresHybridNormalization(const float TermWeight)
 {
-    if (TotalEntries && ComputedS != MaxNormalization)
-    {
-        // Scores are already cosine similarities — just find min/max
-        MinScore = MAXFLOAT;
-        MaxScore = 0.0;
-        for (size_t i = 0; i < TotalEntries; i++)
-        {
-            DOUBLE s = Table[i].GetScore();
-            if (s > MaxScore) MaxScore = s;
-            if (s < MinScore) MinScore = s;
-        }
-        // Rescale to [0.4, 1.0]*TermWeight to match MaxNormalization's output range
-        if (MaxScore > 0.0)
-        {
-            for (size_t i = 0; i < TotalEntries; i++)
-                Table[i].SetScore((0.4 + 0.6*Table[i].GetScore()/MaxScore)*TermWeight);
-            MinScore = (0.4 + 0.6*MinScore/MaxScore)*TermWeight;
-        }
-        MaxScore  = TermWeight;
-        ComputedS = MaxNormalization;  // ← compatible with lexical hybrid combination
-    }
+  return ComputeScoresHybridNormalization(TermWeight, NulString);
+}
+
+OPOBJ *atomicIRSET::ComputeScoresHybridNormalization(
+    const float TermWeight, const STRING& FieldName)
+{
+  // MaxNormalization is the existing fusion-compatible state marker; it
+  // prevents lexical normalization from recomputing these scores from hits.
+  if (ComputedS == MaxNormalization)
     return this;
+
+  VectorEvidenceCalibration calibration;
+  const auto setting = [&](const char* key) -> STRING {
+    if (!Parent) return NulString;
+    if (!FieldName.IsEmpty())
+    {
+      STRING value = Parent->ProfileGetString(STRING("Hybrid:") + FieldName, key);
+      if (!value.IsEmpty()) return value;
+    }
+    return Parent->ProfileGetString("Hybrid", key);
+  };
+  const auto number = [&](const char* key, double fallback) -> double {
+    const STRING value = setting(key);
+    if (value.IsEmpty()) return fallback;
+    char* end = NULL;
+    const double parsed = strtod(value.c_str(), &end);
+    const bool empty = end == value.c_str();
+    while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) ++end;
+    if (empty || !end || *end || !VectorEvidenceCalibration::Finite(parsed))
+    {
+      message_log(LOG_WARN, "Hybrid: invalid %s; using default", key);
+      return fallback;
+    }
+    return parsed;
+  };
+
+  calibration.noise = number("VectorNoise", calibration.noise);
+  calibration.strong = number("VectorStrong", calibration.strong);
+  if (calibration.strong <= calibration.noise ||
+      !VectorEvidenceCalibration::Finite(calibration.strong - calibration.noise))
+  {
+    message_log(LOG_WARN, "Hybrid: VectorStrong must exceed VectorNoise; using defaults");
+    calibration.noise = 0.5;
+    calibration.strong = 1.0;
+  }
+  calibration.floor = number("VectorFloor", calibration.floor);
+  if (calibration.floor < 0.0 || calibration.floor > 1.0)
+  {
+    message_log(LOG_WARN, "Hybrid: VectorFloor must be in [0,1]; using 0");
+    calibration.floor = 0.0;
+  }
+
+  const STRING cdf = setting("VectorCDF");
+  if (!cdf.IsEmpty() && !calibration.SetBackground(cdf.c_str(),
+      number("VectorCDFMin", 0.0), number("VectorCDFMax", 1.0)))
+    message_log(LOG_WARN, "Hybrid: invalid/unresolved VectorCDF; using fixed anchors");
+
+  const double weight = VectorEvidenceCalibration::Finite(TermWeight) ? TermWeight : 0.0;
+  MinScore = MaxScore = 0.0;
+  for (size_t i = 0; i < TotalEntries; ++i)
+  {
+    const double score = calibration.Evidence(Table[i].GetScore()) * weight;
+    Table[i].SetScore(score);
+    if (i == 0 || score < MinScore) MinScore = score;
+    if (i == 0 || score > MaxScore) MaxScore = score;
+  }
+  if (weight < 0.0) Sort = Unsorted;
+  MinScoreValid = true;
+  ComputedS = MaxNormalization;
+  return this;
 }
 
 

@@ -178,6 +178,7 @@ public:
   OPOBJ *ComputeScoresE2Normalization(const float TermWeight);
 
   OPOBJ *ComputeScoresHybridNormalization(const float TermWeight);
+  OPOBJ *ComputeScoresHybridNormalization(const float TermWeight, const STRING& FieldName);
   void SetPrecomputed(enum NormalizationMethods Method);
 
   // Stubs
@@ -856,6 +857,12 @@ public:
       const float TermWeight)
   {
     return node()->ComputeScoresHybridNormalization(TermWeight);
+  }
+
+  OPOBJ* ComputeScoresHybridNormalization(
+      const float TermWeight, const STRING& FieldName)
+  {
+    return node()->ComputeScoresHybridNormalization(TermWeight, FieldName);
   }
 
   OPOBJ* ComputeScoresAux1Normalization(
