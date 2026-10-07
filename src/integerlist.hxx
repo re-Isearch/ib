@@ -175,6 +175,26 @@ public:
     if (first >= last)
       return true;
 
+    // For broad ranges, stream the GP block instead of allocating and
+    // sorting most of the column. Keep the value slice for selective ranges.
+    const size_t broad_range = view.count / 4 + (view.count % 4 != 0);
+    if (last - first >= broad_range)
+      {
+        for (size_t i = 0; i < view.count; ++i)
+          {
+            const value_type value =
+                INTEGER_INDEX_TRAITS::MappedValueAt(view.gp_block, i);
+            const bool match = Relation == ZRelLT ? value < Key :
+                               Relation == ZRelLE ? value <= Key :
+                               Relation == ZRelGT ? value > Key : value >= Key;
+            if (match)
+              visitor(
+                  INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.gp_block, i),
+                  INTEGER_INDEX_TRAITS::MappedSpanAt(view.gp_block, i));
+          }
+        return true;
+      }
+
     struct HITPOS
     {
       GPTYPE    gp;
