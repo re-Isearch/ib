@@ -1692,7 +1692,7 @@ again:
     XSI-conformant systems. */
 	snprintf(line, BUFSIZ,
         // XSI 
-	"Process time: %.0f ms. (%.0f) Search: %.0f ms. (%.1f ms/term)"
+	"CPU Process time: %.0f ms. (%.0f) Search: %.0f ms. (%.1f ms/term)"
 	// "Process time: %.1f ms. (%.1f) Search: %.1f ms. (%.2f ms/term)"
 	, cpu_total, cpu_start, cpu, cpu/termCount);
       }
@@ -1700,7 +1700,7 @@ again:
       {
 	snprintf(line, BUFSIZ,
 	// XSI
-	"Process time: %.0f ms. (%.0f) Search: %.0f ms."
+	"CPU Process time: %.0f ms. (%.0f) Search: %.0f ms."
 	// "Process time: %.1f ms. (%.1f) Search: %.1f ms."
 	,cpu_total, cpu_start, cpu);
 

@@ -381,10 +381,15 @@ public:
     HITTABLE& Table;
   };
 
+
+#if 1
+  HITTABLE() = default;
+#else
   HITTABLE()
     : p_(std::make_shared<FCHITS>())
   {
   }
+#endif
 
   HITTABLE(const hit_type& hit)
     : p_(std::make_shared<FCHITS>(hit))
@@ -514,6 +519,15 @@ public:
   }
 
 
+#if 1
+ void Clear()
+   {
+     if (!p_) return;
+     if (p_.use_count() != 1) p_.reset();
+     else p_->Clear();
+   }
+
+#else
   void Clear()
   {
     if (!p_ || p_.use_count() != 1)
@@ -527,6 +541,7 @@ public:
         p_->Clear();
       }
   }
+#endif
 
   void AddEntryFast(const hit_type& hit)
   {
@@ -612,7 +627,11 @@ public:
     return Readable().IsNormalized();
   }
 
+  static size_t CowDetaches() { return cow_detaches; }
+  static size_t NewHitTables(){ return new_hit_table; }
 private:
+  inline static size_t new_hit_table = 0;
+  inline static size_t cow_detaches = 0;
 
   const FCHITS& Readable() const
   {
@@ -628,10 +647,12 @@ private:
   {
     if (!p_)
       {
+++new_hit_table;
         p_ = std::make_shared<FCHITS>();
       }
     else if (p_.use_count() != 1)
       {
+++cow_detaches;
         p_ = std::make_shared<FCHITS>(*p_);
       }
 

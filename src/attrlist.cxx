@@ -93,13 +93,13 @@ static struct DataType {
 #ifdef VECTOR_INDEX 
   {"hnsw_raw",  _V, FIELDTYPE::db_hnsw_raw, "Encoded Vectors for HNSW"},
   {"hnsw",      _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (base Model)"},
-  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, "Hierarchical Navigable Small Worlds (HNSW) (2nd Model)"},
-  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, "Hierarchical Navigable Small Worlds (HNSW) (3rd Model)"},
+  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, "HNSW 2nd Model"},
+  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, "HNSW 3rd Model"},
 #else
-  {"hnsw_raw",  _V, FIELDTYPE::db_hnsw_raw, _V},
-  {"hnsw",      _V, FIELDTYPE::db_hnsw,  "Hierarchical Navigable Small Worlds (HNSW) (NOT ENABLED)"},
-  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, _V},
-  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, _V},
+  {"hnsw_raw",  _V, FIELDTYPE::db_hnsw_raw, "Encoded Vectors for HNSW // NOT ENABLED"},
+  {"hnsw",      _V, FIELDTYPE::db_hnsw,  "HNSW) base Model // NOT ENABLED"},
+  {"hnsw2",     _V, FIELDTYPE::db_hnsw2, "HNSW 2nd Model // NOT ENABLED"},
+  {"hnsw3",     _V, FIELDTYPE::db_hnsw3, "HNSW 3rd Model // NOT ENABLED"},
 #endif
   {"nsg",        g, FIELDTYPE::db_nsg,    "Spread Out Graph ANNS algorithms (NSG) // NOT YET"}, 
   {"ivfflat",    f, FIELDTYPE::db_IVFFlat,"IVFFlat Vectors // NOT YET"},

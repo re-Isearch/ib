@@ -21,6 +21,8 @@ Author:		Edward C. Zimmermann, edz@nonmonotonic.net
 #include <alloca.h>
 
 
+extern bool is_encoded_embedding(const STRING& Content) ;
+
 MEMODOC::MEMODOC (PIDBOBJ DbParent, const STRING& Name) :
 	PTEXT (DbParent, Name)
 {

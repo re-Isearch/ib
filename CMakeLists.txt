@@ -176,6 +176,7 @@ option(USE_OPENMP      "Use OpenMP"                           ON)
 option(USE_BERKELEY_DB "Use Berkeley DB"                      ON)
 
 option(IB_ENABLE_FAST_MATH "Enable -ffast-math in optimized GNU/Clang builds" ON)
+option(IB_BUILD_SCORING_TESTS "Build focused scoring and typed-search regression tests" OFF)
 
 option(IB_CREATE_USER_PLUGIN_DIR "Create $HOME/.ib/lib/plugins while configuring" OFF)
 
@@ -929,6 +930,18 @@ endif()
 
 if(USE_OPENMP)
     list(APPEND COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+endif()
+
+if(IB_BUILD_SCORING_TESTS)
+    enable_testing()
+    add_executable(hybrid_normalization_test tests/hybrid_normalization.cpp)
+    ib_common_includes(hybrid_normalization_test)
+    target_link_libraries(hybrid_normalization_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME hybrid_normalization COMMAND hybrid_normalization_test)
+    add_executable(typed_search_test tests/typed_search.cpp)
+    ib_common_includes(typed_search_test)
+    target_link_libraries(typed_search_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME typed_search COMMAND typed_search_test)
 endif()
 
 add_subdirectory(doctype/plugins)
