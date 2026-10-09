@@ -449,6 +449,9 @@ private:
         return a.gp < b.gp;
       });
 
+    if (!poll())
+      return false;
+
     for (const HITPOS& hit : hits)
       {
         if (!checkpoint())
