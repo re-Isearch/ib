@@ -3849,6 +3849,8 @@ PIRSET INDEX::Search (const QUERY& Query)
                   Parent->SetErrorCode(108);
                   return ERROR_SET; // Malformed query 
                 }
+              if (Parent->GetErrorCode() == 33)
+                Parent->SetErrorCode(32);
               Stack << Op1->Not ();
             }
 	  else if (op_t == OperatorSibling)
@@ -3921,7 +3923,11 @@ PIRSET INDEX::Search (const QUERY& Query)
 		  if (Op2) { Stack << Op2; Op2 = NULL;}
                   break;
                   // Normal unary operators:
-                case OperatorNotWithin: Op1->Not     ( fieldName ); break;
+                case OperatorNotWithin:
+                  if (Parent->GetErrorCode() == 33)
+                    Parent->SetErrorCode(32);
+                  Op1->Not(fieldName);
+                  break;
                 case OperatorWithin:    Op1->Within  ( fieldName ); break;
                 case OperatorInside:    Op1->Inside  ( fieldName ); break;
 		case OperatorInclusive: Op1->Inclusive(fieldName ); break;
@@ -3948,6 +3954,15 @@ PIRSET INDEX::Search (const QUERY& Query)
                 }
               else
                 {
+                  //
+                  // Error 33 means a leaf search returned a valid subset.
+                  // Once that partial result participates in binary query
+                  // algebra we can no longer promise that the final result
+                  // remains a subset of the exact answer.
+                  //
+                  if (Parent->GetErrorCode() == 33)
+                    Parent->SetErrorCode(32);
+
 #define SwapOp(Op1,Op2) { \
 		  const size_t t1 =((IRSET *)Op1)->GetHitTotal(); \
 		  const size_t t2 =((IRSET *)Op2)->GetHitTotal(); \
