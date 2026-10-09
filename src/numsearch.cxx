@@ -759,87 +759,20 @@ size_t INDEX::NumericalScan(SCANLIST *Scanlist, const STRING& FieldName, size_t 
 
 
 
-PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation)
+template <class Enumerator>
+static void PopulateIntegerResultSet(PIDBOBJ parent,
+                                     const DATERANGE& dateRange,
+                                     PIRSET pirset,
+                                     Enumerator&& enumerate)
 {
-  if (Parent == NULL)
-    return NULL;
+  if (parent == NULL || pirset == NULL)
+    return;
 
-  PIRSET pirset = new IRSET(Parent);
+  const UCHR virtualIndex = (UCHR)parent->GetVolume(NULL);
+  PMDT mdt = parent->GetMainMdt();
 
-#ifdef FIELD_WILD_MATCH
-  STRING pattern(FieldName);
-  const DFDT *dfdtp = Parent->GetMainDfdt();
-
-  if (!pattern.IsPlain() && dfdtp)
-  {
-    IRSET *result = NULL;
-
-    const size_t total = dfdtp->GetTotalEntries();
-
-    for (size_t i = 0; i < total; ++i)
-    {
-      const STRING field = dfdtp->GetFieldName(i + 1);
-      const FIELDTYPE type = Parent->GetFieldType(field);
-
-      if (!type.IsInteger())
-        continue;
-
-      if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
-      {
-        IRSET *part = IntegerSearch(Key, field, Relation);
-
-        if (part)
-        {
-          if (result)
-          {
-            result->Or(*part);
-            delete part;
-          }
-          else
-            result = part;
-        }
-      }
-    }
-
-    if (result)
-    {
-      delete pirset;
-      return result;
-    }
-  }
-#endif
-
-  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
-
-  if (!ft.IsInteger())
-  {
-    Parent->SetErrorCode(113);
-    message_log(LOG_DEBUG,
-                "Can't search integer value in field '%s' of type '%s'",
-                FieldName.c_str(), ft.c_str());
-    return pirset;
-  }
-
-  STRING Fn;
-  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
-  {
-    Parent->SetErrorCode(1);
-    message_log(LOG_PANIC,
-                "Could not create integer table name for field '%s'",
-                FieldName.c_str());
-    return pirset;
-  }
-
-  if (!FileExists(Fn))
-  {
-    Parent->SetErrorCode(113);
-    return pirset;
-  }
-
-  INTEGERLIST List;
-
-  const UCHR virtualIndex = (UCHR)Parent->GetVolume(NULL);
-  PMDT mdt = Parent->GetMainMdt();
+  if (mdt == NULL)
+    return;
 
   IRESULT iresult;
   iresult.SetVirtualIndex(virtualIndex);
@@ -856,64 +789,53 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
   bool isDeleted = false;
   SRCH_DATE rec_date;
 
-  size_t matches = 0;
-
-  const bool found = List.VisitMappedMatches(
-      Fn,
-      Key,
-      (ZRelation_t)Relation,
-      IntegerColumnMaps,
+  enumerate(
       [&](GPTYPE gp, INTEGERFLD::span_type span)
       {
-        ++matches;
-
         //
-        // VisitMappedMatches() emits every supported relation in GP order:
-        // equality is GP ordered within the equal-value slice, inequalities
-        // sort their selected GPs, and != walks the GP-sorted block directly.
-        //
-        // Reuse the current MDT span while the next hit remains in it.
+        // INTEGERLIST enumerators emit in GP order. Reuse the current MDT
+        // span while the next hit remains in the same record.
         //
         if (current_w == 0 || !current_record.Contains(gp))
-        {
-          FC record;
-          const size_t w = gpCursor.Lookup(gp, &record);
-
-          if (w == 0)
           {
-            current_w = 0;
-            current_record = FC();
-            return;
+            FC record;
+            const size_t w = gpCursor.Lookup(gp, &record);
+
+            if (w == 0)
+              {
+                current_w = 0;
+                current_record = FC();
+                return;
+              }
+
+            current_w      = w;
+            current_record = record;
+
+            if (dateRange.Defined())
+              {
+                MDTREC mdtrec;
+
+                if (mdt->GetEntry(current_w, &mdtrec))
+                  {
+                    rec_date  = mdtrec.GetDate();
+                    isDeleted = mdtrec.GetDeleted();
+                  }
+                else
+                  {
+                    rec_date.Clear();
+                    isDeleted = true;
+                  }
+              }
           }
 
-          current_w      = w;
-          current_record = record;
-
-          if (DateRange.Defined())
+        if (dateRange.Defined())
           {
-            MDTREC mdtrec;
+            if (isDeleted)
+              return;
 
-            if (mdt->GetEntry(current_w, &mdtrec))
-            {
-              rec_date  = mdtrec.GetDate();
-              isDeleted = mdtrec.GetDeleted();
-            }
-            else
-            {
-              rec_date.Clear();
-              isDeleted = true;
-            }
+            if (rec_date.Ok() && !dateRange.Contains(rec_date))
+              return;
           }
-        }
-
-        if (DateRange.Defined())
-        {
-          if (isDeleted)
-            return;
-
-          if (rec_date.Ok() && !DateRange.Contains(rec_date))
-            return;
-        }
 
         iresult.SetMdtIndex(current_w);
         iresult.SetHitTable(FCHIT(FC(gp, gp + span)));
@@ -928,22 +850,208 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
         iresult.SetAuxCount(1);
         iresult.SetScore(0);
       });
+}
 
-#if 0
-std::cerr
-    << "HITTABLE: new=" << HITTABLE::NewHitTables()
-    << " cow=" << HITTABLE::CowDetaches()
-    << " matches=" << matches
-    << " records=" << pirset->GetTotalEntries()
-    << '\n';
+
+PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation)
+{
+  if (Parent == NULL)
+    return NULL;
+
+  PIRSET pirset = new IRSET(Parent);
+
+#ifdef FIELD_WILD_MATCH
+  STRING pattern(FieldName);
+  const DFDT *dfdtp = Parent->GetMainDfdt();
+
+  if (!pattern.IsPlain() && dfdtp)
+    {
+      IRSET *result = NULL;
+
+      const size_t total = dfdtp->GetTotalEntries();
+
+      for (size_t i = 0; i < total; ++i)
+        {
+          const STRING field = dfdtp->GetFieldName(i + 1);
+          const FIELDTYPE type = Parent->GetFieldType(field);
+
+          if (!type.IsInteger())
+            continue;
+
+          if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
+            {
+              IRSET *part = IntegerSearch(Key, field, Relation);
+
+              if (part)
+                {
+                  if (result)
+                    {
+                      result->Or(*part);
+                      delete part;
+                    }
+                  else
+                    result = part;
+                }
+            }
+        }
+
+      if (result)
+        {
+          delete pirset;
+          return result;
+        }
+    }
 #endif
 
-  if (!found || matches == 0)
-    return pirset;
+  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
 
-  // VisitMappedMatches() emits in GP order and the rvalue FastAddEntry()
-  // merges adjacent hits for the same MDT record while preserving ByIndex.
+  if (!ft.IsInteger())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_DEBUG,
+                  "Can't search integer value in field '%s' of type '%s'",
+                  FieldName.c_str(), ft.c_str());
+      return pirset;
+    }
+
+  STRING Fn;
+  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
+    {
+      Parent->SetErrorCode(1);
+      message_log(LOG_PANIC,
+                  "Could not create integer table name for field '%s'",
+                  FieldName.c_str());
+      return pirset;
+    }
+
+  if (!FileExists(Fn))
+    {
+      Parent->SetErrorCode(113);
+      return pirset;
+    }
+
+  INTEGERLIST List;
+
+  PopulateIntegerResultSet(
+      Parent,
+      DateRange,
+      pirset,
+      [&](auto&& visitor)
+      {
+        return List.VisitMappedMatches(
+            Fn,
+            Key,
+            (ZRelation_t)Relation,
+            IntegerColumnMaps,
+            visitor);
+      });
+
   return pirset;
 }
 
 
+PIRSET INDEX::IntegerSearchRange(const INTEGERRANGE& Range,
+                                 const STRING& FieldName,
+                                 INT4 Relation)
+{
+  if (Parent == NULL)
+    return NULL;
+
+  PIRSET pirset = new IRSET(Parent);
+
+  if (!Range.Ok())
+    return pirset;
+
+#ifdef FIELD_WILD_MATCH
+  STRING pattern(FieldName);
+  const DFDT *dfdtp = Parent->GetMainDfdt();
+
+  if (!pattern.IsPlain() && dfdtp)
+    {
+      IRSET *result = NULL;
+
+      const size_t total = dfdtp->GetTotalEntries();
+
+      for (size_t i = 0; i < total; ++i)
+        {
+          const STRING field = dfdtp->GetFieldName(i + 1);
+          const FIELDTYPE type = Parent->GetFieldType(field);
+
+          if (!type.IsInteger())
+            continue;
+
+          if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
+            {
+              IRSET *part = IntegerSearchRange(
+                  Range, field, Relation);
+
+              if (part)
+                {
+                  if (result)
+                    {
+                      result->Or(*part);
+                      delete part;
+                    }
+                  else
+                    result = part;
+                }
+            }
+        }
+
+      if (result)
+        {
+          delete pirset;
+          return result;
+        }
+    }
+#endif
+
+  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
+
+  if (!ft.IsInteger())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_DEBUG,
+                  "Can't search integer range in field '%s' of type '%s'",
+                  FieldName.c_str(), ft.c_str());
+      return pirset;
+    }
+
+  STRING Fn;
+  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
+    {
+      Parent->SetErrorCode(1);
+      message_log(LOG_PANIC,
+                  "Could not create integer table name for field '%s'",
+                  FieldName.c_str());
+      return pirset;
+    }
+
+  if (!FileExists(Fn))
+    {
+      Parent->SetErrorCode(113);
+      return pirset;
+    }
+
+  INTEGERLIST List;
+
+  const INT16 low  = (INT16)Range.GetStart();
+  const INT16 high = (INT16)Range.GetEnd();
+
+  PopulateIntegerResultSet(
+      Parent,
+      DateRange,
+      pirset,
+      [&](auto&& visitor)
+      {
+        return List.VisitMappedRange(
+            Fn,
+            low,
+            high,
+            (ZRelation_t)Relation,
+            IntegerColumnMaps,
+            visitor);
+      });
+
+  return pirset;
+}
