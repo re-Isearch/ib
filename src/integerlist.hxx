@@ -98,6 +98,31 @@ public:
                           MultiMMapSession& Sessions,
                           Visitor&& visitor)
   {
+    return VisitMappedMatches(
+        FileName, Key, Relation, Sessions,
+        []() { return true; },
+        visitor);
+  }
+
+  template <class Poll, class Visitor>
+  bool VisitMappedMatches(const STRING& FileName,
+                          value_type Key,
+                          ZRelation_t Relation,
+                          MultiMMapSession& Sessions,
+                          Poll&& poll,
+                          Visitor&& visitor)
+  {
+    static constexpr size_t CPU_CHECK_INTERVAL = 64U * 1024U;
+    size_t until_check = CPU_CHECK_INTERVAL;
+
+    const auto checkpoint = [&]() -> bool
+    {
+      if (--until_check != 0)
+        return true;
+
+      until_check = CPU_CHECK_INTERVAL;
+      return poll();
+    };
     mapped_type view;
 
     if (!INTEGER_INDEX_TRAITS::MapIndexed(FileName, Sessions, &view))
@@ -115,6 +140,9 @@ public:
       {
         for (size_t i = 0; i < view.count; ++i)
           {
+            if (!checkpoint())
+              return false;
+
             if (!INTEGER_INDEX_TRAITS::Equal(
                   INTEGER_INDEX_TRAITS::MappedValueAt(view.gp_block, i),
                   Key))
@@ -136,9 +164,14 @@ public:
     if (Relation == ZRelEQ)
       {
         for (size_t i = lower; i < upper; ++i)
-          visitor(
-              INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
-              INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
+          {
+            if (!checkpoint())
+              return false;
+
+            visitor(
+                INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
+                INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
+          }
 
         return true;
       }
@@ -172,7 +205,7 @@ public:
         return false;
       }
 
-    VisitMappedSlicesInGpOrder(
+    return VisitMappedSlicesInGpOrder(
         view,
         first, last,
         0, 0,
@@ -182,9 +215,9 @@ public:
                  Relation == ZRelLE ? value <= Key :
                  Relation == ZRelGT ? value > Key : value >= Key;
         },
+        checkpoint,
+        poll,
         visitor);
-
-    return true;
   }
 
 
@@ -209,6 +242,32 @@ public:
                         MultiMMapSession& Sessions,
                         Visitor&& visitor)
   {
+    return VisitMappedRange(
+        FileName, Low, High, Relation, Sessions,
+        []() { return true; },
+        visitor);
+  }
+
+  template <class Poll, class Visitor>
+  bool VisitMappedRange(const STRING& FileName,
+                        value_type Low,
+                        value_type High,
+                        ZRelation_t Relation,
+                        MultiMMapSession& Sessions,
+                        Poll&& poll,
+                        Visitor&& visitor)
+  {
+    static constexpr size_t CPU_CHECK_INTERVAL = 64U * 1024U;
+    size_t until_check = CPU_CHECK_INTERVAL;
+
+    const auto checkpoint = [&]() -> bool
+    {
+      if (--until_check != 0)
+        return true;
+
+      until_check = CPU_CHECK_INTERVAL;
+      return poll();
+    };
     mapped_type view;
 
     if (!INTEGER_INDEX_TRAITS::MapIndexed(FileName, Sessions, &view))
@@ -229,9 +288,14 @@ public:
         INTEGER_INDEX_TRAITS::Equal(Low, High))
       {
         for (size_t i = lower_low; i < upper_low; ++i)
-          visitor(
-              INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
-              INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
+          {
+            if (!checkpoint())
+              return false;
+
+            visitor(
+                INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
+                INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
+          }
 
         return true;
       }
@@ -240,7 +304,7 @@ public:
       {
       case ZRelEQ:
       case ZRelGE:
-        VisitMappedSlicesInGpOrder(
+        return VisitMappedSlicesInGpOrder(
             view,
             lower_low, upper_high,
             0, 0,
@@ -248,11 +312,12 @@ public:
             {
               return value >= Low && value <= High;
             },
+            checkpoint,
+            poll,
             visitor);
-        return true;
 
       case ZRelGT:
-        VisitMappedSlicesInGpOrder(
+        return VisitMappedSlicesInGpOrder(
             view,
             upper_low, lower_high,
             0, 0,
@@ -260,12 +325,13 @@ public:
             {
               return value > Low && value < High;
             },
+            checkpoint,
+            poll,
             visitor);
-        return true;
 
       case ZRelLT:
       case ZRelNE:
-        VisitMappedSlicesInGpOrder(
+        return VisitMappedSlicesInGpOrder(
             view,
             0, lower_low,
             upper_high, view.count,
@@ -273,11 +339,12 @@ public:
             {
               return value < Low || value > High;
             },
+            checkpoint,
+            poll,
             visitor);
-        return true;
 
       case ZRelLE:
-        VisitMappedSlicesInGpOrder(
+        return VisitMappedSlicesInGpOrder(
             view,
             0, upper_low,
             lower_high, view.count,
@@ -285,8 +352,9 @@ public:
             {
               return value <= Low || value >= High;
             },
+            checkpoint,
+            poll,
             visitor);
-        return true;
 
       default:
         return false;
@@ -305,13 +373,15 @@ private:
   // GP order. For broad selections, avoid allocating/sorting most of the
   // column and instead stream the GP-sorted block through Predicate.
   //
-  template <class Predicate, class Visitor>
-  static void VisitMappedSlicesInGpOrder(const mapped_type& view,
+  template <class Predicate, class Checkpoint, class Poll, class Visitor>
+  static bool VisitMappedSlicesInGpOrder(const mapped_type& view,
                                          size_t first1,
                                          size_t last1,
                                          size_t first2,
                                          size_t last2,
                                          Predicate&& PredicateFn,
+                                         Checkpoint&& checkpoint,
+                                         Poll&& poll,
                                          Visitor&& visitor)
   {
     const size_t selected =
@@ -319,7 +389,7 @@ private:
         (last2 > first2 ? last2 - first2 : 0);
 
     if (selected == 0)
-      return;
+      return true;
 
     const size_t broad_range =
         view.count / 4 + (view.count % 4 != 0);
@@ -328,6 +398,9 @@ private:
       {
         for (size_t i = 0; i < view.count; ++i)
           {
+            if (!checkpoint())
+              return false;
+
             const value_type value =
                 INTEGER_INDEX_TRAITS::MappedValueAt(view.gp_block, i);
 
@@ -337,7 +410,7 @@ private:
                   INTEGER_INDEX_TRAITS::MappedSpanAt(view.gp_block, i));
           }
 
-        return;
+        return true;
       }
 
     std::vector<HITPOS> hits;
@@ -347,16 +420,28 @@ private:
         [&](size_t first, size_t last)
         {
           for (size_t i = first; i < last; ++i)
-            hits.push_back({
-                INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
-                    view.value_block, i),
-                INTEGER_INDEX_TRAITS::MappedSpanAt(
-                    view.value_block, i)
-            });
+            {
+              if (!checkpoint())
+                return false;
+
+              hits.push_back({
+                  INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
+                      view.value_block, i),
+                  INTEGER_INDEX_TRAITS::MappedSpanAt(
+                      view.value_block, i)
+              });
+            }
+
+          return true;
         };
 
-    collect(first1, last1);
-    collect(first2, last2);
+    if (!collect(first1, last1) || !collect(first2, last2))
+      return false;
+
+    // std::sort itself is not interruptible; avoid entering it if the leaf
+    // budget has already expired after materializing the selected slice.
+    if (!poll())
+      return false;
 
     std::sort(hits.begin(), hits.end(),
       [](const HITPOS& a, const HITPOS& b)
@@ -365,7 +450,14 @@ private:
       });
 
     for (const HITPOS& hit : hits)
-      visitor(hit.gp, hit.span);
+      {
+        if (!checkpoint())
+          return false;
+
+        visitor(hit.gp, hit.span);
+      }
+
+    return true;
   }
 
   static size_t LowerBound(const mapped_type& view, value_type key)
