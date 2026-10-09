@@ -932,6 +932,20 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
 
   INTEGERLIST List;
 
+  const clock_t startClock = clock();
+
+  const auto keepRunning = [&]() -> bool
+  {
+    if (MaxCPU_ticks > 0 &&
+        clock() - startClock > MaxCPU_ticks)
+      {
+        CPU_ResourcesExhausted();
+        return false;
+      }
+
+    return true;
+  };
+
   PopulateIntegerResultSet(
       Parent,
       DateRange,
@@ -943,6 +957,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
             Key,
             (ZRelation_t)Relation,
             IntegerColumnMaps,
+            keepRunning,
             visitor);
       });
 
@@ -1038,6 +1053,20 @@ PIRSET INDEX::IntegerSearchRange(const INTEGERRANGE& Range,
   const INT16 low  = (INT16)Range.GetStart();
   const INT16 high = (INT16)Range.GetEnd();
 
+  const clock_t startClock = clock();
+
+  const auto keepRunning = [&]() -> bool
+  {
+    if (MaxCPU_ticks > 0 &&
+        clock() - startClock > MaxCPU_ticks)
+      {
+        CPU_ResourcesExhausted();
+        return false;
+      }
+
+    return true;
+  };
+
   PopulateIntegerResultSet(
       Parent,
       DateRange,
@@ -1050,6 +1079,7 @@ PIRSET INDEX::IntegerSearchRange(const INTEGERRANGE& Range,
             high,
             (ZRelation_t)Relation,
             IntegerColumnMaps,
+            keepRunning,
             visitor);
       });
 
