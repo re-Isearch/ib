@@ -300,6 +300,26 @@ public:
         return true;
       }
 
+    //
+    // <= x-x means value <= x OR value >= x, i.e. every occurrence.
+    // Walk the GP block once rather than materializing two overlapping slices.
+    //
+    if (Relation == ZRelLE &&
+        INTEGER_INDEX_TRAITS::Equal(Low, High))
+      {
+        for (size_t i = 0; i < view.count; ++i)
+          {
+            if (!checkpoint())
+              return false;
+
+            visitor(
+                INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.gp_block, i),
+                INTEGER_INDEX_TRAITS::MappedSpanAt(view.gp_block, i));
+          }
+
+        return true;
+      }
+
     switch (Relation)
       {
       case ZRelEQ:
