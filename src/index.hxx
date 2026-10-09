@@ -165,6 +165,8 @@ public:
 
   PIRSET Search(const QUERY& SearchQuery);
   PIRSET IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation= ZRelEQ);
+  PIRSET IntegerSearchRange(const INTEGERRANGE& Range, const STRING& FieldName,
+                            INT4 Relation = ZRelEQ);
   PIRSET NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET HashSearch(const STRING& Contents, const STRING& FieldName, INT4 Relation = ZRelEQ, bool useCase = true);
