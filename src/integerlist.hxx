@@ -107,9 +107,9 @@ public:
       return true;
 
     //
-    // != is naturally a GP-order field-domain scan.  Test every INTEGER
+    // != is naturally a GP-order field-domain scan. Test every INTEGER
     // occurrence in the already GP-sorted block and emit only occurrences
-    // whose value differs from Key.  Records without the field never enter.
+    // whose value differs from Key. Records without the field never enter.
     //
     if (Relation == ZRelNE)
       {
@@ -172,43 +172,191 @@ public:
         return false;
       }
 
-    if (first >= last)
+    VisitMappedSlicesInGpOrder(
+        view,
+        first, last,
+        0, 0,
+        [Key, Relation](value_type value)
+        {
+          return Relation == ZRelLT ? value < Key :
+                 Relation == ZRelLE ? value <= Key :
+                 Relation == ZRelGT ? value > Key : value >= Key;
+        },
+        visitor);
+
+    return true;
+  }
+
+
+  //
+  // Range relation semantics:
+  //
+  //   = a-b   a <= value <= b
+  //  >= a-b   a <= value <= b
+  //   > a-b   a <  value <  b
+  //   < a-b   value < a || value > b
+  //  <= a-b   value <= a || value >= b
+  //  != a-b   value < a || value > b
+  //
+  // Endpoints are normalized here rather than in INTEGERRANGE so the value
+  // object preserves what was parsed.
+  //
+  template <class Visitor>
+  bool VisitMappedRange(const STRING& FileName,
+                        value_type Low,
+                        value_type High,
+                        ZRelation_t Relation,
+                        MultiMMapSession& Sessions,
+                        Visitor&& visitor)
+  {
+    mapped_type view;
+
+    if (!INTEGER_INDEX_TRAITS::MapIndexed(FileName, Sessions, &view))
+      return false;
+
+    if (view.count == 0)
       return true;
 
-    // For broad ranges, stream the GP block instead of allocating and
-    // sorting most of the column. Keep the value slice for selective ranges.
-    const size_t broad_range = view.count / 4 + (view.count % 4 != 0);
-    if (last - first >= broad_range)
+    if (INTEGER_INDEX_TRAITS::Less(High, Low))
+      std::swap(Low, High);
+
+    const size_t lower_low  = LowerBound(view, Low);
+    const size_t upper_low  = UpperBound(view, Low);
+    const size_t lower_high = LowerBound(view, High);
+    const size_t upper_high = UpperBound(view, High);
+
+    if ((Relation == ZRelEQ || Relation == ZRelGE) &&
+        INTEGER_INDEX_TRAITS::Equal(Low, High))
+      {
+        for (size_t i = lower_low; i < upper_low; ++i)
+          visitor(
+              INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
+              INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i));
+
+        return true;
+      }
+
+    switch (Relation)
+      {
+      case ZRelEQ:
+      case ZRelGE:
+        VisitMappedSlicesInGpOrder(
+            view,
+            lower_low, upper_high,
+            0, 0,
+            [Low, High](value_type value)
+            {
+              return value >= Low && value <= High;
+            },
+            visitor);
+        return true;
+
+      case ZRelGT:
+        VisitMappedSlicesInGpOrder(
+            view,
+            upper_low, lower_high,
+            0, 0,
+            [Low, High](value_type value)
+            {
+              return value > Low && value < High;
+            },
+            visitor);
+        return true;
+
+      case ZRelLT:
+      case ZRelNE:
+        VisitMappedSlicesInGpOrder(
+            view,
+            0, lower_low,
+            upper_high, view.count,
+            [Low, High](value_type value)
+            {
+              return value < Low || value > High;
+            },
+            visitor);
+        return true;
+
+      case ZRelLE:
+        VisitMappedSlicesInGpOrder(
+            view,
+            0, upper_low,
+            lower_high, view.count,
+            [Low, High](value_type value)
+            {
+              return value <= Low || value >= High;
+            },
+            visitor);
+        return true;
+
+      default:
+        return false;
+      }
+  }
+
+private:
+  struct HITPOS
+  {
+    GPTYPE    gp;
+    span_type span;
+  };
+
+  //
+  // Materialize one or two slices of the value-sorted block and emit them in
+  // GP order. For broad selections, avoid allocating/sorting most of the
+  // column and instead stream the GP-sorted block through Predicate.
+  //
+  template <class Predicate, class Visitor>
+  static void VisitMappedSlicesInGpOrder(const mapped_type& view,
+                                         size_t first1,
+                                         size_t last1,
+                                         size_t first2,
+                                         size_t last2,
+                                         Predicate&& PredicateFn,
+                                         Visitor&& visitor)
+  {
+    const size_t selected =
+        (last1 > first1 ? last1 - first1 : 0) +
+        (last2 > first2 ? last2 - first2 : 0);
+
+    if (selected == 0)
+      return;
+
+    const size_t broad_range =
+        view.count / 4 + (view.count % 4 != 0);
+
+    if (selected >= broad_range)
       {
         for (size_t i = 0; i < view.count; ++i)
           {
             const value_type value =
                 INTEGER_INDEX_TRAITS::MappedValueAt(view.gp_block, i);
-            const bool match = Relation == ZRelLT ? value < Key :
-                               Relation == ZRelLE ? value <= Key :
-                               Relation == ZRelGT ? value > Key : value >= Key;
-            if (match)
+
+            if (PredicateFn(value))
               visitor(
                   INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.gp_block, i),
                   INTEGER_INDEX_TRAITS::MappedSpanAt(view.gp_block, i));
           }
-        return true;
+
+        return;
       }
 
-    struct HITPOS
-    {
-      GPTYPE    gp;
-      span_type span;
-    };
-
     std::vector<HITPOS> hits;
-    hits.reserve(last - first);
+    hits.reserve(selected);
 
-    for (size_t i = first; i < last; ++i)
-      hits.push_back({
-          INTEGER_INDEX_TRAITS::MappedGlobalStartAt(view.value_block, i),
-          INTEGER_INDEX_TRAITS::MappedSpanAt(view.value_block, i)
-      });
+    const auto collect =
+        [&](size_t first, size_t last)
+        {
+          for (size_t i = first; i < last; ++i)
+            hits.push_back({
+                INTEGER_INDEX_TRAITS::MappedGlobalStartAt(
+                    view.value_block, i),
+                INTEGER_INDEX_TRAITS::MappedSpanAt(
+                    view.value_block, i)
+            });
+        };
+
+    collect(first1, last1);
+    collect(first2, last2);
 
     std::sort(hits.begin(), hits.end(),
       [](const HITPOS& a, const HITPOS& b)
@@ -218,11 +366,8 @@ public:
 
     for (const HITPOS& hit : hits)
       visitor(hit.gp, hit.span);
-
-    return true;
   }
 
-private:
   static size_t LowerBound(const mapped_type& view, value_type key)
   {
     size_t lo = 0;

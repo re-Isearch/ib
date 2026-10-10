@@ -405,7 +405,12 @@ static void HelpUsage(const char *progname)
 	"                   // Fielded Search: [[fieldname][relation]]searchterm[*][:n]" << endl <<
 	"                   // Relations are <,>,>=,<=,<> whose semantics of depends upon the" << endl <<
         "                   // field datatype." << endl <<  
-	endl <<
+	"                   // For integer types we also have x-y for terms where for field v: " << endl << 
+	"                   //     v>x-y    x <  v <  y" << endl << 
+	"                   //     v>=x-y   x <= v <= y" << endl << 
+	"                   //     v<x-y    v < x || v > y" << endl << 
+	"                   //     v<=x-y   v <= x || v >= y" << endl << 
+	"                   //     v!=x-y   v < x || v > y" <<  endl <<
 	"                   // In addition one may prefix with fieldname/ for fielded text searching." << endl <<
 	"                   // Append * for right truncation." << endl <<
 	"                   // Prepend * for left truncation." << endl <<

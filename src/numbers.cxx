@@ -1312,6 +1312,67 @@ inline bool Read(BOOLEANOBJ *p, FILE *Fp)
 #endif
 
 
+//
+// Integer range syntax.
+//
+// For now the compact query form is:
+//
+//     10-15
+//     -10-15
+//     -15--10
+//
+// INTEGEROBJ remains the authority for endpoint parsing, so the range
+// automatically inherits the full signed 128-bit syntax and validation.
+//
+bool INTEGERRANGE::SetRange(const STRING& RangeString)
+{
+  const STRING range(RangeString.Strip(STRING::both));
+  const char *text = range.c_str();
+  const size_t length = range.GetLength();
+
+  if (text == NULL || length < 3)
+    return false;
+
+  //
+  // A leading '-' belongs to the first endpoint. Every later '-' is a
+  // candidate separator; accept the first split for which both sides are
+  // valid INTEGEROBJs. This also handles a negative second endpoint.
+  //
+  for (size_t i = 1; i + 1 < length; ++i)
+    {
+      if (text[i] != '-')
+        continue;
+
+      const STRING left(text, i);
+      const STRING right(text + i + 1);
+
+      const INTEGEROBJ start(left);
+      const INTEGEROBJ end(right);
+
+      if (!start.Ok() || !end.Ok())
+        continue;
+
+      d_start = start;
+      d_end   = end;
+      return true;
+    }
+
+  return false;
+}
+
+
+bool INTEGERRANGE::Contains(const INTEGEROBJ& Test) const
+{
+  if (!Ok() || !Test.Ok())
+    return false;
+
+  if (d_start <= d_end)
+    return Test >= d_start && Test <= d_end;
+
+  return Test >= d_end && Test <= d_start;
+}
+
+
 // We now will support 128-bit integers
 bool INTEGEROBJ::Set(const STRING& s)
 {

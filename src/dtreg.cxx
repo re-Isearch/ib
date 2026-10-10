@@ -140,6 +140,7 @@ enum Doctypes {
   _TAGML,
   _BRAT,
   _CGLOMD,
+  _ISI_CIW,
 
   _MAX_ID, // This is the "last real" doctype
   _PLUGIN = 126
@@ -223,7 +224,7 @@ static const struct {
   { "TAGML",       _TAGML,   true},
   { "BRAT",        _BRAT,    true},
   { "CGLOMD",      _CGLOMD,  true},
-
+  { "ISI-CIW",     _ISI_CIW,   true},
 
   /* Aliases */
   { "TBINARY",    _TBINARY,     false},
@@ -259,6 +260,8 @@ static const struct {
   { "JSONLD",     _LDJSON,  false},
   { "CIRRUS",     _CIRRUSNDJSON, false},
   { "ESNDJSON",   _ESBULKNDJSON, false},
+  { "CURRENT-CONTENTS", _ISI_CIW, false},
+  { "WEB-OF-SCIENCE", _ISI_CIW, false},
 
 
   { "PLUGIN",     _PLUGIN,      false}
@@ -751,6 +754,8 @@ PDOCTYPE        DTREG::GetDocTypePtr(const DOCTYPE_ID& DoctypeId)
       return RegisterDocType (Ident, new DIGESTTOC(Db, Name));
     case _MEDLINE:
       return RegisterDocType (Ident, new MEDLINE(Db, Name));
+    case _ISI_CIW:
+      return RegisterDocType (Ident, new ISI_CIW(Db, Name));
     case _RIS:
       return RegisterDocType (Ident, new MEDLINE_RIS(Db, Name));
     case _FILMLINE:

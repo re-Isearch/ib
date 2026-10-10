@@ -140,10 +140,12 @@ void MEDLINE::ParseRecords (const RECORD& FileRecord)
       if (End > 0 && Position > End) break; // End of Subrecord
       if (Ch == '\n')
 	{
-	  // New Line
-	  if (State == LOOK)
+	  // New Line 
+	  bool is_ER = (pos >= 2 && buf[0] == 'E' && buf[1] == 'R' && 
+               (pos == 2 || buf[2] == ' ' || buf[2] == '-' || buf[2] == '\r'));
+	  if (State == LOOK || is_ER) 
 	    {
-	      if (pos < 5)
+	      if (is_ER || pos < 5)
 		State = FOUND;
 	      else if (!isspace (buf[0]) && !isalpha (buf[0]))
 		State = FOUND;	// not space and not letter
@@ -242,13 +244,15 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   static const TagTable_t Table[] = {
   /* SORTED LIST */
   /* NOTE: No white space and only Alphanumeric and - and . are allowed. */
+  {"A1",  "Author"},            // Primary Author
+  {"A2",  "Secondary-Author"},
   {"AA",  "Author-Address"},
   {"AB",  "Abstract"},
   {"AD",  "author-address"},
   {"AN",  "Accession-Number"},
   {"AR",  "Access-Restrictions"},
   {"AT",  "Article-Title"},
-  {"AU"   "Author"},
+  {"AU",  "Author"},
   {"CA",  "Corporate-Author"},
   {"CD",  "Coden"},
   {"CI",  "Column-inches"},
@@ -258,6 +262,8 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   {"DT",  "Document-Type"},
   {"DY",  "Day-of-the-week"},
   {"ED",  "Edition"},
+  {"EP",  "End-Page"},
+  {"ER",  "End-of-Record"},     // Equivalent to "ZZ"
   {"FR",  "Frequency"},
   {"GC",  "Geographic-Code"},
   {"GD",  "Government-Document-Num"},
@@ -269,6 +275,7 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   {"JA",  "Jo.Author"},
   {"JO",  "Journal"},
   {"JT",  "Item-Title"},
+  {"KW",  "Subject"},           // Keywords (maps directly to SU)
   {"LA",  "Language"},
   {"LC",  "LCCN"},
   {"LO",  "Location"},
@@ -290,6 +297,7 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   {"PL",  "Place"},
   {"PN",  "Producer-Num"},
   {"PU",  "Publisher"},
+  {"PY",  "Year"},              // Publication Year (maps to YE)
   {"RE",  "Reprint"},
   {"RF",  "Reference"},
   {"RN",  "Report-Numb"},
@@ -299,6 +307,7 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   {"SE",  "Series"},
   {"SL",  "Scale"},
   {"SO",  "Source"},
+  {"SP",  "Start-Page"},
   {"SR",  "Series-added"},
   {"SS",  "ISSN"},
   {"ST",  "Stock-Num"},
@@ -307,17 +316,17 @@ INT MEDLINE::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
   {"TD",  "Technical-Details"},
   {"TH",  "Thematic"},
   {"TI",  "Title"},
+  {"TY",  "Document-Type"},     // Reference Type (maps to DT)
   {"UI",  "Journal-code"},
   {"UT",  "Uniform-Title"},
   {"UR",  "URL"},
   {"VN",  "Vendor-Num"},
+  {"VL",  "Volume"},
   {"VO",  "Volume"},
-  {"VO",  "issue-vol"},
   {"YE",  "Year"},
   {"XX",  "Message"},
   {"ZZ",  "End-of-Record"}
  };
-
   return UnifiedNames (Table, sizeof(Table)/sizeof(TagTable_t), Tag, Value);
 }
 
@@ -984,16 +993,17 @@ PCHR *MEDLINE::parse_subtags (PCHR, off_t)
   return NULL; // No subtags
 }
 
-/*
+
 // ISI - Common Export Format 
 void ISI_CIW::SourceMIMEContent(PSTRING StringBuffer) const
 {
-  *StringBuffer = "Application/x-Inst-for-Scientific-InfoFile";
+  *StringBuffer = "Application/x-isi";
 }
 
 const char *ISI_CIW::Description(PSTRLIST List) const
 {
-  const STRING ThisDoctype("CURRENT-CITES");
+ //  const STRING ThisDoctype("CURRENT-CITES");
+  const STRING ThisDoctype("ISI-CIW");
   if (Doctype != ThisDoctype && List->IsEmpty())
     List->AddEntry(Doctype);
   List->AddEntry (ThisDoctype);
@@ -1001,11 +1011,53 @@ const char *ISI_CIW::Description(PSTRLIST List) const
   return "ISI Common Export Format used by Current Citations and other applications";
 }
 
-*/
+INT ISI_CIW::UnifiedNames (const STRING& Tag, PSTRLIST Value) const
+{
+  static const TagTable_t Table[] = {
+    {"PT", "publication-type"},
+    {"AU", "author"},
+    {"AF", "author-full"},
+    {"TI", "title-cover,title"},       // Multi-field aliasing into title vector!
+    {"SO", "source,journal"},
+    {"LA", "language"},
+    {"DT", "document-type"},
+    {"DE", "keywords"},
+    {"ID", "keywords-plus"},
+    {"AB", "abstract"},
+    {"C1", "author-address"},
+    {"RP", "reprint-address"},
+    {"CR", "cited-references"},       // Unique strength of ISI data
+    {"NR", "cited-reference-count"},
+    {"TC", "times-cited"},
+    {"PU", "publisher"},
+    {"PI", "publisher-city"},
+    {"PA", "publisher-address"},
+    {"SN", "issn"},
+    {"EI", "eissn"},
+    {"BN", "isbn"},
+    {"J9", "source-abbrev"},
+    {"JI", "iso-source-abbrev"},
+    {"PD", "publication-date"},
+    {"PY", "date,year"},
+    {"VL", "volume"},
+    {"IS", "issue"},
+    {"BP", "page-start"},
+    {"EP", "page-end"},
+    {"DI", "doi"},
+    {"UT", "accession-number,id"},     // WoS Unique Identifier (e.g., WOS:000123456...)
+    {"ER", "end-of-record"}            // Triggers your state machine's FOUND transition
+    /* NO NULL please! */
+  };
+  return MEDLINE::UnifiedNames (Table, sizeof(Table)/sizeof(TagTable_t), Tag, Value);
+
+}
 
 void MEDLINE_RIS::SourceMIMEContent(PSTRING StringBuffer) const
 {
-  *StringBuffer = "Application/X-Research-Info-Systems";
+  *StringBuffer = "application/x-research-info-systems";
 }
+
+
+
 
 

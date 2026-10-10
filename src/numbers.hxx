@@ -394,4 +394,61 @@ private:
   bool valid;
 };
 
+
+class INTEGERRANGE
+{
+public:
+  INTEGERRANGE() = default;
+
+  INTEGERRANGE(const INTEGEROBJ& Start, const INTEGEROBJ& End)
+    : d_start(Start), d_end(End)
+  {
+  }
+
+  explicit INTEGERRANGE(const STRING& RangeString)
+  {
+    SetRange(RangeString);
+  }
+
+  bool SetRange(const STRING& RangeString);
+
+  bool SetRange(const INTEGEROBJ& Start, const INTEGEROBJ& End)
+  {
+    if (!Start.Ok() || !End.Ok())
+      return false;
+
+    d_start = Start;
+    d_end   = End;
+    return true;
+  }
+
+  INTEGEROBJ GetStart() const { return d_start; }
+  INTEGEROBJ GetEnd()   const { return d_end; }
+
+  void SetStart(const INTEGEROBJ& Start) { d_start = Start; }
+  void SetEnd(const INTEGEROBJ& End)     { d_end = End; }
+
+  bool Ok() const
+  {
+    return d_start.Ok() && d_end.Ok();
+  }
+
+  bool Defined() const
+  {
+    return d_start.Ok() || d_end.Ok();
+  }
+
+  bool Contains(const INTEGEROBJ& Test) const;
+
+  void Clear()
+  {
+    d_start = INTEGEROBJ();
+    d_end   = INTEGEROBJ();
+  }
+
+private:
+  INTEGEROBJ d_start;
+  INTEGEROBJ d_end;
+};
+
 #endif
