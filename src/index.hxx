@@ -23,6 +23,7 @@ Description:	Class INDEX
 #include "numbers.hxx"
 #include "intlist.hxx"
 #include "integerlist.hxx"
+#include "monetarylist.hxx"
 #include "gpolylist.hxx"
 #include "bboxlist.hxx"
 #include "fuzzy.hxx"
@@ -169,6 +170,8 @@ public:
                             INT4 Relation = ZRelEQ);
   PIRSET NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation = ZRelEQ);
+  PIRSET MonetarySearchRange(const MONETARYRANGE& Range, const STRING& FieldName,
+                             INT4 Relation = ZRelEQ);
   PIRSET HashSearch(const STRING& Contents, const STRING& FieldName, INT4 Relation = ZRelEQ, bool useCase = true);
   PIRSET LexiHashSearch(const STRING& Term, const STRING& FieldName, INT4 Relation = ZRelEQ);
 
@@ -440,6 +443,7 @@ private:
   // separate from FCACHE's pool because MultiMMapSession returns raw,
   // unpinned pointers and another FCACHE mapping could evict them.
   MultiMMapSession      IntegerColumnMaps;
+  MultiMMapSession      MonetaryColumnMaps;
 
   volatile Dictionary  *NumFieldCache;
 

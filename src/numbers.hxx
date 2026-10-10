@@ -261,107 +261,115 @@ computed callback ->|                |
 
 
 class MONETARYOBJ {
-// MONETARYOBJ represents a non-negative monetary quantity.
-// It provides fixed bounded precision suitable for prices and
-// intermediate monetary calculations.  Settlement/cash rounding
-// is an explicit operation and is not performed by Set().
 public:
-  MONETARYOBJ ();
-  MONETARYOBJ (const STRING& s);
-  MONETARYOBJ (const NUMBER x);
-  MONETARYOBJ (const NUMERICOBJ& x);
-/*
-  MONETARYOBJ (UINT4 amount, UINT2 fract) {
-    Amount = amount;
-    Fract  = fract;
-  }
-*/
-  bool Ok() const { return Fract < 50000 ? true : false; }
+  enum { TICKS_PER_UNIT = 50000 };
 
-  bool Set(const NUMBER  x);
+  MONETARYOBJ();
+  MONETARYOBJ(const STRING& s);
+  MONETARYOBJ(const NUMBER x);
+  MONETARYOBJ(const NUMERICOBJ& x);
+
+  bool Ok() const { return Valid; }
+
+  bool Set(const NUMBER x);
   bool Set(const STRING& s);
-
-  MONETARYOBJ& operator=(const MONETARYOBJ& newVal) {
-   Amount = newVal.Amount;
-   Fract  = newVal.Fract;
-   return *this;
-  }
-  MONETARYOBJ& operator=(const NUMBER x) {
-   Set(x);
-   return *this;
-  }
-
-  operator long double() const {
-    long double val = Amount;
-    if (Ok()) val += Fract/50000.0;
-    else      val += (Fract - 50001)/50000.0;
-    return val;
-  }
-
-  operator NUMERICOBJ() const { return NUMERICOBJ((long double)*this); }
-  operator double() const { return (double)((long double)*this); }
-  operator int()    const { return (int)Amount;  }
-  operator long()   const { return (long)Amount; }
-
-  bool RoundToNearest100th() {
-    if (!Ok()) return false;
-    UINT4 fract = 500 * ((Fract + 250) / 500);
-    if (fract >= 50000)
-      {
-        const UINT4 maxAmount = ~(UINT4)0;
-        if (Amount == maxAmount)
-          return false;
-        ++Amount;
-        Fract = 0;
-      }
-    else
-      {
-        Fract = (UINT2)fract;
-      }
+  bool SetTicks(INT16 ticks, bool fractionSpecified = true) {
+    Ticks = ticks;
+    Valid = true;
+    ExplicitFraction = fractionSpecified;
     return true;
   }
 
-  // Resolves to 0.000002
-  bool operator== (const MONETARYOBJ& Other) const {
-    return Amount == Other.Amount && Fract == Other.Fract;
+  INT16 GetTicks() const { return Ticks; }
+  INT16 GetWholePart() const {
+    return Valid ? Ticks / (INT16)TICKS_PER_UNIT : 0;
   }
-  bool operator!= (const MONETARYOBJ& Other) const {
-    return !(*this == Other);
-  }
-  bool operator>= (const MONETARYOBJ& Other) const {
-    return (Amount > Other.Amount || (Amount == Other.Amount && Fract >= Other.Fract));
-  }
-  bool operator<= (const MONETARYOBJ& Other) const {
-    return (Amount < Other.Amount || (Amount == Other.Amount && Fract <= Other.Fract));
-  }
-  bool operator>  (const MONETARYOBJ& Other) const {
-    return (Amount > Other.Amount || (Amount == Other.Amount && Fract > Other.Fract));
-  }
-  bool operator<  (const MONETARYOBJ& Other) const {
-    return (Amount < Other.Amount || (Amount == Other.Amount && Fract < Other.Fract));
+  bool HasExplicitFraction() const {
+    return Valid && ExplicitFraction;
   }
 
-  void        Write(FILE *Fp) const;
+  MONETARYOBJ& operator=(const MONETARYOBJ& other) {
+    Ticks = other.Ticks;
+    Valid = other.Valid;
+    ExplicitFraction = other.ExplicitFraction;
+    return *this;
+  }
+  MONETARYOBJ& operator=(const NUMBER x) {
+    Set(x);
+    return *this;
+  }
+
+  operator long double() const {
+    return Valid ? (long double)Ticks / (long double)TICKS_PER_UNIT : 0.0L;
+  }
+  operator NUMERICOBJ() const { return NUMERICOBJ((long double)*this); }
+  operator double() const { return (double)((long double)*this); }
+  operator int() const { return (int)GetWholePart(); }
+  operator long() const { return (long)GetWholePart(); }
+
+  bool RoundToNearest100th();
+
+  bool operator==(const MONETARYOBJ& other) const { return Ticks == other.Ticks; }
+  bool operator!=(const MONETARYOBJ& other) const { return Ticks != other.Ticks; }
+  bool operator>=(const MONETARYOBJ& other) const { return Ticks >= other.Ticks; }
+  bool operator<=(const MONETARYOBJ& other) const { return Ticks <= other.Ticks; }
+  bool operator> (const MONETARYOBJ& other) const { return Ticks >  other.Ticks; }
+  bool operator< (const MONETARYOBJ& other) const { return Ticks <  other.Ticks; }
+
+  void Write(FILE *Fp) const;
   bool Read(FILE *Fp);
 
   friend void Write(const MONETARYOBJ& s, FILE *Fp);
   friend bool Read(MONETARYOBJ *p, PFILE Fp);
 
-  // STD IO Streams
-  friend ostream& operator <<(ostream& os, const MONETARYOBJ& val) {
-    return os << val.Amount << "." << val.Fract;
+  friend ostream& operator<<(ostream& os, const MONETARYOBJ& val) {
+    return os << (long double)val;
   }
-  friend istream& operator >>(istream& os, MONETARYOBJ& val) {
-    STRING   tmp;
-    istream& o = os >> tmp;
+  friend istream& operator>>(istream& os, MONETARYOBJ& val) {
+    STRING tmp;
+    istream& out = os >> tmp;
     val = MONETARYOBJ(tmp);
-    return o;
+    return out;
   }
 
 private:
   void Invalidate();
-  UINT4 Amount;
-  UINT2 Fract; // nearlest 1/500 th cent, e.g. Amount/500*100 = 50,000
+
+  INT16 Ticks;
+  bool  Valid;
+  bool  ExplicitFraction;
+};
+
+
+class MONETARYRANGE
+{
+public:
+  MONETARYRANGE() = default;
+  MONETARYRANGE(const MONETARYOBJ& Start, const MONETARYOBJ& End)
+    : d_start(Start), d_end(End) {}
+  explicit MONETARYRANGE(const STRING& RangeString) { SetRange(RangeString); }
+
+  bool SetRange(const STRING& RangeString);
+  bool SetRange(const MONETARYOBJ& Start, const MONETARYOBJ& End) {
+    if (!Start.Ok() || !End.Ok()) return false;
+    d_start = Start;
+    d_end = End;
+    return true;
+  }
+
+  MONETARYOBJ GetStart() const { return d_start; }
+  MONETARYOBJ GetEnd() const { return d_end; }
+  void SetStart(const MONETARYOBJ& Start) { d_start = Start; }
+  void SetEnd(const MONETARYOBJ& End) { d_end = End; }
+
+  bool Ok() const { return d_start.Ok() && d_end.Ok(); }
+  bool Defined() const { return d_start.Ok() || d_end.Ok(); }
+  bool Contains(const MONETARYOBJ& Test) const;
+  void Clear() { d_start = MONETARYOBJ(); d_end = MONETARYOBJ(); }
+
+private:
+  MONETARYOBJ d_start;
+  MONETARYOBJ d_end;
 };
 
 

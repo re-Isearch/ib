@@ -98,10 +98,12 @@ void INDEX::SortNumericFieldData()
 
     if (FieldType.IsInteger()) {
       INTEGERLIST().WriteIndex(Fn);
+    } else if (FieldType.IsCurrency()) {
+      MONETARYLIST().WriteIndex(Fn);
     } else if (FieldType.IsNumerical() || FieldType.Equals(FIELDTYPE::boolean) ||
 		FieldType.IsComputed() || FieldType.IsPhonetic() ||
 		FieldType.IsHash() || FieldType.IsCaseHash() || FieldType.IsPrivHash() ||
-		FieldType.IsCurrency() || FieldType.IsLexiHash() || FieldType.IsSMILES() ) {
+		FieldType.IsLexiHash() || FieldType.IsSMILES() ) {
       NUMERICLIST().WriteIndex(Fn);
     } else if (FieldType.IsNumericalRange()) {
       INTERVALLIST().WriteIndex(Fn);
@@ -237,61 +239,292 @@ PIRSET INDEX::LexiHashSearch(const STRING& Term, const STRING& FieldName, INT4 R
 
 
 
-PIRSET INDEX::MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation)
+template <class Enumerator>
+static void PopulateTypedResultSet(PIDBOBJ parent,
+                                   const DATERANGE& dateRange,
+                                   PIRSET pirset,
+                                   Enumerator&& enumerate);
+
+
+static void MonetaryWholeUnitBounds(INT16 key, INT16 *low, INT16 *high)
 {
-  if (Parent == NULL) return NULL;
+  const INT16 tail = (INT16)MONETARYOBJ::TICKS_PER_UNIT - 1;
+
+  if (key > 0)
+    {
+      *low = key;
+      *high = key > MAX_INT16 - tail ? MAX_INT16 : key + tail;
+    }
+  else if (key < 0)
+    {
+      *high = key;
+      *low = key < MIN_INT16 + tail ? MIN_INT16 : key - tail;
+    }
+  else
+    {
+      *low = -tail;
+      *high = tail;
+    }
+}
+
+
+PIRSET INDEX::MonetarySearch(const MONETARYOBJ& Price,
+                             const STRING& FieldName,
+                             INT4 Relation)
+{
+  if (Parent == NULL)
+    return NULL;
+
+  PIRSET pirset = new IRSET(Parent);
 
   if (!Price.Ok())
     {
       Parent->SetErrorCode(113);
-      message_log(LOG_WARN, "Invalid monetary value in search for field '%s'", FieldName.c_str());
-      return new IRSET(Parent);
+      message_log(LOG_WARN,
+                  "Invalid monetary value in search for field '%s'",
+                  FieldName.c_str());
+      return pirset;
     }
 
-  const NUMBER   fKey = Price ;
-
 #ifdef FIELD_WILD_MATCH
-  STRING          pattern(FieldName);
-  const DFDT     *dfdtp = Parent->GetMainDfdt();
- 
+  STRING pattern(FieldName);
+  const DFDT *dfdtp = Parent->GetMainDfdt();
+
   if (!pattern.IsPlain() && dfdtp)
     {
+      IRSET *result = NULL;
       const size_t total = dfdtp->GetTotalEntries();
-      STRING       field;
-      FIELDTYPE    fType;
-      IRSET       *irset0 = NULL;
-      IRSET       *irset  = NULL;
 
-      //pattern.ToUpper();
-      //pattern.Replace("\\","/");
-      for (size_t i=0; i<total; i++)
+      for (size_t i = 0; i < total; ++i)
         {
-          field = dfdtp->GetFieldName(i+1);
-          fType = Parent->GetFieldType(field);
-          // Is this field currency? 
-          if (! fType.IsCurrency())
+          const STRING field = dfdtp->GetFieldName(i + 1);
+          const FIELDTYPE type = Parent->GetFieldType(field);
+
+          if (!type.IsCurrency())
             continue;
 
-          // Does it match?
-          //field.Replace("\\", "/");
-          if (field.GetLength() &&  FIELD_WILD_MATCH(pattern, field))
+          if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
             {
-              if ((irset0 = NumericSearch(fKey, field, Relation)) != NULL)
+              IRSET *part = MonetarySearch(Price, field, Relation);
+
+              if (part)
                 {
-                  if (irset)
+                  if (result)
                     {
-                      irset->Or(*irset0);
-                      delete irset0;
+                      result->Or(*part);
+                      delete part;
                     }
-                  else irset = irset0;
+                  else
+                    result = part;
                 }
             }
         }
-      if (irset) return irset;
+
+      if (result)
+        {
+          delete pirset;
+          return result;
+        }
     }
 #endif
-  return NumericSearch(fKey, FieldName, Relation);
+
+  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
+
+  if (!ft.IsCurrency())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_DEBUG,
+                  "Can't search monetary value in field '%s' of type '%s'",
+                  FieldName.c_str(), ft.c_str());
+      return pirset;
+    }
+
+  STRING Fn;
+  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
+    {
+      Parent->SetErrorCode(1);
+      message_log(LOG_PANIC,
+                  "Could not create monetary table name for field '%s'",
+                  FieldName.c_str());
+      return pirset;
+    }
+
+  if (!FileExists(Fn))
+    {
+      Parent->SetErrorCode(113);
+      return pirset;
+    }
+
+  MONETARYLIST List;
+  const INT16 key = Price.GetTicks();
+
+  const clock_t startClock = clock();
+  const auto keepRunning = [&]() -> bool
+  {
+    if (MaxCPU_ticks > 0 &&
+        clock() - startClock > MaxCPU_ticks)
+      {
+        CPU_ResourcesExhausted();
+        return false;
+      }
+
+    return true;
+  };
+
+  PopulateTypedResultSet(
+      Parent,
+      DateRange,
+      pirset,
+      [&](auto&& visitor)
+      {
+        // "12" denotes the whole-unit bucket; "12.00" is exact.
+        // Other scalar relations retain ordinary ordered semantics.
+        if (!Price.HasExplicitFraction() &&
+            (Relation == ZRelEQ || Relation == ZRelNE))
+          {
+            INT16 low, high;
+            MonetaryWholeUnitBounds(key, &low, &high);
+
+            return List.VisitMappedRange(
+                Fn,
+                low,
+                high,
+                (ZRelation_t)Relation,
+                MonetaryColumnMaps,
+                keepRunning,
+                visitor);
+          }
+
+        return List.VisitMappedMatches(
+            Fn,
+            key,
+            (ZRelation_t)Relation,
+            MonetaryColumnMaps,
+            keepRunning,
+            visitor);
+      });
+
+  return pirset;
 }
+
+
+PIRSET INDEX::MonetarySearchRange(const MONETARYRANGE& Range,
+                                  const STRING& FieldName,
+                                  INT4 Relation)
+{
+  if (Parent == NULL)
+    return NULL;
+
+  PIRSET pirset = new IRSET(Parent);
+
+  if (!Range.Ok())
+    return pirset;
+
+#ifdef FIELD_WILD_MATCH
+  STRING pattern(FieldName);
+  const DFDT *dfdtp = Parent->GetMainDfdt();
+
+  if (!pattern.IsPlain() && dfdtp)
+    {
+      IRSET *result = NULL;
+      const size_t total = dfdtp->GetTotalEntries();
+
+      for (size_t i = 0; i < total; ++i)
+        {
+          const STRING field = dfdtp->GetFieldName(i + 1);
+          const FIELDTYPE type = Parent->GetFieldType(field);
+
+          if (!type.IsCurrency())
+            continue;
+
+          if (field.GetLength() && FIELD_WILD_MATCH(pattern, field))
+            {
+              IRSET *part = MonetarySearchRange(Range, field, Relation);
+
+              if (part)
+                {
+                  if (result)
+                    {
+                      result->Or(*part);
+                      delete part;
+                    }
+                  else
+                    result = part;
+                }
+            }
+        }
+
+      if (result)
+        {
+          delete pirset;
+          return result;
+        }
+    }
+#endif
+
+  const FIELDTYPE ft = Parent->GetFieldType(FieldName);
+
+  if (!ft.IsCurrency())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_DEBUG,
+                  "Can't search monetary range in field '%s' of type '%s'",
+                  FieldName.c_str(), ft.c_str());
+      return pirset;
+    }
+
+  STRING Fn;
+  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
+    {
+      Parent->SetErrorCode(1);
+      message_log(LOG_PANIC,
+                  "Could not create monetary table name for field '%s'",
+                  FieldName.c_str());
+      return pirset;
+    }
+
+  if (!FileExists(Fn))
+    {
+      Parent->SetErrorCode(113);
+      return pirset;
+    }
+
+  MONETARYLIST List;
+  const INT16 low = Range.GetStart().GetTicks();
+  const INT16 high = Range.GetEnd().GetTicks();
+
+  const clock_t startClock = clock();
+  const auto keepRunning = [&]() -> bool
+  {
+    if (MaxCPU_ticks > 0 &&
+        clock() - startClock > MaxCPU_ticks)
+      {
+        CPU_ResourcesExhausted();
+        return false;
+      }
+
+    return true;
+  };
+
+  PopulateTypedResultSet(
+      Parent,
+      DateRange,
+      pirset,
+      [&](auto&& visitor)
+      {
+        return List.VisitMappedRange(
+            Fn,
+            low,
+            high,
+            (ZRelation_t)Relation,
+            MonetaryColumnMaps,
+            keepRunning,
+            visitor);
+      });
+
+  return pirset;
+}
+
 
 //
 
@@ -760,7 +993,7 @@ size_t INDEX::NumericalScan(SCANLIST *Scanlist, const STRING& FieldName, size_t 
 
 
 template <class Enumerator>
-static void PopulateIntegerResultSet(PIDBOBJ parent,
+static void PopulateTypedResultSet(PIDBOBJ parent,
                                      const DATERANGE& dateRange,
                                      PIRSET pirset,
                                      Enumerator&& enumerate)
@@ -790,10 +1023,10 @@ static void PopulateIntegerResultSet(PIDBOBJ parent,
   SRCH_DATE rec_date;
 
   enumerate(
-      [&](GPTYPE gp, INTEGERFLD::span_type span)
+      [&](GPTYPE gp, UINT2 span)
       {
         //
-        // INTEGERLIST enumerators emit in GP order. Reuse the current MDT
+        // Typed ordered-list enumerators emit in GP order. Reuse the current MDT
         // span while the next hit remains in the same record.
         //
         if (current_w == 0 || !current_record.Contains(gp))
@@ -946,7 +1179,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
     return true;
   };
 
-  PopulateIntegerResultSet(
+  PopulateTypedResultSet(
       Parent,
       DateRange,
       pirset,
@@ -1067,7 +1300,7 @@ PIRSET INDEX::IntegerSearchRange(const INTEGERRANGE& Range,
     return true;
   };
 
-  PopulateIntegerResultSet(
+  PopulateTypedResultSet(
       Parent,
       DateRange,
       pirset,
