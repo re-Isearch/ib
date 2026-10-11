@@ -7,6 +7,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include "numbers.hxx"
 
 #include <charconv>
+#include <array>
 
 static DOUBLE BAD_NUMBER = 1.17549435e-38F;
 
@@ -316,28 +317,28 @@ bool NUMERICALRANGE::Defined() const
   return d_start.val != BAD_NUMBER || d_end.val != BAD_NUMBER;
 }
 
-static const UINT4 CURRENCY_MODULO  = 50000;
-static const UINT2 BAD_CURRENCY_VAL = 50001;
+static const INT4 CURRENCY_MODULO = MONETARYOBJ::TICKS_PER_UNIT;
 
 
 void MONETARYOBJ::Invalidate()
 {
-  Amount = 0;
-  Fract  = BAD_CURRENCY_VAL;
+  Ticks = 0;
+  Valid = false;
+  ExplicitFraction = false;
 }
 
 //
-// This is the class that handles monetary objects like prices and valuta.
-// 
-MONETARYOBJ::MONETARYOBJ ()
+// Monetary values are stored as signed 128-bit counts of 1/50000-unit ticks.
+// String parsing remains decimal and exact up to that resolution.
+//
+MONETARYOBJ::MONETARYOBJ()
 {
   Invalidate();
 }
 
-MONETARYOBJ::MONETARYOBJ (const STRING& s)
+MONETARYOBJ::MONETARYOBJ(const STRING& s)
 {
-  Amount = 0;
-  Fract  = BAD_CURRENCY_VAL;
+  Invalidate();
   Set(s);
 }
 
@@ -756,12 +757,11 @@ bool MONETARYOBJ::Set(const STRING& s)
   if (p == end)
     return false;
 
-  // Current representation is unsigned.
-  if (*p == '-')
-    return false;
+  bool negative = false;
 
-  if (*p == '+')
+  if (*p == '-' || *p == '+')
     {
+      negative = (*p == '-');
       ++p;
       SkipMoneySpaces(p, end);
 
@@ -894,16 +894,15 @@ bool MONETARYOBJ::Set(const STRING& s)
   //
   // Build the whole part exactly.  No floating point involved.
   //
-  UINT8 whole = 0;
+  UINT16 whole = 0;
 
   for (const unsigned char *q = p; q < integerEnd; )
     {
       if (MoneyDigit(*q))
         {
-          const UINT8 digit = *q - '0';
-          const UINT8 maxValue = ~(UINT8)0;
+          const UINT16 digit = *q - '0';
 
-          if (whole > (maxValue - digit) / 10)
+          if (whole > (MAX_UINT16 - digit) / 10)
             return false;
 
           whole = whole * 10 + digit;
@@ -989,24 +988,35 @@ bool MONETARYOBJ::Set(const STRING& s)
   // Cent input:
   //       cents * 500 + fractional-cent ticks
   //
-  const UINT8 scale = cents ? 500 : CURRENCY_MODULO;
+  const UINT16 scale = (UINT16)(cents ? 500 : CURRENCY_MODULO);
+  const UINT16 minMagnitude = (UINT16)MAX_INT16 + 1;
+  const UINT16 maxMagnitude =
+      negative ? minMagnitude : (UINT16)MAX_INT16;
 
-  const UINT8 maxAmount = (UINT4)~(UINT4)0;
-  const UINT8 maxTicks = maxAmount * (UINT8)CURRENCY_MODULO + (CURRENCY_MODULO - 1);
-
-  if (whole > maxTicks / scale)
+  if (whole > maxMagnitude / scale)
     return false;
 
-  UINT8 ticks = whole * scale;
+  UINT16 magnitude = whole * scale;
 
-  if ((UINT8)fractionScaled > maxTicks - ticks)
+  if ((UINT16)fractionScaled > maxMagnitude - magnitude)
     return false;
 
-  ticks += fractionScaled;
+  magnitude += (UINT16)fractionScaled;
 
-  Amount = (UINT4)(ticks / CURRENCY_MODULO);
-  Fract  = (UINT2)(ticks % CURRENCY_MODULO);
+  if (negative)
+    {
+      if (magnitude == minMagnitude)
+        Ticks = MIN_INT16;
+      else
+        Ticks = -(INT16)magnitude;
+    }
+  else
+    {
+      Ticks = (INT16)magnitude;
+    }
 
+  Valid = true;
+  ExplicitFraction = (decimal != NULL) || cents;
   return true;
 }
 
@@ -1158,117 +1168,191 @@ bool MONETARYOBJ::Set(const STRING& s)
 #endif
 
 
-MONETARYOBJ::MONETARYOBJ (const NUMBER x)
+MONETARYOBJ::MONETARYOBJ(const NUMBER x)
 {
+  Invalidate();
   Set(x);
 }
 
-MONETARYOBJ::MONETARYOBJ (const NUMERICOBJ& x)
+MONETARYOBJ::MONETARYOBJ(const NUMERICOBJ& x)
 {
+  Invalidate();
   Set((NUMBER)x);
 }
 
-
-#if 1
 
 bool MONETARYOBJ::Set(const NUMBER x)
 {
   Invalidate();
 
-  // Current representation is unsigned: don't silently wrap debt/negative
-  // amounts. Supporting negatives would require a representation change.
-  if (x < 0) return false;
-
-  // NaN/infinity should also never become prices.
-  if (!std::isfinite((long double)x)) return false;
-
-  const NUMBER whole = floorl(x);
-  // MaxAmount >
-  if (whole > (NUMBER)((UINT4)~(UINT4)0))
+  const long double input = (long double)x;
+  if (!std::isfinite(input))
     return false;
 
+  const long double scaled = input * (long double)CURRENCY_MODULO;
+  if (!std::isfinite(scaled))
+    return false;
 
-  NUMBER f = (x - whole) * (double)CURRENCY_MODULO;
-  UINT4 fract = (UINT4)floorl(f + 0.5L);
+  const long double rounded =
+      scaled < 0.0L ? ceill(scaled - 0.5L) : floorl(scaled + 0.5L);
 
-  UINT4 amount = (UINT4)whole;
+  if (rounded < (long double)MIN_INT16 ||
+      rounded > (long double)MAX_INT16)
+    return false;
 
-  // Round to the nearest representable 1/50000.
-  if (fract >= CURRENCY_MODULO)
-    {
-      if (amount == (UINT4)~(UINT4)0)
-        return false;
-      // 0.99999... may round to the next whole unit.
-      ++amount;
-      fract = 0;
-    }
+  Ticks = (INT16)rounded;
+  Valid = true;
 
-  Amount = amount;
-  Fract  = (UINT2)fract;
+  // NUMBER has already lost lexical precision information. Treat it as
+  // an explicitly specified numeric value, never whole-unit shorthand.
+  ExplicitFraction = true;
   return true;
 }
 
-#else
 
-bool MONETARYOBJ::Set (const NUMBER x)
+bool MONETARYOBJ::RoundToNearest100th()
 {
-  const long crowns = (long)x;
+  if (!Valid)
+    return false;
 
-  Amount = (UINT4)crowns;
-  Fract  = (UINT2)((x - crowns)*CURRENCY_MODULO);
-  if (Amount == crowns) // It fits
-    return true;
-  Fract += BAD_CURRENCY_VAL;
-  return false; // Does not fit
+  const INT16 cent = (INT16)(CURRENCY_MODULO / 100);
+  const INT16 half = cent / 2;
+  const INT16 remainder = Ticks % cent;
+  INT16 rounded = Ticks - remainder;
+
+  if (remainder >= half)
+    {
+      if (rounded > MAX_INT16 - cent)
+        return false;
+      rounded += cent;
+    }
+  else if (remainder <= -half)
+    {
+      if (rounded < MIN_INT16 + cent)
+        return false;
+      rounded -= cent;
+    }
+
+  Ticks = rounded;
+  ExplicitFraction = true;
+  return true;
 }
-#endif
+
 
 void MONETARYOBJ::Write(FILE *Fp) const
 {
-  ::Write(Amount, Fp);
-  ::Write(Fract, Fp);
+  if (Fp == NULL)
+    return;
+
+  const UCHR flags =
+      (Valid ? 0x01 : 0x00) |
+      (ExplicitFraction ? 0x02 : 0x00);
+
+  const UINT16 bits = (UINT16)Ticks;
+
+  ::Write(flags, Fp);
+  ::Write(UINT16_high_part(bits), Fp);
+  ::Write(UINT16_low_part(bits), Fp);
 }
+
 
 void Write(const MONETARYOBJ& s, FILE *Fp)
 {
   s.Write(Fp);
 }
 
-#if 1
+
 bool MONETARYOBJ::Read(FILE *Fp)
 {
   Invalidate();
 
-  UINT4 amount;
-  UINT2 fract;
+  if (Fp == NULL)
+    return false;
 
-  ::Read(&amount, Fp);
-  ::Read(&fract, Fp);
+  std::array<BYTE, 17> buf;
 
-  if (Ok()) 
+  if (fread(buf.data(), 1, buf.size(), Fp) != buf.size())
+    return false;
+
+  const UCHR flags = buf[0];
+  const UINT16 bits = cons_UINT16(
+      getINT8(buf.data(), 1),
+      getINT8(buf.data(), 9));
+  const UINT16 sign = ((UINT16)1 << 127);
+
+  if ((bits & sign) == 0)
+    Ticks = (INT16)bits;
+  else
     {
-      Amount = amount;
-      Fract  = fract;
+      const UINT16 magnitude = (~bits) + 1;
+
+      if (magnitude == sign)
+        Ticks = MIN_INT16;
+      else
+        Ticks = -(INT16)magnitude;
+    }
+
+  Valid = (flags & 0x01) != 0;
+  ExplicitFraction = (flags & 0x02) != 0;
+
+  if (!Valid)
+    Ticks = 0;
+
+  return Valid;
+}
+
+
+bool Read(MONETARYOBJ *p, FILE *Fp)
+{
+  return p ? p->Read(Fp) : false;
+}
+
+
+//
+// Monetary range syntax mirrors INTEGER ranges, but each endpoint uses the
+// monetary parser (currency symbols, grouping, decimal separator, signs).
+//
+bool MONETARYRANGE::SetRange(const STRING& RangeString)
+{
+  const STRING range(RangeString.Strip(STRING::both));
+  const char *text = range.c_str();
+  const size_t length = range.GetLength();
+
+  if (text == NULL || length < 3)
+    return false;
+
+  for (size_t i = 1; i + 1 < length; ++i)
+    {
+      if (text[i] != '-')
+        continue;
+
+      const STRING left(text, i);
+      const STRING right(text + i + 1);
+
+      const MONETARYOBJ start(left);
+      const MONETARYOBJ end(right);
+
+      if (!start.Ok() || !end.Ok())
+        continue;
+
+      d_start = start;
+      d_end = end;
       return true;
     }
+
   return false;
 }
 
-#else
-bool MONETARYOBJ::Read(FILE *Fp)
-{
-  Fract = BAD_CURRENCY_VAL;
-  ::Read(&Amount, Fp);
-  ::Read(&Fract, Fp);
-  return Ok();
-}
-#endif
-  
 
-inline bool Read(MONETARYOBJ *p, FILE *Fp)
+bool MONETARYRANGE::Contains(const MONETARYOBJ& Test) const
 {
-  if (p) return p->Read(Fp);
-  return false;
+  if (!Ok() || !Test.Ok())
+    return false;
+
+  if (d_start <= d_end)
+    return Test >= d_start && Test <= d_end;
+
+  return Test >= d_end && Test <= d_start;
 }
 
 

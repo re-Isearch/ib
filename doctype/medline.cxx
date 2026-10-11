@@ -47,6 +47,11 @@ MEDLINE::MEDLINE (PIDBOBJ DbParent, const STRING& Doc): DOCTYPE (DbParent, Doc)
 {
  if (DateField.IsEmpty())
     DateField = "DP";
+
+  if (Db) {
+    Db->AddFieldType("year",      FIELDTYPE::date);
+    Db->AddFieldType("Date-of-publication", FIELDTYPE::date);
+  }
 }
 
 void MEDLINE::SourceMIMEContent(PSTRING StringPtr) const

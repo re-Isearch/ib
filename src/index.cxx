@@ -1336,7 +1336,6 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	case FIELDTYPE::metaphone2:
 	case FIELDTYPE::hash:
 	case FIELDTYPE::casehash:
-	case FIELDTYPE::currency:
 	case FIELDTYPE::lexi:
 	case FIELDTYPE::smiles:
 	case FIELDTYPE::dotnumber:
@@ -1351,6 +1350,12 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	  fp = INTEGERLIST().OpenForAppend(FileName);
 	  break;
 #endif
+	case FIELDTYPE::currency:
+	  // MONETARY uses the same mapped ordered geometry as INTEGER but a
+	  // distinct on-disk identity and domain semantics.
+	  MonetaryColumnMaps.Invalidate(FileName);
+	  fp = MONETARYLIST().OpenForAppend(FileName);
+	  break;
 	case FIELDTYPE::db_hnsw:
 #ifdef VECTOR_INDEX
 	case FIELDTYPE::db_hnsw2:
@@ -1785,8 +1790,29 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	      const MONETARYOBJ currency ( DocTypePtr->ParseCurrency(FieldName, Buffer) );
               if (currency.Ok())
                 {
-                  NUMERICFLD(gp, currency).Write(fp);
-                  items++;
+                  const FC monetaryFc(gp, gp + flen - 1);
+                  const MONETARYFLD field(monetaryFc, currency.GetTicks());
+
+                  if (!field.HasValidSpan())
+                    {
+                      message_log(LOG_ERROR,
+                        "MONETARY field '%s' at GP %lld has span %lu; maximum stored span is %lu",
+                        FieldName.c_str(), (long long)gp,
+                        (unsigned long)monetaryFc.Span(),
+                        (unsigned long)MONETARYFLD::MaxSpan());
+                      errors++;
+                    }
+                  else if (field.Write(fp))
+                    {
+                      items++;
+                    }
+                  else
+                    {
+                      message_log(LOG_ERROR | LOG_ERRNO,
+                        "Failed writing MONETARY field '%s' at GP %lld",
+                        FieldName.c_str(), (long long)gp);
+                      errors++;
+                    }
                 }
               break;
 	    }
@@ -3849,6 +3875,8 @@ PIRSET INDEX::Search (const QUERY& Query)
                   Parent->SetErrorCode(108);
                   return ERROR_SET; // Malformed query 
                 }
+              if (Parent->GetErrorCode() == 33)
+                Parent->SetErrorCode(32);
               Stack << Op1->Not ();
             }
 	  else if (op_t == OperatorSibling)
@@ -3921,7 +3949,11 @@ PIRSET INDEX::Search (const QUERY& Query)
 		  if (Op2) { Stack << Op2; Op2 = NULL;}
                   break;
                   // Normal unary operators:
-                case OperatorNotWithin: Op1->Not     ( fieldName ); break;
+                case OperatorNotWithin:
+                  if (Parent->GetErrorCode() == 33)
+                    Parent->SetErrorCode(32);
+                  Op1->Not(fieldName);
+                  break;
                 case OperatorWithin:    Op1->Within  ( fieldName ); break;
                 case OperatorInside:    Op1->Inside  ( fieldName ); break;
 		case OperatorInclusive: Op1->Inclusive(fieldName ); break;
@@ -3948,6 +3980,15 @@ PIRSET INDEX::Search (const QUERY& Query)
                 }
               else
                 {
+                  //
+                  // Error 33 means a leaf search returned a valid subset.
+                  // Once that partial result participates in binary query
+                  // algebra we can no longer promise that the final result
+                  // remains a subset of the exact answer.
+                  //
+                  if (Parent->GetErrorCode() == 33)
+                    Parent->SetErrorCode(32);
+
 #define SwapOp(Op1,Op2) { \
 		  const size_t t1 =((IRSET *)Op1)->GetHitTotal(); \
 		  const size_t t2 =((IRSET *)Op2)->GetHitTotal(); \
@@ -4361,11 +4402,27 @@ PIRSET INDEX::Search (const QUERY& Query)
               else if (aFieldType.IsCurrency() || FieldType.IsCurrency()) // FIELDTYPE::currency
                 {
                   if (gotRelation==false) Relation=ZRelEQ;
-		  MONETARYOBJ price;
-		  if (_IB_search_currency)
-		    price.Set(_IB_search_currency(FieldName.c_str(), Term.c_str(), Term.GetLength()));
-		  else price.Set(Term);
-		  if (price.Ok()) NewIrset=MonetarySearch(price, FieldName, Relation);
+
+                  MONETARYRANGE range(Term);
+
+                  if (range.Ok())
+                    {
+                      NewIrset = MonetarySearchRange(range, FieldName, Relation);
+                    }
+                  else
+                    {
+                      MONETARYOBJ price;
+
+                      if (_IB_search_currency)
+                        price.Set(_IB_search_currency(FieldName.c_str(),
+                                                      Term.c_str(),
+                                                      Term.GetLength()));
+                      else
+                        price.Set(Term);
+
+                      if (price.Ok())
+                        NewIrset = MonetarySearch(price, FieldName, Relation);
+                    }
                 }
 	      else if (aFieldType.IsLexiHash() || FieldType.IsLexiHash()) // FIELDTYPE::lexi
 		{
@@ -8734,6 +8791,36 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 	      IndexPtr->Parent->DfdtGetFileName(fieldName, fieldType, &Fn);
 	      switch ((int)fieldType)
 		{
+		  case FIELDTYPE::currency:
+		    {
+		      MONETARYLIST List;
+
+                      if (!List.LoadValueBlock(Fn))
+                        continue;
+
+                      const size_t count = List.GetCount();
+
+                      if (count > 0)
+                        {
+                          if ((out_fp = OpenForAppend(fieldName, fieldType)) != NULL)
+                            {
+                              for (size_t i = 0; i < count; ++i)
+                                List[i].Write(out_fp, offset);
+
+                              fclose(out_fp);
+                              objects += count;
+                              message_log(LOG_DEBUG,
+                                  "Imported %lu %s field(s) [%s].",
+                                  (long)count, fieldType.c_str(), "MONETARYLIST");
+                            }
+                          else
+                            message_log(LOG_ERROR | LOG_ERRNO,
+                                "Could not append to field '%s':%s [%s].",
+                                fieldName.c_str(), fieldType.c_str(), "MONETARYLIST");
+                        }
+		    }
+		    break;
+
 		  case FIELDTYPE::ttl:
 		  case FIELDTYPE::boolean:
 		  case FIELDTYPE::numerical:
@@ -8743,7 +8830,6 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		  case FIELDTYPE::metaphone2:
 		  case FIELDTYPE::hash:
 		  case FIELDTYPE::casehash:
-		  case FIELDTYPE::currency:
 		  case FIELDTYPE::lexi:
 		  case FIELDTYPE::dotnumber:
 		  case FIELDTYPE::privhash:
