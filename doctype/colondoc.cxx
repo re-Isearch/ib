@@ -105,7 +105,7 @@ FIELDTYPE METADOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	  else if (Contents.IsDate()) ft = FIELDTYPE::date;
 	  // else if (Contents.IsDate())          ft = FIELDTYPE::date;
 	  // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
-	  // else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
+	  else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
 	  else if (Contents.IsDotNumber())     ft = FIELDTYPE::dotnumber;
 
 	  else ft = FIELDTYPE::text;

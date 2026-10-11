@@ -87,12 +87,18 @@ inline bool _IsBulkActionLine(const STRING& content)
 
 
 inline JsonFlavor classify_nl_buffer(const STRING& content) {
-    // Look at first line structure
-    if (content[0] == '{' && content.find("wikitext"))
-        return JsonFlavor::CIRRUS;
-     if (_IsBulkActionLine (content.c_str(), content.Len()))
-        return JsonFlavor::ESBULK;
-    return JsonFlavor::JSONL; 
+  // Look at first line structure
+
+  if (content[0] == '{' && content.find("wikitext") != STRING::npos)
+    return JsonFlavor::CIRRUS;
+
+//  if (content[0] == '{' && content.find("wikitext"))
+//    return JsonFlavor::CIRRUS;
+
+
+  if (_IsBulkActionLine (content.c_str(), content.Len()))
+    return JsonFlavor::ESBULK;
+  return JsonFlavor::JSONL; 
 }
 
 static JsonFlavor identify_flavor(const STRING& content) {
@@ -432,6 +438,9 @@ void JSONDOC::ParseRecords(const RECORD& FileRecord)
 
     errors++;
   }
+
+  while ((off_t)Start < (off_t)ActualLength && isspace((unsigned char)RecBuffer[Start]))
+    ++Start;
 
   // Handle any trailing unparsed bytes
   if ((off_t)Start < (off_t)ActualLength)
