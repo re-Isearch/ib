@@ -4272,13 +4272,13 @@ PIRSET INDEX::Search (const QUERY& Query)
 		    {
 //cerr << "IS Number " << endl;
 		      // Number could be money but money should be money...
-		      if (Dfdt->NumericFieldExists(FieldName))
-			{
-			  FieldType = FIELDTYPE::numerical;
-			}
-		      else if (Dfdt->TypeFieldExists(FIELDTYPE::currency, FieldName))
+		      if (Dfdt->TypeFieldExists(FIELDTYPE::currency, FieldName))
 			{
 			  FieldType = FIELDTYPE::currency;
+			}
+		      else if (Dfdt->NumericFieldExists(FieldName))
+			{
+			  FieldType = FIELDTYPE::numerical;
 			}
 		    }
 		  else if (Term.IsCurrency())
