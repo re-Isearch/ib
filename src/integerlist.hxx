@@ -76,16 +76,17 @@ struct INTEGER_INDEX_TRAITS
 
   static bool WriteIndex(const STRING&,
       const std::vector<field_type>& valueBlock,
-      const std::vector<field_type>& gpBlock);class INTEGERLIST : public MAPPEDORDEREDLIST<INTEGER_INDEX_TRAITS>
+      const std::vector<field_type>& gpBlock);
+};
+
+
+class INTEGERLIST : public MAPPEDORDEREDLIST<INTEGER_INDEX_TRAITS>
 {
 public:
   using base_type   = MAPPEDORDEREDLIST<INTEGER_INDEX_TRAITS>;
-  using value_type  = typename base_type::value_type;
-  using span_type   = typename base_type::span_type;
-  using mapped_type = typename base_type::mapped_type;
-};
-
-}
+  using value_type  = base_type::value_type;
+  using span_type   = base_type::span_type;
+  using mapped_type = base_type::mapped_type;
 };
 
 #endif
