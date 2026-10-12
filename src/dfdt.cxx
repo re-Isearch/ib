@@ -359,7 +359,9 @@ size_t DFDT::Lookup (const STRING& FieldName) const
   message_log(LOG_DEBUG, "DFDT Lookup (%s) // Total=%d", Field.c_str(), TotalEntries);
 
   // Lets look at the last...
-  if (lastIndex && (Table[lastIndex-1].GetFieldName () == Field)) {
+  // The cached position is shared across tables, which may have fewer entries.
+  if (lastIndex > 0 && (size_t)lastIndex <= TotalEntries &&
+      (Table[lastIndex-1].GetFieldName () == Field)) {
     return lastIndex;
    }
 #if 1
@@ -431,6 +433,13 @@ bool DFDT::IsNumericalField (const STRING& FieldName) const
   if (x == 0)
     return false;
   return Table[x-1].GetAttributesPtr()->AttrGetFieldNumerical ();
+}
+
+FIELD_TYPE_STATE DFDT::GetFieldTypeState(const STRING& FieldName) const
+{
+  const size_t x = Lookup(FieldName);
+  return x ? Table[x-1].GetAttributesPtr()->AttrGetFieldTypeState() :
+             TypeStateUnknown;
 }
 
 bool DFDT::GetAttributes (const size_t Index, PATTRLIST AttributesBuffer) const

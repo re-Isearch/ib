@@ -1294,6 +1294,12 @@ extern "C" long double (*_IB_search_currency)(const char *, const char *, size_t
 
 
 
+FIELD_TYPE_STATE INDEX::GetFieldTypeState(const STRING& FieldName) const
+{
+  const DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
+  return Dfdt ? Dfdt->GetFieldTypeState(FieldName) : TypeStateUnknown;
+}
+
 // Given a Fieldname and FieldType return the filename (or its base)
 STRING INDEX::getFileName(const STRING& FieldName, FIELDTYPE FieldType)
 {

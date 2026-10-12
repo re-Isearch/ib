@@ -79,6 +79,13 @@ public:
 
   bool WriteFieldData(const RECORD& Record, const GPTYPE GpOffset);
 
+  // Read the state for a logical field name from the resident DFDT.
+  // Missing/legacy definitions are Unknown and conservatively frozen.
+  FIELD_TYPE_STATE GetFieldTypeState(const STRING& FieldName) const;
+  bool IsFieldTypeFrozen(const STRING& FieldName) const {
+    return GetFieldTypeState(FieldName) != TypeStateOpen;
+  }
+
   bool AddRecordList(PFILE RecordListFp);
 
   bool ValidateInField(const GPTYPE HitGp, const STRING& FieldName) const;
