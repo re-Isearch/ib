@@ -1322,6 +1322,9 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
       return it->second;
     }
 
+  if (FieldType != FIELDTYPE::text && FieldType != FIELDTYPE::any)
+    FreezeFieldType(FieldName);
+
   FILE         *fp = NULL;
   STRING       FileName = getFileName(FieldName, FieldType);
 
@@ -8999,5 +9002,18 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
   ActiveIndexing = false;
 
   return recordsAdded;
+}
+
+FIELD_TYPE_STATE INDEX::GetFieldTypeState(const STRING& FieldName) const
+{
+  const DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
+  return Dfdt ? Dfdt->GetFieldTypeState(FieldName) : TypeStateUnknown;
+}
+
+void INDEX::FreezeFieldType(const STRING& FieldName)
+{
+  DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
+  if (Dfdt)
+    Dfdt->FreezeFieldType(FieldName);
 }
 

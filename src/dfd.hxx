@@ -102,6 +102,9 @@ public:
   void                SetFcLayout(DFD_FC_LAYOUT value) { FcLayout = value; }
   DFD_FC_LAYOUT       GetFcLayout () const             { return FcLayout;  }
 
+  void                FreezeFieldType () {
+    Attributes.AttrSetFieldTypeState(FIELD_TYPE_STATE::TypeStateFrozen);
+  }
 ~DFD();
 private:
   // Persistent (created during indexing)

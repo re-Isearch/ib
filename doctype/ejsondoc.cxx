@@ -39,8 +39,8 @@ static const MongoAlias MongoAliases[] = {
   { "code",          "string"    },  // JavaScript code — index as text
   { "numberDecimal", "numerical" },
   { "numberDouble",  "numerical" },
-  { "numberInt",     "numerical" },
-  { "numberLong",    "numerical" },
+  { "numberInt",     "integer" },
+  { "numberLong",    "integer" },
   { "oid",           "casehash"  },  // 24-hex ObjectId string
   { "regex",         "string"    },  // pattern — index as text
   { "symbol",        "string"    },
@@ -232,7 +232,22 @@ void EJSONDOC::ForceFieldType(const STRING& fieldname, const FIELDTYPE& ft)
   if (!Db || !ft.Defined()) return;
 
   const FIELDTYPE current = CheckFieldType(fieldname);
-  if (!current.Defined())
+  bool changed = !current.Defined();
+
+cerr << "FIELD = " << fieldname << "   Current = " << current << " FT = " << ft << endl;
+
+  if (!changed)
+    {
+      bool update = false;
+      if (current == FIELDTYPE::integer && ft == FIELDTYPE::numerical)
+        update  = true;
+      else if (ft == FIELDTYPE::currency)
+        update  = current == FIELDTYPE::integer || current == FIELDTYPE::numerical;
+      if (update && !Db->IsFieldTypeFrozen(fieldname))
+        changed = true;
+    }
+
+  if (changed)
     {
       DFD dfd;
       Db->AddFieldType(fieldname, ft);
