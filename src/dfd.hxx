@@ -103,7 +103,7 @@ public:
   DFD_FC_LAYOUT       GetFcLayout () const             { return FcLayout;  }
 
   void                FreezeFieldType () {
-    Attributes.AttrSetFieldTypeState(FIELD_TYPE_STATE::TypeStateFrozen);
+    Attributes.AttrFreezeFieldType();
   }
 ~DFD();
 private:

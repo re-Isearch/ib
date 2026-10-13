@@ -234,8 +234,6 @@ void EJSONDOC::ForceFieldType(const STRING& fieldname, const FIELDTYPE& ft)
   const FIELDTYPE current = CheckFieldType(fieldname);
   bool changed = !current.Defined();
 
-cerr << "FIELD = " << fieldname << "   Current = " << current << " FT = " << ft << endl;
-
   if (!changed)
     {
       bool update = false;

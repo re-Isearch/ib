@@ -140,8 +140,8 @@ private:
   FIELDTYPE FieldType;
 };
 
-// Persisted values for IsearchTypeStateAttr. Missing/invalid state is Unknown
-// and must be treated as frozen; only an explicitly Open field may be refined.
+// Persisted values for IsearchTypeStateAttr. Missing/invalid state is Unknown.
+// Only an explicit Frozen state prevents automatic field type refinement.
 enum FIELD_TYPE_STATE {
   TypeStateUnknown = 0,
   TypeStateOpen    = 1,
@@ -190,7 +190,7 @@ public:
   bool AttrGetFieldType(PSTRING StringBuffer) const;
   FIELDTYPE   AttrGetFieldType() const;
 
-  // Initialize newly created field definitions explicitly to TypeStateOpen.
+  // Newly inferred fields may be explicitly marked TypeStateOpen.
   void        AttrSetFieldTypeState(const FIELD_TYPE_STATE State);
   FIELD_TYPE_STATE AttrGetFieldTypeState() const;
   bool        AttrGetFieldTypeFrozen() const;

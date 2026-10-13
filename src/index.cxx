@@ -1501,6 +1501,12 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
           continue;
         }
 
+#ifdef VECTOR_INDEX
+      // Vector appends bypass OpenForAppend, so freeze at their dispatch too.
+      if (FieldType == FIELDTYPE::db_hnsw || FieldType == FIELDTYPE::db_hnsw2 ||
+          FieldType == FIELDTYPE::db_hnsw3 || FieldType == FIELDTYPE::db_hnsw_raw)
+        FreezeFieldType(FieldName);
+#endif
 
       INT         type = (INT)FieldType;
       message_log (LOG_DEBUG, "Handle fieldtype: %d", type);
