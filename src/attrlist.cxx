@@ -811,7 +811,7 @@ FIELD_TYPE_STATE ATTRLIST::AttrGetFieldTypeState() const
 
 bool ATTRLIST::AttrGetFieldTypeFrozen() const
 {
-  return AttrGetFieldTypeState() != TypeStateOpen;
+  return AttrGetFieldTypeState() == TypeStateFrozen;
 }
 
 void ATTRLIST::AttrFreezeFieldType()

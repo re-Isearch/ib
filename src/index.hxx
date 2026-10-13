@@ -80,10 +80,10 @@ public:
   bool WriteFieldData(const RECORD& Record, const GPTYPE GpOffset);
 
   // Read the state for a logical field name from the resident DFDT.
-  // Missing/legacy definitions are Unknown and conservatively frozen.
+  // Unset state is Unknown; only explicit Frozen prevents refinement.
   FIELD_TYPE_STATE GetFieldTypeState(const STRING& FieldName) const;
   bool IsFieldTypeFrozen(const STRING& FieldName) const {
-    return GetFieldTypeState(FieldName) != TypeStateOpen;
+    return GetFieldTypeState(FieldName) == TypeStateFrozen;
   }
 
   bool AddRecordList(PFILE RecordListFp);
