@@ -698,20 +698,8 @@ enum TruncationValues {
 // Index Attributes (Features)
 void  ATTRLIST::AttrSetFieldObj(const FIELDOBJ& FieldObj)
 {
-  FIELDTYPE FieldType = FieldObj.GetFieldType();
-
   AttrSetFieldName ( FieldObj.GetFieldName() );
-  SetValue(IsearchAttributeSet, IsearchTypeAttr, (const char *)FieldType);
-#if 1
-  if (FieldType.IsNumerical())
-    {
-      AttrSetFieldNumerical(true);
-    }
-  else if (FieldType.IsDate())
-    {
-      AttrSetFieldDate(true);
-    }
-#endif
+  AttrSetFieldType(FieldObj.GetFieldType());
 }
 
 
@@ -747,20 +735,9 @@ void ATTRLIST::AttrSetFieldType(const FIELDTYPE& FieldType)
   STRING Type (FieldType.c_str());
   SetValue(IsearchAttributeSet, IsearchTypeAttr, Type);
 
-#if 1
-// Data types: "text" (the default), "num", "date", "date-range" and "gpoly".
-
-  if (FieldType.IsNumerical())
-    {
-      AttrSetFieldNumerical(true);
-    }
-  else if (FieldType.IsDate())
-    {
-      AttrSetFieldDate(true);
-    }
-  else
-    SetValue(IsearchAttributeSet, IsearchTypeAttr, Type);
-#endif
+  // A promotion must also remove the previous type's structure flag.
+  AttrSetFieldNumerical(FieldType.IsNumerical());
+  AttrSetFieldDate(FieldType.IsDate());
 }
 
 bool ATTRLIST::AttrGetFieldType(PSTRING StringBuffer) const

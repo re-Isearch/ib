@@ -173,3 +173,20 @@ STRING IDBOBJ::RelativizePathname(const STRING& Path) const
 {
   return ::RelativizePathname(Path, WorkingDirectory);
 }
+
+
+
+#include "index.hxx"
+  
+bool IDBOBJ::IsFieldTypeFrozen(const STRING& FieldName) const
+{
+  const INDEX *ptr = GetMainIndex();
+  if (ptr) return ptr->IsFieldTypeFrozen(FieldName);
+  return true; // Default is frozen!
+}
+void IDBOBJ::FreezeFieldType(const STRING& FieldName)
+{
+  INDEX *ptr = GetMainIndex();
+  if (ptr) ptr->FreezeFieldType(FieldName);
+}
+

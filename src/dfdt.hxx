@@ -101,6 +101,7 @@ public:
   INT GetFileNumber(const STRING& FieldName) const;
   bool IsNumericalField (const STRING& FieldName) const;
   FIELD_TYPE_STATE GetFieldTypeState(const STRING& FieldName) const;
+  bool             FreezeFieldType(const STRING& FieldName);
 
   int         Roots(STRLIST *StrlistPtr = NULL) const; // Returns number of root paths 
   STRING      FirstRoot() const;  // Returns first root

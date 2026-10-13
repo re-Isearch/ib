@@ -18,6 +18,7 @@ Author:		Edward C. Zimmermann, edz@nonmonotonic.net
 #include "colondoc.hxx"
 #include "common.hxx"
 #include "doc_conf.hxx"
+#include "fieldtype_promotion.hxx"
 
 static const STRING TableKeyword ("Table");
 static const STRING ListKeyword  ("List");
@@ -68,13 +69,26 @@ FIELDTYPE METADOC::GuessFieldType(const STRING& FieldName, const STRING& Content
   const size_t fLen = FieldName.GetLength();
 
 
-  if (Db && Contents.GetLength() && fLen > 0)
+  if (Db && fLen > 0)
     {
       FIELDTYPE ft ( CheckFieldType(FieldName) );
 
       // We already have a type?
       if (ft.Defined())
-	return ft;
+        {
+          if (!autoFieldTypes || Contents.IsEmpty() || fLen >= 1024) return ft;
+          const FIELDTYPE next = field_type_inference::GuessNumericPromotion(
+            ft, Contents, [&] { return Db->IsFieldTypeFrozen(FieldName); });
+          if (next != ft)
+            {
+              Db->AddFieldType(FieldName, next);
+              message_log(LOG_INFO, "%s: Field '%s' advanced from '%s' to '%s'",
+                Doctype.c_str(), FieldName.c_str(), ft.c_str(), next.c_str());
+            }
+          return next;
+        }
+
+      if (Contents.IsEmpty()) return FIELDTYPE::text;
 
       // We don't want to bother with fields longer than 1024 bytes!
       if (autoFieldTypes && fLen < 1024)
@@ -102,10 +116,10 @@ FIELDTYPE METADOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 		  }
 	    }
 	  else if (Contents.IsNumber()) ft = FIELDTYPE::numerical;
+	  else if (Contents.IsCurrency()) ft = FIELDTYPE::currency;
 	  else if (Contents.IsDate()) ft = FIELDTYPE::date;
 	  // else if (Contents.IsDate())          ft = FIELDTYPE::date;
 	  // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
-	  // else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
 	  else if (Contents.IsDotNumber())     ft = FIELDTYPE::dotnumber;
 
 	  else ft = FIELDTYPE::text;
@@ -467,7 +481,8 @@ void METADOC::ParseFields (RECORD *NewRecord)
 	}
 
       FIELDTYPE ft ( CheckFieldType(FieldName) );
-      if (recordsAdded < 100 && !ft.Defined())
+      if (recordsAdded < 100 && (!ft.Defined() ||
+          (autoFieldTypes && (ft == FIELDTYPE::integer || ft == FIELDTYPE::numerical))))
 	{
 #ifdef SVR4
           char *entry_id = (char *)alloca(sizeof(char)*(val_len +1));

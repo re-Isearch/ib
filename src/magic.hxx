@@ -52,7 +52,6 @@ typedef enum OBJ_IDS  {
   objDFDTRANGE, // 38 // Added 2026
   objINTEGERLIST, // 39
   objMONETARYLIST, // 40
-
   // .inx magic
   objINDEXm = 0x49, // MSB Index
   objINDEXl = 0x69 // LSB Index

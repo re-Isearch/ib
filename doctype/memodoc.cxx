@@ -18,6 +18,7 @@ Author:		Edward C. Zimmermann, edz@nonmonotonic.net
 #include "memodoc.hxx"
 #include "common.hxx"
 #include "doc_conf.hxx"
+#include "fieldtype_promotion.hxx"
 #include <alloca.h>
 
 
@@ -76,13 +77,26 @@ void MEMODOC::AfterIndexing()
 
 FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Contents)
 {
-  if (Db && Contents.GetLength())
+  if (Db)
     {
       FIELDTYPE ft ( Db->GetFieldType(FieldName) );
 
       // We already have a type?
       if (ft.Defined())
-	return ft;
+        {
+          if (!autoFieldTypes || Contents.IsEmpty() || Contents.GetLength() >= 512) return ft;
+          const FIELDTYPE next = field_type_inference::GuessNumericPromotion(
+            ft, Contents, [&] { return Db->IsFieldTypeFrozen(FieldName); });
+          if (next != ft)
+            {
+              Db->AddFieldType(FieldName, next);
+              message_log(LOG_INFO, "%s: Field '%s' advanced from '%s' to '%s'",
+                Doctype.c_str(), FieldName.c_str(), ft.c_str(), next.c_str());
+            }
+          return next;
+        }
+
+      if (Contents.IsEmpty()) return FIELDTYPE::text;
 
       // We only auto detect fields where the content is less than 512 bytes long
       if (autoFieldTypes && Contents.GetLength() < 512)
@@ -118,9 +132,9 @@ FIELDTYPE MEMODOC::GuessFieldType(const STRING& FieldName, const STRING& Content
 	    {
 	      ft = FIELDTYPE::numerical;
 	    }
+	  else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
           else if (Contents.IsDate())          ft = FIELDTYPE::date;
          // else if (Contents.IsDateRange())     ft = FIELDTYPE::daterange;
-	  else if (Contents.IsCurrency())      ft = FIELDTYPE::currency;
 	  else if (Contents.IsDotNumber())     ft = FIELDTYPE::dotnumber;
 #if 1
 	  else if ((Contents.GetLength() > DocumentKeySize) && ( FieldName ^= "ipnode"))
@@ -328,7 +342,8 @@ void MEMODOC::ParseFields (RECORD *NewRecord)
 	{
 //***************************************************
 	  FIELDTYPE ft ( Db->GetFieldType(FieldName) );
-	  if (recordsAdded < 100 && !ft.Defined())
+	  if (recordsAdded < 100 && (!ft.Defined() ||
+              (autoFieldTypes && (ft == FIELDTYPE::integer || ft == FIELDTYPE::numerical))))
 	    {
 	      char *entry_id = (char *)alloca( val_len + 1);
 

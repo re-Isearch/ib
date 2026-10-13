@@ -75,16 +75,15 @@ public:
   void   SetMaximumQueryCPU_sec(size_t newMax);
   size_t GetMaximumQueryCPU_sec() const;
 
-
-
-  bool WriteFieldData(const RECORD& Record, const GPTYPE GpOffset);
-
   // Read the state for a logical field name from the resident DFDT.
   // Unset state is Unknown; only explicit Frozen prevents refinement.
   FIELD_TYPE_STATE GetFieldTypeState(const STRING& FieldName) const;
   bool IsFieldTypeFrozen(const STRING& FieldName) const {
     return GetFieldTypeState(FieldName) == TypeStateFrozen;
   }
+  void FreezeFieldType(const STRING& FieldName);
+
+  bool WriteFieldData(const RECORD& Record, const GPTYPE GpOffset);
 
   bool AddRecordList(PFILE RecordListFp);
 

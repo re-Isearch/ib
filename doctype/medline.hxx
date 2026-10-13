@@ -71,16 +71,14 @@ public:
   ~MEDLINE_RIS() {}
 };
 
-/*
 class ISI_CIW : public MEDLINE {
 public:
-  ISI_CIW(IDBOBJ *Db, const STRING& Name);
+  ISI_CIW(IDBOBJ *Db, const STRING& Name) : MEDLINE(Db, Name) {}
   const char *Description(PSTRLIST List) const;
   void SourceMIMEContent(PSTRING StringBuffer) const;
-  ~ISI_CIW();
-private:
-  PCHR *parse_tags(PCHR b, off_t len) const;
+  INT UnifiedNames (const STRING& Tag, PSTRLIST Value) const;
+
+  ~ISI_CIW() {};
 };
-*/
 
 #endif

@@ -33,6 +33,20 @@ For a play, that might be a speech. For a scientific article, an abstract or par
 
 ### NEWS
 
+Oct 11 2026
+
+I've moved integer datatype from floating point to a 128-bit integer type. This will allow quite large sums. We've also moved the currency datatype to use 128-bit integers with 1/50000-unit ticks (resolution): any amount -3402823669209384634633746074317682.11456 up to  3402823669209384634633746074317682.11454.  This is roughly 27 quintillion times the entire annual world GDP in USD.
+In other words, the range is not going to be the practical limitation.
+
+The currency datatype not only has now a very large capacity-- sufficient for any economic data point-- but we've also implemented a specific search semantics:  NN matches NN.CCC but NN.CC only matches NN.CC. This models the human notion that a price of $12.95 is $12 (and change). 
+
+For integer (and soon numerical) types we also have x-y for terms where for field v:
+   v>x-y    x < v < y               v>=x-y   x <= v <= y
+   v<x-y    v < x || v > y          v=x-y    x <= v <= y
+   v!=x-y   v < x || v > y          v<=x-y   v <= x || v >= y
+
+The new design provides not just higher capacity and more features but also a signficant performance boost.
+
 Sept 2026
 
 We've added a few new doctypes.

@@ -1294,12 +1294,6 @@ extern "C" long double (*_IB_search_currency)(const char *, const char *, size_t
 
 
 
-FIELD_TYPE_STATE INDEX::GetFieldTypeState(const STRING& FieldName) const
-{
-  const DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
-  return Dfdt ? Dfdt->GetFieldTypeState(FieldName) : TypeStateUnknown;
-}
-
 // Given a Fieldname and FieldType return the filename (or its base)
 STRING INDEX::getFileName(const STRING& FieldName, FIELDTYPE FieldType)
 {
@@ -1327,6 +1321,9 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
     {
       return it->second;
     }
+
+  if (FieldType != FIELDTYPE::text && FieldType != FIELDTYPE::any)
+    FreezeFieldType(FieldName);
 
   FILE         *fp = NULL;
   STRING       FileName = getFileName(FieldName, FieldType);
@@ -1504,6 +1501,12 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
           continue;
         }
 
+#ifdef VECTOR_INDEX
+      // Vector appends bypass OpenForAppend, so freeze at their dispatch too.
+      if (FieldType == FIELDTYPE::db_hnsw || FieldType == FIELDTYPE::db_hnsw2 ||
+          FieldType == FIELDTYPE::db_hnsw3 || FieldType == FIELDTYPE::db_hnsw_raw)
+        FreezeFieldType(FieldName);
+#endif
 
       INT         type = (INT)FieldType;
       message_log (LOG_DEBUG, "Handle fieldtype: %d", type);
@@ -4278,13 +4281,13 @@ PIRSET INDEX::Search (const QUERY& Query)
 		    {
 //cerr << "IS Number " << endl;
 		      // Number could be money but money should be money...
-		      if (Dfdt->NumericFieldExists(FieldName))
-			{
-			  FieldType = FIELDTYPE::numerical;
-			}
-		      else if (Dfdt->TypeFieldExists(FIELDTYPE::currency, FieldName))
+		      if (Dfdt->TypeFieldExists(FIELDTYPE::currency, FieldName))
 			{
 			  FieldType = FIELDTYPE::currency;
+			}
+		      else if (Dfdt->NumericFieldExists(FieldName))
+			{
+			  FieldType = FIELDTYPE::numerical;
 			}
 		    }
 		  else if (Term.IsCurrency())
@@ -9005,5 +9008,18 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
   ActiveIndexing = false;
 
   return recordsAdded;
+}
+
+FIELD_TYPE_STATE INDEX::GetFieldTypeState(const STRING& FieldName) const
+{
+  const DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
+  return Dfdt ? Dfdt->GetFieldTypeState(FieldName) : TypeStateUnknown;
+}
+
+void INDEX::FreezeFieldType(const STRING& FieldName)
+{
+  DFDT *Dfdt = Parent ? Parent->GetMainDfdt() : NULL;
+  if (Dfdt)
+    Dfdt->FreezeFieldType(FieldName);
 }
 

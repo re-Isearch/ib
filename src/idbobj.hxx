@@ -295,6 +295,9 @@ public:
   virtual INDEX *GetMainIndex() const { return 0; }
   virtual INDEX *GetMainIndex(INT) const { return GetMainIndex(); }
 
+  virtual bool IsFieldTypeFrozen(const STRING& FieldName) const;
+  virtual void FreezeFieldType(const STRING& FieldName);
+
   virtual size_t ImportIndex(IDBOBJ *IndexPtr) { return 0; }
 
   virtual FCACHE *GetFieldCache() { return NULL; }

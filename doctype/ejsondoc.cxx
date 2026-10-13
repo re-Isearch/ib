@@ -39,8 +39,8 @@ static const MongoAlias MongoAliases[] = {
   { "code",          "string"    },  // JavaScript code — index as text
   { "numberDecimal", "numerical" },
   { "numberDouble",  "numerical" },
-  { "numberInt",     "numerical" },
-  { "numberLong",    "numerical" },
+  { "numberInt",     "integer" },
+  { "numberLong",    "integer" },
   { "oid",           "casehash"  },  // 24-hex ObjectId string
   { "regex",         "string"    },  // pattern — index as text
   { "symbol",        "string"    },
@@ -180,7 +180,8 @@ bool EJSONDOC::IsEJsonWrapper(const char *json, size_t recLen, size_t pos, FIELD
   //    Returns FIELDTYPE::unknown for unrecognised names.
   //    Covers: $date, $box, $iban, $metaphone, $xs:dateTime, etc.
 
-  if ( FIELDTYPE::GetType(STRING(nameBuf)) != FIELDTYPE::unknown)
+  ft = FIELDTYPE::GetType(STRING(nameBuf));
+  if (ft != FIELDTYPE::unknown)
     return true;
 
   // 2. MongoDB-specific alias table — names that don't match any
@@ -192,7 +193,8 @@ bool EJSONDOC::IsEJsonWrapper(const char *json, size_t recLen, size_t pos, FIELD
         sizeof(MongoAliases[0]), CmpMongoAlias);
     if (alias)
       {
-	if ( FIELDTYPE::GetType(STRING(alias->reisearch)) !=  FIELDTYPE::unknown)
+	ft = FIELDTYPE::GetType(STRING(alias->reisearch));
+	if (ft !=  FIELDTYPE::unknown)
 	  return true;
       }
   }
@@ -228,10 +230,31 @@ bool EJSONDOC::IsEJsonWrapper(const char *json, size_t recLen, size_t pos, FIELD
 void EJSONDOC::ForceFieldType(const STRING& fieldname, const FIELDTYPE& ft)
 {
   if (!Db || !ft.Defined()) return;
-  DFD dfd;
-  dfd.SetFieldName(fieldname);
-  dfd.SetFieldType(ft);
-  Db->DfdtAddEntry(dfd);
+
+  const FIELDTYPE current = CheckFieldType(fieldname);
+  bool changed = !current.Defined();
+
+cerr << "FIELD = " << fieldname << "   Current = " << current << " FT = " << ft << endl;
+
+  if (!changed)
+    {
+      bool update = false;
+      if (current == FIELDTYPE::integer && ft == FIELDTYPE::numerical)
+        update  = true;
+      else if (ft == FIELDTYPE::currency)
+        update  = current == FIELDTYPE::integer || current == FIELDTYPE::numerical;
+      if (update && !Db->IsFieldTypeFrozen(fieldname))
+        changed = true;
+    }
+
+  if (changed)
+    {
+      DFD dfd;
+      Db->AddFieldType(fieldname, ft);
+      dfd.SetFieldName(fieldname);
+      dfd.SetFieldType(ft);
+      Db->DfdtAddEntry(dfd);
+   }
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +323,11 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
         }
       if (tStart != (size_t)-1 && !fieldname.IsEmpty())
         {
+          ForceFieldType(fieldname, ft);
           AddField(record, fieldname,
                    (GPTYPE)(base + tStart), (GPTYPE)(base + tEnd),
                    tContents);
-          ForceFieldType(fieldname, ft);
+          // ForceFieldType(fieldname, ft);
         }
     }
   else if (json[pos] == '{')
@@ -339,10 +363,11 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
 
       if (vStart != (size_t)-1 && !fieldname.IsEmpty())
         {
+          ForceFieldType(fieldname, ft);
           AddField(record, fieldname,
                    (GPTYPE)(base + vStart), (GPTYPE)(base + vEnd),
                    contents);
-          ForceFieldType(fieldname, ft);
+          // ForceFieldType(fieldname, ft);
         }
     }
   else if (json[pos] == '"')
@@ -354,10 +379,11 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
         {
           STRING contents;
           for (size_t i = vStart; i <= vEnd; ++i) contents += json[i];
+          ForceFieldType(fieldname, ft);
           AddField(record, fieldname,
                    (GPTYPE)(base + vStart), (GPTYPE)(base + vEnd),
                    contents);
-          ForceFieldType(fieldname, ft);
+          // ForceFieldType(fieldname, ft);
         }
     }
   else
@@ -369,10 +395,11 @@ void EJSONDOC::HandleEJsonWrapper(const char *json, size_t recLen,
         {
           STRING contents;
           for (size_t i = vStart; i <= vEnd; ++i) contents += json[i];
+          ForceFieldType(fieldname, ft);
           AddField(record, fieldname,
                    (GPTYPE)(base + vStart), (GPTYPE)(base + vEnd),
                    contents);
-          ForceFieldType(fieldname, ft);
+          // ForceFieldType(fieldname, ft);
         }
     }
 

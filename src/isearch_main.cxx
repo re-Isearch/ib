@@ -405,7 +405,10 @@ static void HelpUsage(const char *progname)
 	"                   // Fielded Search: [[fieldname][relation]]searchterm[*][:n]" << endl <<
 	"                   // Relations are <,>,>=,<=,<> whose semantics of depends upon the" << endl <<
         "                   // field datatype." << endl <<  
-	endl <<
+	"                   // For integer types we also have x-y for terms where for field v: " << endl << 
+	"                   //     v>x-y    x < v <  y             v>=x-y   x <= v <= y" << endl << 
+	"                   //     v<x-y    v < x || v > y         v<=x-y   v <= x || v >= y" << endl << 
+	"                   //     v!=x-y   v < x || v > y" <<  endl <<
 	"                   // In addition one may prefix with fieldname/ for fielded text searching." << endl <<
 	"                   // Append * for right truncation." << endl <<
 	"                   // Prepend * for left truncation." << endl <<
@@ -3434,8 +3437,12 @@ static void HelpUsageText( const char *progname, std::ostream& out)
       << "\n"
       << "fielded search:\n"
       << "  [[fieldname][relation]]searchterm[*][:weight]\n"
-      << "  Relations are <, >, >=, <= and <>. Their semantics depend\n"
+      << "  Relations are <, >, >=, <=, = and <>. Their semantics depend\n"
       << "  upon the field datatype.\n"
+      << "  For integer types we also have x-y for terms where for field v:\n"
+      << "   v>x-y    x < v < y               v>=x-y   x <= v <= y\n" 
+      << "   v<x-y    v < x || v > y          v=x-y    x <= v <= y\n"
+      << "   v!=x-y   v < x || v > y          v<=x-y   v <= x || v >= y\n"
       << "\n"
       << "term modifiers:\n";
 

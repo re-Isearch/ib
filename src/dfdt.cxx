@@ -293,7 +293,11 @@ void DFDT::AddEntry(const DFD& DfdRecord)
       }
       Changed = true;
     } else {
-       Table[0].SetFieldType (DfdRecord.GetFieldType()); // added 9 Oct 2003 
+       if (Table[0].GetFieldType() != DfdRecord.GetFieldType())
+         {
+           Table[0].SetFieldType(DfdRecord.GetFieldType());
+           Changed = true;
+         }
     }
     return;
   } else {
@@ -302,7 +306,11 @@ void DFDT::AddEntry(const DFD& DfdRecord)
       /* binary search */
       oip = i;
       if ((res = Fieldname.FieldCmp( Table[i].GetFieldName()  )) == 0) {
-	Table[i].SetFieldType (DfdRecord.GetFieldType()); // added 9 Oct 2003
+	if (Table[i].GetFieldType() != DfdRecord.GetFieldType())
+	  {
+	    Table[i].SetFieldType(DfdRecord.GetFieldType());
+	    Changed = true;
+	  }
 	return; // Already available
       } else if (res < 0)
 	high = i;
@@ -314,7 +322,11 @@ void DFDT::AddEntry(const DFD& DfdRecord)
 	  left++;
 	else if (res == 0)
 	  {
-	    Table[left].SetFieldType (DfdRecord.GetFieldType()); // added 9 Oct 2003
+	    if (Table[left].GetFieldType() != DfdRecord.GetFieldType())
+	      {
+	        Table[left].SetFieldType(DfdRecord.GetFieldType());
+	        Changed = true;
+	      }
 	    return; // Already in list
 	  }
 	break;
@@ -440,6 +452,21 @@ FIELD_TYPE_STATE DFDT::GetFieldTypeState(const STRING& FieldName) const
   const size_t x = Lookup(FieldName);
   return x ? Table[x-1].GetAttributesPtr()->AttrGetFieldTypeState() :
              TypeStateUnknown;
+}
+
+bool DFDT::FreezeFieldType(const STRING& FieldName)
+{
+  const size_t x = Lookup(FieldName);
+  if (!x) return false;
+
+  const FIELD_TYPE_STATE previous = Table[x-1].GetAttributesPtr()->AttrGetFieldTypeState();
+  if (previous != TypeStateFrozen)
+    {
+      Table[x-1].FreezeFieldType();
+      if (Table[x-1].GetAttributesPtr()->AttrGetFieldTypeState() != previous)
+        Changed = true;
+    }
+  return true;
 }
 
 bool DFDT::GetAttributes (const size_t Index, PATTRLIST AttributesBuffer) const
