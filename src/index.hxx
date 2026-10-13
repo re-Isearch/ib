@@ -160,6 +160,16 @@ public:
 	INT TotalRequested = -1);
   size_t NumericalScan(STRLIST *Strlist, const STRING& FieldName, size_t Start = 0,
 	INT TotalRequested = -1);
+  // Start is a row offset in the value-sorted sidecar. Append distinct values
+  // in numeric order; SCANLIST also retains occurrence counts.
+  size_t IntegerScan(SCANLIST *List, const STRING& FieldName, size_t Start = 0,
+	INT TotalRequested = -1);
+  size_t IntegerScan(STRLIST *List, const STRING& FieldName, size_t Start = 0,
+	INT TotalRequested = -1);
+  size_t CurrencyScan(SCANLIST *List, const STRING& FieldName, size_t Start = 0,
+	INT TotalRequested = -1);
+  size_t CurrencyScan(STRLIST *List, const STRING& FieldName, size_t Start = 0,
+	INT TotalRequested = -1);
   size_t GPolyScan(SCANLIST *List, const STRING& FieldName, size_t Start = 0,
 	INT TotalRequested = -1);
   size_t GPolyScan(STRLIST *Strlist, const STRING& FieldName, size_t Start = 0,

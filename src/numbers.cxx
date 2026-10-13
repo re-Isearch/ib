@@ -1238,6 +1238,27 @@ bool MONETARYOBJ::RoundToNearest100th()
   return true;
 }
 
+STRING MONETARYOBJ::ToString() const
+{
+  if (!Valid) return STRING();
+
+  const INT16 whole = Ticks / (INT16)TICKS_PER_UNIT;
+  const INT16 remainder = Ticks % (INT16)TICKS_PER_UNIT;
+  STRING term(whole);
+  if (Ticks < 0 && whole == 0) term = "-0";
+
+  // One tick is exactly 0.00002. The remainder is small even at INT128_MIN.
+  const unsigned fraction = (unsigned)(remainder < 0 ? -remainder : remainder) * 2;
+  char digits[6];
+  snprintf(digits, sizeof(digits), "%05u", fraction);
+  size_t length = 5;
+  while (length > 2 && digits[length-1] == '0') --length;
+  digits[length] = '\0';
+  term += '.';
+  term += digits;
+  return term;
+}
+
 
 void MONETARYOBJ::Write(FILE *Fp) const
 {

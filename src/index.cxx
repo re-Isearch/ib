@@ -2278,6 +2278,8 @@ src=\"%s\" version=\"0.1\">\n",
                     count = DateScan(&sList, fieldName);
                     break;
 		  case FIELDTYPE::boolean:
+                  case FIELDTYPE::integer:
+                  case FIELDTYPE::currency:
                   case FIELDTYPE::numerical:
                     count = NumericalScan(&sList, fieldName);
                     break;

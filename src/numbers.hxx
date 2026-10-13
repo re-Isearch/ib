@@ -308,6 +308,9 @@ public:
   operator long() const { return (long)GetWholePart(); }
 
   bool RoundToNearest100th();
+  // Exact decimal with 2-5 fraction digits; whole amounts retain ".00" so
+  // scan terms select exact values rather than whole-unit search buckets.
+  STRING ToString() const;
 
   bool operator==(const MONETARYOBJ& other) const { return Ticks == other.Ticks; }
   bool operator!=(const MONETARYOBJ& other) const { return Ticks != other.Ticks; }

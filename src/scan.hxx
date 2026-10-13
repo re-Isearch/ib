@@ -118,7 +118,9 @@ class SCANLISTptr {
     SCANLISTptr(const atomicSCANLIST *List) {
       count_ = 1;
       table_ = new atomicSCANLIST();
-      table_-> Add(List);
+      if (List)
+        for (const atomicSCANLIST *p = List->Next(); p != List; p = p->Next())
+          table_->FastAddEntry(p->Value());
     }
    ~SCANLISTptr() { delete table_; }
   private:
@@ -169,6 +171,11 @@ public:
   }
   atomicSCANLIST   *AddEntry(const STRING& StringEntry, size_t Frequency) {
     return node()->AddEntry(StringEntry, Frequency);
+  }
+
+  // Append in caller order, including numeric ordering from datatype scans.
+  void FastAddEntry(const STRING& StringEntry, size_t Frequency) {
+    node()->FastAddEntry(StringEntry, Frequency);
   }
 
   atomicSCANLIST *AddEntry(const STRING& Words, const LISTOBJ *StopWords=NULL) {

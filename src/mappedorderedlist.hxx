@@ -25,6 +25,34 @@ public:
   using base_type::OpenForAppend;
   using base_type::WriteIndex;
 
+  // Start is a row offset in the value-sorted block, matching the existing
+  // datatype scans. Emit each distinct value with its remaining occurrences.
+  template <class Visitor>
+  bool VisitMappedValues(const STRING& FileName,
+                         size_t Start,
+                         INT TotalRequested,
+                         MultiMMapSession& Sessions,
+                         Visitor&& visitor)
+  {
+    if (TotalRequested == 0) return true;
+
+    mapped_type view;
+    if (!Traits::MapIndexed(FileName, Sessions, &view)) return false;
+
+    size_t emitted = 0;
+    for (size_t i = Start; i < view.count &&
+         (TotalRequested < 0 || emitted < (size_t)TotalRequested); ++emitted)
+      {
+        const value_type value = Traits::MappedValueAt(view.value_block, i);
+        const size_t first = i++;
+        while (i < view.count &&
+               Traits::Equal(value, Traits::MappedValueAt(view.value_block, i)))
+          ++i;
+        visitor(value, i - first);
+      }
+    return true;
+  }
+
   template <class Visitor>
   bool VisitMappedMatches(const STRING& FileName,
                           value_type Key,
