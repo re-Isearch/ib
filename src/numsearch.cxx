@@ -52,6 +52,7 @@ Description:	Class INDEX - numeric search methods
 #include "dtreg.hxx"
 #include "rcache.hxx"
 #include "index.hxx"
+#include "typedscan.hxx"
 #include "fprec.hxx"
 #include "fpt.hxx"
 #include "registry.hxx"
@@ -890,22 +891,51 @@ complement:
 }
 
 // Dump the numbers in an index
+size_t INDEX::IntegerScan(STRLIST *List, const STRING& FieldName, size_t Start, INT TotalRequested)
+{
+  return typed_scan::ScanField<INTEGER_INDEX_TRAITS>(Parent, List, FieldName,
+    FIELDTYPE::integer, Start, TotalRequested, IntegerColumnMaps, typed_scan::IntegerTerm());
+}
+
+size_t INDEX::IntegerScan(SCANLIST *List, const STRING& FieldName, size_t Start, INT TotalRequested)
+{
+  return typed_scan::ScanField<INTEGER_INDEX_TRAITS>(Parent, List, FieldName,
+    FIELDTYPE::integer, Start, TotalRequested, IntegerColumnMaps, typed_scan::IntegerTerm());
+}
+
+size_t INDEX::CurrencyScan(STRLIST *List, const STRING& FieldName, size_t Start, INT TotalRequested)
+{
+  return typed_scan::ScanField<MONETARY_INDEX_TRAITS>(Parent, List, FieldName,
+    FIELDTYPE::currency, Start, TotalRequested, MonetaryColumnMaps, typed_scan::CurrencyTerm());
+}
+
+size_t INDEX::CurrencyScan(SCANLIST *List, const STRING& FieldName, size_t Start, INT TotalRequested)
+{
+  return typed_scan::ScanField<MONETARY_INDEX_TRAITS>(Parent, List, FieldName,
+    FIELDTYPE::currency, Start, TotalRequested, MonetaryColumnMaps, typed_scan::CurrencyTerm());
+}
+
 size_t INDEX::NumericalScan(STRLIST *Strlist, const STRING& FieldName, size_t Start, INT TotalRequested)
 {
+  if (!Parent || !Strlist || TotalRequested == 0) return 0;
   FIELDTYPE    FieldType = Parent->GetFieldType(FieldName);
-  STRING       Fn;
-  NUMERICLIST  List;
-  size_t       total = 0;
 
 #if DEBUG
   cerr << "FieldName = " << FieldName << "  FieldType = " << FieldType << endl;
 #endif
 
+  if (FieldType == FIELDTYPE::integer)
+    return IntegerScan(Strlist, FieldName, Start, TotalRequested);
+  if (FieldType == FIELDTYPE::currency)
+    return CurrencyScan(Strlist, FieldName, Start, TotalRequested);
   if (FieldType.IsDate())
     return DateScan(Strlist, FieldName, Start, TotalRequested);
   if (! (FieldType.IsNumerical() || FieldType.IsComputed()))
     return 0;
 
+  STRING       Fn;
+  NUMERICLIST  List;
+  size_t       total = 0;
   Parent->DfdtGetFileName(FieldName, FieldType, &Fn);
   if (!FileExists(Fn))
     {
@@ -936,20 +966,25 @@ size_t INDEX::NumericalScan(STRLIST *Strlist, const STRING& FieldName, size_t St
 
 size_t INDEX::NumericalScan(SCANLIST *Scanlist, const STRING& FieldName, size_t Start, INT TotalRequested)
 {
+  if (!Parent || !Scanlist || TotalRequested == 0) return 0;
   FIELDTYPE    FieldType = Parent->GetFieldType(FieldName);
-  STRING       Fn;  
-  NUMERICLIST  List;   
-  size_t       total = 0;
 
 #if DEBUG
   cerr << "FieldName = " << FieldName << "  FieldType = " << FieldType << endl;
 #endif
 
+  if (FieldType == FIELDTYPE::integer)
+    return IntegerScan(Scanlist, FieldName, Start, TotalRequested);
+  if (FieldType == FIELDTYPE::currency)
+    return CurrencyScan(Scanlist, FieldName, Start, TotalRequested);
   if (FieldType.IsDate())
     return DateScan(Scanlist, FieldName, Start, TotalRequested);
   if (! (FieldType.IsNumerical() || FieldType.IsComputed()))
     return 0;
 
+  STRING       Fn;
+  NUMERICLIST  List;
+  size_t       total = 0;
   Parent->DfdtGetFileName(FieldName, FieldType, &Fn);
   if (!FileExists(Fn))
     {
