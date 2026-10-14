@@ -184,7 +184,7 @@ public:
   PIRSET IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relation= ZRelEQ);
   PIRSET IntegerSearchRange(const INTEGERRANGE& Range, const STRING& FieldName,
                             INT4 Relation = ZRelEQ);
-  PIRSET NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
+  PIRSET NumericSearch(const NUMERICOBJ& fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearchRange(const MONETARYRANGE& Range, const STRING& FieldName,
                              INT4 Relation = ZRelEQ);
@@ -459,6 +459,7 @@ private:
   // separate from FCACHE's pool because MultiMMapSession returns raw,
   // unpinned pointers and another FCACHE mapping could evict them.
   MultiMMapSession      IntegerColumnMaps;
+  MultiMMapSession NumericColumnMaps;
   MultiMMapSession      MonetaryColumnMaps;
 
   volatile Dictionary  *NumFieldCache;

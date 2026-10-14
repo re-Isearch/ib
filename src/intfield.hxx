@@ -18,26 +18,27 @@ Description:	Class INTFIELD - Numeric interval data object
 class INTERVALFLD : public NUMERICFLD {
 
 public:
+  static constexpr size_t DISK_SIZE = 1 + sizeof(GPTYPE) + 2 * NUMERICOBJ::DISK_SIZE;
   INTERVALFLD();
   INTERVALFLD(const INTERVALFLD& OtherField);
   INTERVALFLD operator=(const INTERVALFLD& OtherField);
   GPTYPE GetGlobalStart() const  { return GlobalStart; }
   void   SetGlobalStart(GPTYPE x){ GlobalStart = x; }
-  DOUBLE GetStartValue() const   { return StartValue; }
-  void   SetStartValue(DOUBLE x) { StartValue = x; }
-  DOUBLE GetEndValue() const     { return EndValue; }
-  void   SetEndValue(DOUBLE x)   { EndValue = x; }
+  NUMERICOBJ GetStartValue() const   { return StartValue; }
+  void   SetStartValue(NUMERICOBJ x) { StartValue = x; }
+  NUMERICOBJ GetEndValue() const     { return EndValue; }
+  void   SetEndValue(NUMERICOBJ x)   { EndValue = x; }
   void   Write(FILE *fp) const;
   void   Write(FILE *Fp, GPTYPE Offset) const;
   void   Dump(ostream& os = cout) const;
 
-  void   Read(FILE *fp);
+  bool   Read(FILE *fp);
 
   ~INTERVALFLD();
  
 
   friend void Write(const INTERVALFLD& s, FILE *Fp);
-  friend void Read(INTERVALFLD *s, FILE *Fp);
+  friend bool Read(INTERVALFLD *s, FILE *Fp);
 
 
   friend inline ostream& operator<<(ostream& os, const INTERVALFLD& Fld);
@@ -45,8 +46,8 @@ public:
 
 private:
   GPTYPE GlobalStart;
-  DOUBLE StartValue;
-  DOUBLE EndValue;
+  NUMERICOBJ StartValue;
+  NUMERICOBJ EndValue;
 };
 
 

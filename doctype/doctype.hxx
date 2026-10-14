@@ -61,7 +61,7 @@ public:
   virtual NUMERICOBJ ParseNumeric(const STRING& Buffer) const;
   virtual INTEGEROBJ ParseInteger(const STRING& Buffer) const { return Buffer; }
   virtual bool ParseRange(const STRING& Buffer, const STRING& FieldName,
-	DOUBLE* fStart, DOUBLE* fEnd) const;
+	NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const;
 
   virtual int        ParseBBox(const STRING& Buffer,const STRING& FieldName,  BBOXFLD* gpoly) const;
   virtual int        ParseBBox(const STRING& Buffer, BBOXFLD* gpoly) const;

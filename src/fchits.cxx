@@ -161,8 +161,7 @@ void FCHITS::Append(const FCHITS& other)
       return;
     }
 
-  Reserve(Buffer.size() + other.Buffer.size());
-
+  // AddEntryFast retains vector's geometric growth for repeated appends.
   for (const hit_type& fc : other.Buffer)
     AddEntryFast(fc);
 }
@@ -170,8 +169,6 @@ void FCHITS::Append(const FCHITS& other)
 
 void FCHITS::Append(const FCT& other)
 {
-    Reserve(Buffer.size() + other.GetTotalEntries());
-
     for (const FC& fc : other)
         AddEntryFast(hit_type(fc, FCSOURCE_NONE));
 }

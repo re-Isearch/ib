@@ -1251,7 +1251,8 @@ NUMERICOBJ INDEX::encodeHash(const STRING& String) const
 {
   STRING     buffer ( String.DeQuote().Pack().Trim(STRING::both) );
   NUMERICOBJ val = buffer.CRC64();
-  NUMERICOBJ off = 1.0/(double)(buffer.GetLength() % 10000);
+  const size_t length = buffer.GetLength() % 10000;
+  const NUMERICOBJ off = NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
   return val + off;
 }
 
@@ -1261,7 +1262,8 @@ NUMERICOBJ INDEX::encodeCaseHash(const STRING& String) const
 
   buffer.MakeLower();
   NUMERICOBJ val = buffer.CRC64();
-  NUMERICOBJ off = 1.0/(double)(buffer.GetLength() % 10000);
+  const size_t length = buffer.GetLength() % 10000;
+  const NUMERICOBJ off = NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
   return val + off;
 }
 
@@ -1285,7 +1287,8 @@ NUMERICOBJ INDEX::encodeLexiHash(const STRING& String) const
   for (size_t i = 0; i < sizeof(x); i++)
     x = (x << 8) + tmp[i];
 
-  return (long double)x +  1.0/((double)(buffer.GetLength() % 10000));
+  const size_t length = buffer.GetLength() % 10000;
+  return NUMERICOBJ(x) + NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
 }
 
 
@@ -1332,6 +1335,7 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
     switch ( (INT)FieldType )
       {
         case FIELDTYPE::ttl:
+        case FIELDTYPE::computed:
         case FIELDTYPE::numerical:
 	case FIELDTYPE::phonhash:
 	case FIELDTYPE::phonhash2:
@@ -1343,6 +1347,7 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	case FIELDTYPE::smiles:
 	case FIELDTYPE::dotnumber:
 	case FIELDTYPE::boolean:
+	  NumericColumnMaps.Invalidate(FileName);
 	  fp = NUMERICLIST().OpenForAppend(FileName);
 	  break;
 #if HAVE_INTEGER
@@ -1383,7 +1388,10 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	  break;
 	case FIELDTYPE::privhash:
 	  if (_IB_private_hash)
-	    fp = NUMERICLIST().OpenForAppend(FileName);
+	    {
+	      NumericColumnMaps.Invalidate(FileName);
+	      fp = NUMERICLIST().OpenForAppend(FileName);
+	    }
 	  else
 	    FileName.Clear(); // Can't add to an undefined ...
           break;
@@ -1602,7 +1610,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
           case FIELDTYPE::ttl_expires:
           {
             NUMERICOBJ val (DocTypePtr->ParseTTL(FieldName, Buffer));
-              int        ttl = val;
+              int        ttl = (int)val;
               if (ttl > 0)
                 {
                   // Becomes a FIELDTYPE::date type(!)
@@ -1617,7 +1625,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
             case FIELDTYPE::time:
             {
               NUMERICOBJ val (DocTypePtr->ParseComputed(FieldName, Buffer));
-              time_t     time = val;
+              time_t     time = (long)val;
 
               // Numeric computed value for time_t struct (seconds since 1970)
               // this becomes a FIELDTYPE::date type(!)
@@ -1827,7 +1835,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	    }
 	    case FIELDTYPE::boolean:
 	    {
-              const NUMERICOBJ val ( (NUMBER)DocTypePtr->ParseBoolean(Buffer) );
+              const NUMERICOBJ val(DocTypePtr->ParseBoolean(Buffer));
               if (val.Ok())
                 {
                   NUMERICFLD(gp, val).Write(fp);
@@ -1910,11 +1918,11 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
             }
             case FIELDTYPE::numericalrange:
             {
-              DOUBLE fStart = 0, fEnd = 0;
+              NUMERICOBJ fStart, fEnd;
               if (DocTypePtr->ParseRange(Buffer, FieldName, &fStart, &fEnd))
                 {
                   INTERVALFLD intervalfield;
-                  // Double pair
+                  // Exact decimal endpoints
                   intervalfield.SetGlobalStart(gp);
                   intervalfield.SetStartValue(fStart);
                   intervalfield.SetEndValue(fEnd);
@@ -4408,7 +4416,7 @@ PIRSET INDEX::Search (const QUERY& Query)
                 {
                   if (gotRelation==false) Relation=ZRelEQ;
 //cerr << "Numeric Search for: " << Term << " rel=" << Relation << endl;
-                  NewIrset=NumericSearch(Term.GetDouble(), FieldName, Relation);
+                  NewIrset=NumericSearch(NUMERICOBJ(Term), FieldName, Relation);
                 }
               else if (aFieldType.IsCurrency() || FieldType.IsCurrency()) // FIELDTYPE::currency
                 {
@@ -8833,6 +8841,7 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		    break;
 
 		  case FIELDTYPE::ttl:
+		  case FIELDTYPE::computed:
 		  case FIELDTYPE::boolean:
 		  case FIELDTYPE::numerical:
 		  case FIELDTYPE::phonhash:
@@ -8850,7 +8859,7 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
                       if (GetFileSize(Fn) <= (off_t)sizeof(GPTYPE))
 			continue;
 		      List.SetFileName(Fn);
-		      List.LoadTable(VAL_BLOCK);
+		      List.LoadTable(GP_BLOCK);
 		      const size_t  count = List.GetCount();
 		      if (count > 0)
 			{

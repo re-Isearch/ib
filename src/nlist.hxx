@@ -1,160 +1,74 @@
-/*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
-It is made available and licensed under the Apache 2.0 license: see LICENSE
-*/
-// $Id: nlist.hxx,v 1.1 2007/05/15 15:47:20 edz Exp $
-
-/*@@@
-File:		nlist.hxx
-Version:	1.00
-$Revision: 1.1 $
-Description:	Class NLIST - Utilities for lists of numeric values
-Author:		Jim Fullton, Jim.Fullton@cnidr.org
-@@@*/
-
 #ifndef NUMERICLIST_HXX
 #define NUMERICLIST_HXX
 
-#include <stdlib.h>
-
-#include "gdt.h"
-#include "defs.hxx"
-#include "string.hxx"
 #include "nfield.hxx"
+#include "integerlist.hxx"
 
 #ifndef DATELIST_HXX
-// SearchState is used to indicate the results of the matcher 
 enum SearchState { NO_MATCH=-1, TOO_LOW, TOO_HIGH, MATCH };
-
-// IntType tells the matcher where we are in the block of values
 enum IntType { AT_START, INSIDE, AT_END };
-
-// NumBlock tells LoadTable which sorted block to load - the blocks are
-// sorted by start value, end value and global pointer
 enum NumBlock { NONE, VAL_BLOCK, GP_BLOCK };
 typedef NumBlock blktype;
-
 #endif
 
-
-#ifndef HAVE_SORTTYPE
-# define HAVE_SORTTYPE 1
-  enum stype {EQ,LT,LE,GT,GE,NE};
-  typedef enum stype SortType;
-#else
-  extern stype SortType;
-#endif
-
-#ifndef HAVE_STATUS
-# define HAVE_STATUS 1
-  enum mstatus {MATCH_FAILED=-1,  /* failed for unknown reasons */
-                MATCH_GOOD,       /* finished the search */
-                MATCH_LOWER,      /* key matches lower bound */
-                MATCH_MID,        /* key is in range */
-                MATCH_UPPER};     /* key matches upper bound */
-  typedef mstatus Status;
-#else
-  extern mstatus Status;
-#endif
-
-class NUMERICLIST {
-private:
-  NUMERICFLD  *table;      // the table of attribute/numeric data
-  size_t       Count;      // count of items in table
-  INT          Attribute;  // which USE attribute this table maps
-  size_t       Pointer;    // current position
-  size_t       MaxEntries; // current maximum size of table - see Resize()
-  size_t       StartIndex;
-  size_t       EndIndex;
-  ZRelation_t  Relation;   // what relation generated StartIndex, EndIndex
-  STRING       FileName;   // the file which attributes/numeric data are in
-  INT          Ncoords;    // Number of values in an entry
-  blktype      table_type; // how is the data in table sorted?
-
-  SearchState  MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  MemFind(GPTYPE Key, ZRelation_t Relation, INT4 *Index);
-#if 1
-  SearchState  MemFindGp(GPTYPE Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  MemFindIndexes(NUMBER Key, ZRelation_t Relation, INT4 *StartIndex, INT4 *EndIndex);
-#endif
-  SearchState  DiskFind(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  DiskFind(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 *Index);
-
-  SearchState  Matcher(NUMBER Key, NUMBER A, NUMBER B, NUMBER C, 
-		       ZRelation_t Relation, INT4 Type);
-  SearchState  Matcher(GPTYPE Key, GPTYPE A, GPTYPE B, GPTYPE C, 
-		       ZRelation_t Relation, INT4 Type);
-
-#if 1
-  Status        n_compare(NUMBER val, NUMBER key);
-  Status        LinearMatchUpGT(NUMBER Key, int bottom,int top,int* Index);
-  Status        LinearMatchDownLT(NUMBER Key,int bottom,int top,int* Index);
-  Status        LinearMatchLE(NUMBER Key,int bottom,int top,int* Index);
-  Status        LinearMatchGE(NUMBER Key,int bottom,int top,int* Index);
-  Status        BestMatchLE(NUMBER Key,int first,int last, int* Index);
-  Status        BestMatchGE(NUMBER Key,int first,int last, int* Index);
-  Status        Match(SortType Relation, NUMBER Key,int* Index);
-  Status        MatchGp(SortType Relation,int Key,int* Index);
-#endif
-public:
-  NUMERICLIST();
-  NUMERICLIST(INT n);
-
-  void         Clear();
-  void         Empty();
-
-  void         SetRelation(ZRelation_t r) { Relation = r; };
-  INT          GetRelation()              { return(Relation); };
-  NUMBER       GetNumericValue(INT i)     { return(table[i].GetNumericValue()); };
-  // return the USE attribute for this table
-  INT          GetAttribute()             { return(Attribute); };
-  // set the USE attribute
-  void         SetAttribute(INT x)        { Attribute = x; }; 
-  // get number of items in table
-  INT4         GetCount()                 { return(Count); };
-  // make room for more entries
-  bool  Expand(size_t Entries);
-  bool  Expand()                   { return Resize(Count + (50*Ncoords)); };
-  // collapse size to total entries
-  void         Cleanup()                  { Resize(Count); };
-  GPTYPE       GetGlobalStart(INT4 i)     { return(table[i].GetGlobalStart()); };
-  // set file name to load from
-  void         SetFileName(STRING s)      { FileName = s; };
-  // set file name to load from
-  void         SetFileName(PCHR s)        { FileName = s; };
-  void         SetCoords(INT n)           { Ncoords = n; };
-  INT          GetCoords()                { return Ncoords; };
-
-  void         WriteIndex(const STRING& Fn);
-  FILE        *OpenForAppend(const STRING& Fn);
-
-  ///
-  NUMERICFLD  operator[](signed n) const   {return table[n]; }
-  NUMERICFLD  operator[](unsigned n) const {return table[n]; }
-  NUMERICFLD& operator[](unsigned n)       {return table[n]; }
-
-  SearchState  Find(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  Find(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  Find(NUMBER Key, ZRelation_t Relation, INT4 *Index);
-  SearchState  Find(GPTYPE Key, ZRelation_t Relation, INT4 *Index);
-
-  SearchState  FindIndexes(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *StartIndex, INT4 *EndIndex);
-  void         Sort();                     // sort numeric field items
-  void         SortByGP();                 // sort by global ptr
-  void         Dump(ostream& os = cout) const;   // dump all numeric field data
-  void         Dump(INT4 start, INT4 end, ostream& os=cout) const; // dump numeric field data
-  bool  Resize(size_t Entries);       // resize table to Entries size
-  void         TempLoad();                 // test routine
-  size_t       LoadTable(NumBlock Offset);
-  size_t       LoadTable(INT4 Start, INT4 End);
-  size_t       LoadTable(INT4 Start, INT4 End, NumBlock Offset);
-  void         WriteTable();
-  void         WriteTable(INT Offset);
-  void         ResetHitPosition();
-  GPTYPE       GetNextHitPosition();
-
-  ~NUMERICLIST();
+struct NUMERIC_INDEX_TRAITS : public INTEGER_INDEX_TRAITS {
+  using field_type = NUMERICFLD;
+  static constexpr const char *Name() { return "NUMERICAL"; }
+  static value_type Value(const field_type& field) { return field.GetNumericValue().GetTicks(); }
+  static GPTYPE GlobalStart(const field_type& field) { return field.GetGlobalStart(); }
+  static value_type MappedValueAt(const BYTE *block, size_t i) { return field_type::DecodeValue(block+i*field_type::DISK_SIZE); }
+  static GPTYPE MappedGlobalStartAt(const BYTE *block, size_t i) { return field_type::DecodeGlobalStart(block+i*field_type::DISK_SIZE); }
+  static span_type MappedSpanAt(const BYTE *, size_t) { return 0; }
+  static FILE *OpenForAppend(const STRING&);
+  static bool LoadRawBlock(const STRING&, std::vector<field_type>*);
+  static bool LoadValueBlock(const STRING&, std::vector<field_type>*);
+  static bool MapIndexed(const STRING&, MultiMMapSession&, mapped_type*);
+  static bool WriteIndex(const STRING&, const std::vector<field_type>&, const std::vector<field_type>&);
 };
 
+class NUMERICLIST : public MAPPEDORDEREDLIST<NUMERIC_INDEX_TRAITS> {
+public:
+  using base_type = MAPPEDORDEREDLIST<NUMERIC_INDEX_TRAITS>;
+  NUMERICLIST() = default;
+  explicit NUMERICLIST(INT coords) : Ncoords(coords) {}
+  void Empty() { Clear(); }
+  void SetFileName(const STRING& name) { FileName = name; }
+  void SetCoords(INT value) { Ncoords = value; }
+  INT GetCoords() const { return Ncoords; }
+  void SetAttribute(INT value) { Attribute = value; }
+  INT GetAttribute() const { return Attribute; }
+  void SetRelation(ZRelation_t value) { Relation = value; }
+  INT GetRelation() const { return Relation; }
+  NUMERICOBJ GetNumericValue(size_t i) const { return (*this)[i].GetNumericValue(); }
+  bool Resize(size_t count) { Reserve(count); return true; }
+  bool Expand(size_t count) { return Resize(count); }
+  bool Expand() { return Resize(GetCount()+50); }
+  void Cleanup() {}
+  size_t LoadTable(NumBlock block) { return LoadTable(0, -1, block); }
+  size_t LoadTable(INT4 start, INT4 end) { return LoadTable(start, end, NONE); }
+  size_t LoadTable(INT4 start, INT4 end, NumBlock block);
+  SearchState Find(const STRING& name, const NUMERICOBJ& key, ZRelation_t relation, INT4 *index);
+  SearchState Find(const NUMERICOBJ& key, ZRelation_t relation, INT4 *index);
+  SearchState Find(const STRING& name, GPTYPE key, ZRelation_t relation, INT4 *index);
+  SearchState Find(GPTYPE key, ZRelation_t relation, INT4 *index);
+  SearchState FindIndexes(const STRING& name, const NUMERICOBJ& key, ZRelation_t relation, INT4 *first, INT4 *last);
+  template <class T, typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+  SearchState Find(const STRING& name, T value, ZRelation_t relation, INT4 *index) {
+    return Find(name, NUMERICOBJ(value), relation, index);
+  }
+  template <class T, typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+  SearchState Find(T value, ZRelation_t relation, INT4 *index) {
+    return Find(NUMERICOBJ(value), relation, index);
+  }
+  void ResetHitPosition() { Pointer = StartIndex; }
+  GPTYPE GetNextHitPosition() { return Pointer < EndIndex ? GetGlobalStart(Pointer++) : GPTYPE(-1); }
+  void Dump(ostream& os = cout) const;
+  void Dump(INT4 first, INT4 last, ostream& os = cout) const;
+private:
+  STRING FileName;
+  INT Attribute = 0, Ncoords = 1;
+  ZRelation_t Relation = ZRelEQ;
+  size_t Pointer = 0, StartIndex = 0, EndIndex = 0;
+};
 typedef NUMERICLIST* PNUMERICLIST;
 #endif

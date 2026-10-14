@@ -52,6 +52,9 @@ typedef enum OBJ_IDS  {
   objDFDTRANGE, // 38 // Added 2026
   objINTEGERLIST, // 39
   objMONETARYLIST, // 40
+  objFIXEDNUMERICLIST, // 41: signed INT128, decimal scale in the header
+  objFIXEDINTERVALLIST, // 42: fixed-point interval endpoints
+  objFIXEDINTERVALFLD, // 43: identifies raw fixed-point interval rows
   // .inx magic
   objINDEXm = 0x49, // MSB Index
   objINDEXl = 0x69 // LSB Index

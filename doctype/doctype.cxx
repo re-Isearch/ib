@@ -695,7 +695,7 @@ NUMERICOBJ DOCTYPE::ParseNumeric(const STRING& Buffer) const
 }
 
 bool DOCTYPE::ParseRange(const STRING& Buffer, const STRING& FieldName,
-        DOUBLE* fStart, DOUBLE* fEnd) const
+        NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const
 {
   NUMERICALRANGE Range(Buffer);
   if (Range.Ok())

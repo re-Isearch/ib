@@ -13,6 +13,8 @@ Author:		Archie Warnock (warnock@clark.net), A/WWW Enterprises
 
 #include <stdlib.h>
 #include <time.h>
+#include <limits>
+#include <array>
 
 #include "common.hxx"
 #include "intlist.hxx"
@@ -21,6 +23,14 @@ Author:		Archie Warnock (warnock@clark.net), A/WWW Enterprises
 typedef UINT4  _Count_t;
 
 #define SIZEOF_HEADER  sizeof(_Count_t)+1 /* size of magic */
+
+static bool ReadCount(FILE *fp, _Count_t *count)
+{
+  std::array<BYTE, sizeof(_Count_t)> bytes;
+  if (fread(bytes.data(), 1, bytes.size(), fp) != bytes.size()) return false;
+  *count = getINT4(bytes.data(), 0);
+  return true;
+}
 
 
 // Prototypes
@@ -101,23 +111,30 @@ INT4 INTERVALLIST::LoadTable(INT4 Start, INT4 End)
 
   fp = fopen(FileName,"rb");
   if (fp) {
-
-     if (End < 0)
-	End = GetFileSize(fp)/sizeof(INTERVALFLD);
+    const off_t bytes = GetFileSize(fp);
+    const off_t records = bytes / INTERVALFLD::DISK_SIZE;
+    if (bytes % INTERVALFLD::DISK_SIZE || records > std::numeric_limits<INT4>::max())
+      { fclose(fp); return 0; }
+     if (End < 0 || End >= records)
+	End = records-1;
      if (Start < 0)
 	Start = 0;
+    if (Start > End) { fclose(fp); return 0; }
 
-    if (fseek(fp, (off_t)Start*sizeof(INTERVALFLD), SEEK_SET) == -1)
+    if (fseek(fp, (off_t)Start*INTERVALFLD::DISK_SIZE, SEEK_SET) == -1)
       {
 	message_log (LOG_ERRNO, "INTERVALLIST could not seek on '%s' (Start=%ld)",
 		FileName.c_str(), (long)Start);
+	fclose(fp);
 	return 0;
       }
 
     Expand(Count + End - Start + 1);
 
-    for (INT4 i=Start, x=0; i<=End; i++) {
-      Read(&table[Count], fp);
+    const size_t original = Count;
+    for (INT4 i=Start; i<=End; i++) {
+      if (!Read(&table[Count], fp))
+        { Count = original; fclose(fp); return 0; }
       nRecs++;
       if(++Count == MaxEntries)
 	Expand();
@@ -139,7 +156,7 @@ INT4 INTERVALLIST::LoadTable(INT4 Start, INT4 End, IntBlock Offset)
   FILE  *fp;
   GPTYPE high;
   INT4   x, i;
-  DOUBLE fStart, fEnd;
+  NUMERICOBJ fStart, fEnd;
   size_t nRecs=0;
   off_t   MoveTo;
   
@@ -155,25 +172,32 @@ INT4 INTERVALLIST::LoadTable(INT4 Start, INT4 End, IntBlock Offset)
     // Note - there are two tables in the file - one sorted by starting
     // value, one sorted by ending value.  There are Count entries in each
     // version.  
-    x = fread((char*)&nCount, 1, sizeof(UINT4), fp); // explicit cast
+    if (getObjID(fp) != objFIXEDINTERVALLIST ||
+        !ReadCount(fp, &nCount) ||
+        nCount > UINT4(std::numeric_limits<INT4>::max()) ||
+        GetFileSize(fp) != off_t(SIZEOF_HEADER) + off_t(3)*nCount*INTERVALFLD::DISK_SIZE)
+      { fclose(fp); return 0; }
+    x = 1;
 
     if ((End >= nCount) || (End < 0))
       End = nCount-1;
     if (Start < 0)
       Start = 0;
+    if (Start > End) { fclose(fp); return 0; }
   
     if (x != 0) {
       if (Offset == START_BLOCK)
-	MoveTo = SIZEOF_HEADER + (Start * sizeof(INTERVALFLD));
+	MoveTo = SIZEOF_HEADER + (Start * INTERVALFLD::DISK_SIZE);
       else if (Offset == END_BLOCK)
-	MoveTo = SIZEOF_HEADER + ((nCount+Start) * sizeof(INTERVALFLD));
+	MoveTo = SIZEOF_HEADER + ((nCount+Start) * INTERVALFLD::DISK_SIZE);
      else
-	MoveTo = SIZEOF_HEADER + ((2*nCount)+Start) * sizeof(INTERVALFLD);
+	MoveTo = SIZEOF_HEADER + ((2*nCount)+Start) * INTERVALFLD::DISK_SIZE;
 
       if (fseek(fp, MoveTo, SEEK_SET) == -1)
 	{
 	  message_log (LOG_ERROR, "INTERVALLIST could not seek to '%s'(%ld))",
                 FileName.c_str(), (long)MoveTo);
+	  fclose(fp);
 	  return 0;
 	}
 
@@ -181,8 +205,10 @@ INT4 INTERVALLIST::LoadTable(INT4 Start, INT4 End, IntBlock Offset)
 
       Expand(Count + End - Start + 1);
 
+      const size_t original = Count;
       for (i=Start; i<=End; i++) {
-	Read(&table[Count], fp);
+	if (!Read(&table[Count], fp))
+          { Count = original; fclose(fp); return 0; }
 	nRecs++;
 	if(++Count == MaxEntries)
 	  Expand();
@@ -229,12 +255,12 @@ void INTERVALLIST::WriteTable(INT Offset)
   if ((fp = fopen (FileName, (Offset == 0) ? "wb" : "a+b")) != NULL) {
     // First, write out the header
     if (Offset == 0) {
-      putObjID(objINTLIST, fp);
+      putObjID(objFIXEDINTERVALLIST, fp);
       Write( (_Count_t)Count, fp);
     }
 
     // Now, go to the specified offset and write the table
-    size_t nBytes = sizeof(INTERVALFLD);
+    size_t nBytes = INTERVALFLD::DISK_SIZE;
     off_t MoveTo = SIZEOF_HEADER + ((off_t)Offset*nBytes);
 
     //    cout << "Offsetting " << MoveTo << " bytes into the file." << endl;
@@ -268,48 +294,40 @@ void INTERVALLIST::SortByGP()
 
 static INT SortStartCmp(const void* x, const void* y) 
 {
-  DOUBLE a=((*((PINTERVALFLD)x)).GetStartValue()) - ((*((PINTERVALFLD)y)).GetStartValue()) ;
-  if (a<0)
-    return(-1);
-  if (a>0)
-    return(1);
-  return(0);
+  const NUMERICOBJ a = static_cast<const INTERVALFLD *>(x)->GetStartValue();
+  const NUMERICOBJ b = static_cast<const INTERVALFLD *>(y)->GetStartValue();
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 
 static INT SortEndCmp(const void* x, const void* y) 
 {
-  DOUBLE a=((*((PINTERVALFLD)x)).GetEndValue()) - ((*((PINTERVALFLD)y)).GetEndValue()) ;
-  if (a<0)
-    return(-1);
-  if (a>0)
-    return(1);
-  return(0);
+  const NUMERICOBJ a = static_cast<const INTERVALFLD *>(x)->GetEndValue();
+  const NUMERICOBJ b = static_cast<const INTERVALFLD *>(y)->GetEndValue();
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 
 static INT SortGPCmp(const void* x, const void* y) 
 {
-  long long a= (long long)((*((PINTERVALFLD)x)).GetGlobalStart()) -
-    (long long)((*((PINTERVALFLD)y)).GetGlobalStart()) ;
-  if (a<0)
-    return(-1);
-  if (a>0)
-    return(1);
-  return(0);
+  const GPTYPE a = static_cast<const INTERVALFLD *>(x)->GetGlobalStart();
+  const GPTYPE b = static_cast<const INTERVALFLD *>(y)->GetGlobalStart();
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 
-SearchState INTERVALLIST::IntervalMatcher(DOUBLE Key, DOUBLE LowerBound, DOUBLE Mid, 
-			      DOUBLE UpperBound, INT4 Relation, IntType Type)
+SearchState INTERVALLIST::IntervalMatcher(NUMERICOBJ Key, NUMERICOBJ LowerBound, NUMERICOBJ Mid,
+			      NUMERICOBJ UpperBound, INT4 Relation, IntType Type)
   // Return TOO_LOW if the key value is less than the lower bound
   // Return TOO_HIGH if the key value is greater than the upper bound
   // Return MATCH if the key value is between the bounds
 {
   if (Truncate)
     {
-      return IntervalMatcher((DOUBLE)((long)Key), (DOUBLE)((long)LowerBound),
-	(DOUBLE)((long)Mid), (DOUBLE)((long)UpperBound), Relation, Type) ;
+      Key = NUMERICOBJ((INT16)Key);
+      LowerBound = NUMERICOBJ((INT16)LowerBound);
+      Mid = NUMERICOBJ((INT16)Mid);
+      UpperBound = NUMERICOBJ((INT16)UpperBound);
     }
 	
   switch (Relation)
@@ -415,7 +433,7 @@ SearchState INTERVALLIST::IntervalMatcher(GPTYPE Key,  GPTYPE LowerBound, GPTYPE
 // memory.  If it succeeds, it'll call MemFind to do the search in memory.
 // Otherwise, it'll call DiskFind to do the search on disk.
 SearchState 
-INTERVALLIST::Find(STRING Fn, DOUBLE Key, INT4 Relation, 
+INTERVALLIST::Find(STRING Fn, NUMERICOBJ Key, INT4 Relation,
 		   IntBlock FindBlock, INT4 *Index)
 {
   SetFileName(Fn);
@@ -434,7 +452,7 @@ INTERVALLIST::Find(STRING Fn, GPTYPE Key, INT4 Relation,
 }
 
 
-SearchState INTERVALLIST::Find(DOUBLE Key, INT4 Relation, 
+SearchState INTERVALLIST::Find(NUMERICOBJ Key, INT4 Relation,
 		   IntBlock FindBlock, INT4 *Index)
 {
   return DiskFind(FileName, Key, Relation, FindBlock, Index);
@@ -448,7 +466,7 @@ SearchState INTERVALLIST::Find(GPTYPE Key, INT4 Relation,
 }
 
 
-SearchState INTERVALLIST::MemFind(DOUBLE Key, INT4 Relation, 
+SearchState INTERVALLIST::MemFind(NUMERICOBJ Key, INT4 Relation,
 		      IntBlock FindBlock, INT4 *Index)
 {
   return NO_MATCH;
@@ -462,7 +480,7 @@ SearchState INTERVALLIST::MemFind(GPTYPE Key, INT4 Relation,
 }
 
 
-SearchState INTERVALLIST::DiskFind(STRING Fn, DOUBLE Key, INT4 Relation, 
+SearchState INTERVALLIST::DiskFind(STRING Fn, NUMERICOBJ Key, INT4 Relation,
 		       IntBlock FindBlock, INT4 *Index)
 {
   PFILE  Fp = fopen(Fn, "rb");
@@ -482,13 +500,17 @@ SearchState INTERVALLIST::DiskFind(STRING Fn, DOUBLE Key, INT4 Relation,
     INT Low = 0;
     INT High, X, OX;
 
-    if (getObjID(Fp) != objINTLIST)
+    if (getObjID(Fp) != objFIXEDINTERVALLIST)
       {
         message_log (LOG_PANIC, "%s not a interval index??", Fn.c_str());
         *Index = -1;
+        fclose(Fp);
         return NO_MATCH;
       }
-    Read(&Total, Fp);
+    if (!ReadCount(Fp, &Total) || !Total ||
+        Total > UINT4(std::numeric_limits<INT4>::max()) ||
+        GetFileSize(Fp) != off_t(SIZEOF_HEADER) + off_t(3)*Total*INTERVALFLD::DISK_SIZE)
+      { fclose(Fp); *Index = -1; return NO_MATCH; }
     High = Total - 1;
     X = High / 2;
 
@@ -499,13 +521,13 @@ SearchState INTERVALLIST::DiskFind(STRING Fn, DOUBLE Key, INT4 Relation,
       do {
 	OX = X;
 	if ((X > 0) && (X < High)) {
-	  fseek(Fp, SIZEOF_HEADER + (X-1) * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + (X-1) * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=INSIDE; // We're inside the interval
 	} else if (X <= 0) {
-	  fseek(Fp, SIZEOF_HEADER + X * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + X * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=AT_START; // We're at the lower boundary
 	} else if (X >= High) {
-	  fseek(Fp, SIZEOF_HEADER + (X-1) * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + (X-1) * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=AT_END; // We're at the upper boundary
 	}
 
@@ -584,15 +606,15 @@ SearchState INTERVALLIST::DiskFind(STRING Fn, DOUBLE Key, INT4 Relation,
       do {
 	OX = X;
 	if ((X > 0) && (X < High)) {
-	  fseek(Fp, SIZEOF_HEADER + (Total+X-1) * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + (Total+X-1) * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=INSIDE; // We're inside the interval
 
 	} else if (X <= 0) {
-	  fseek(Fp, SIZEOF_HEADER + (Total+X) * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + (Total+X) * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=AT_START; // We're at the lower boundary
 
 	} else if (X >= High) {
-	  fseek(Fp, SIZEOF_HEADER + (Total+X-1) * sizeof(INTERVALFLD), SEEK_SET);
+	  fseek(Fp, SIZEOF_HEADER + (Total+X-1) * INTERVALFLD::DISK_SIZE, SEEK_SET);
 	  Type=AT_END; // We're at the upper boundary
 	}
 
@@ -711,15 +733,19 @@ SearchState INTERVALLIST::DiskFind(STRING Fn, GPTYPE Key, INT4 Relation,
 
   } else {
 
-    if (getObjID(Fp) != objINTLIST)
+    if (getObjID(Fp) != objFIXEDINTERVALLIST)
       {
         message_log (LOG_PANIC, "%s not a interval index??", Fn.c_str());
         *Index = -1;
+        fclose(Fp);
         return NO_MATCH;
       }
-    Read(&Total, Fp);
+    if (!ReadCount(Fp, &Total) || !Total ||
+        Total > UINT4(std::numeric_limits<INT4>::max()) ||
+        GetFileSize(Fp) != off_t(SIZEOF_HEADER) + off_t(3)*Total*INTERVALFLD::DISK_SIZE)
+      { fclose(Fp); *Index = -1; return NO_MATCH; }
 
-    ElementSize = sizeof(INTERVALFLD);
+    ElementSize = INTERVALFLD::DISK_SIZE;
     High = Total - 1;
     X = High / 2;
 
@@ -898,8 +924,9 @@ INTERVALLIST::~INTERVALLIST()
 
 void INTERVALLIST::WriteIndex(const STRING& Fn)
 {
+  Clear();
   SetFileName(Fn);
-  LoadTable(0,-1);
+  if (!LoadTable(0,-1)) return;
   if (Count > 0) { // was > 1
     ::remove(Fn);
 
@@ -924,22 +951,25 @@ FILE *INTERVALLIST::OpenForAppend(const STRING& Fn)
 
   FILE *Fp = fopen(Fn, "rb");
 
-cerr << "INTERVALLIST::OpenForAppend " << Fn << endl;
   if (Fp == NULL)
    {
       message_log (LOG_ERRNO, "INTERVALLIST:: Can't open '%s' for reading.", Fn.c_str());
       return NULL;
    }
-  if (getObjID(Fp)!= objINTLIST)
+  const obj_t identity = getObjID(Fp);
+  if (identity != objFIXEDINTERVALLIST)
     {
       fclose(Fp);
-      return fopen(Fn, "a+b");
+      if (identity == objFIXEDINTERVALFLD && GetFileSize(Fn) % INTERVALFLD::DISK_SIZE == 0)
+        return fopen(Fn, "a+b");
+      message_log(LOG_ERROR, "'%s' is not a fixed-point interval index; reindex required", Fn.c_str());
+      return NULL;
     }
 
-cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
-
   _Count_t  Total; // This MUST match the type of Count!!!
-  Read(&Total, Fp);
+  if (!ReadCount(Fp, &Total) ||
+      GetFileSize(Fp) != off_t(SIZEOF_HEADER) + off_t(3)*Total*INTERVALFLD::DISK_SIZE)
+    { fclose(Fp); return NULL; }
   if (Total == 0) 
     {
       // Nothing in there so
@@ -949,7 +979,9 @@ cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
 
 #if 1
 
-  STRING TmpName = GetTempFilename("intlist.", true);
+  STRING TmpName = Fn + "~";
+  for (size_t i = 0; FileExists(TmpName); ++i)
+    TmpName.form("%s~.%lu", Fn.c_str(), (unsigned long)i);
   FILE *oFp = fopen(TmpName, "wb");
   if (oFp == NULL)
   {
@@ -987,19 +1019,24 @@ cerr << "INTERVALLIST::OpenForAppend READING from " << Fn << endl;
     }
 #endif
 
-  // Copy over
+  // Append streams retain GP order, which is the third sorted block.
+  if (fseek(Fp, off_t(SIZEOF_HEADER)+off_t(2)*Total*INTERVALFLD::DISK_SIZE, SEEK_SET) != 0)
+    { fclose(Fp); fclose(oFp); UnlinkFile(TmpName); return NULL; }
   INTERVALFLD fld;
   for (UINT4 i=0; i< Total; i++)
     {
-      fld.Read(Fp);
+      if (!fld.Read(Fp))
+        { fclose(Fp); fclose(oFp); UnlinkFile(TmpName); return NULL; }
       fld.Write(oFp);
     }
   fclose(Fp);
-  fclose(oFp);
-  if (remove(Fn) == -1)
-    message_log (LOG_ERRNO, "Can't remove '%s'", Fn.c_str());
+  if (fclose(oFp) != 0) { UnlinkFile(TmpName); return NULL; }
   if (RenameFile(TmpName, Fn) == -1)
-    message_log (LOG_ERRNO, "Can't rename '%s' to '%s'", TmpName.c_str(), Fn.c_str());
+    {
+      message_log (LOG_ERRNO, "Can't rename '%s' to '%s'", TmpName.c_str(), Fn.c_str());
+      UnlinkFile(TmpName);
+      return NULL;
+    }
 
   // Now open for append
   if ((Fp = fopen(Fn, "a+b")) == NULL)
@@ -1017,9 +1054,9 @@ main()
   NUMERICLIST list;
   STRING n;
   INT4 Start,End;
-  DOUBLE val;
+  NUMERICOBJ val;
   n="test.62";
-  printf("DOUBLE is %d bytes\n",sizeof(DOUBLE));
+  printf("NUMERICOBJ is %d bytes\n",sizeof(NUMERICOBJ));
   list.TempLoad();
   End=list.DiskFind(n, (double)88.0,5); // 5 GT
   printf("\n===\n");

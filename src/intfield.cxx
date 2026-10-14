@@ -12,12 +12,11 @@ Author:		Archie Warnock (warnock@clark.net), A/WWW Enterprises
 
 
 #include "intfield.hxx"
+#include <array>
 
 INTERVALFLD::INTERVALFLD()
 {
   GlobalStart = (GPTYPE)-1;
-  StartValue  = 0.0;
-  EndValue    = 0.0;
 }
 
 
@@ -57,6 +56,7 @@ INTERVALFLD::~INTERVALFLD()
 
 void INTERVALFLD::Write(PFILE Fp) const
 {
+  putObjID(objFIXEDINTERVALFLD, Fp);
   ::Write(GlobalStart, Fp);
   ::Write(StartValue, Fp);
   ::Write(EndValue, Fp);
@@ -64,6 +64,7 @@ void INTERVALFLD::Write(PFILE Fp) const
 
 void INTERVALFLD::Write(PFILE Fp, GPTYPE Offset) const
 {
+  putObjID(objFIXEDINTERVALFLD, Fp);
   ::Write(GlobalStart+Offset, Fp);
   ::Write(StartValue, Fp);
   ::Write(EndValue, Fp);
@@ -76,16 +77,25 @@ void Write(const INTERVALFLD& s, PFILE Fp)
 }
 
 
-void INTERVALFLD::Read(FILE *Fp)
+bool INTERVALFLD::Read(FILE *Fp)
 {
-  ::Read(&GlobalStart, Fp);
-  ::Read(&StartValue, Fp);
-  ::Read(&EndValue, Fp);
+  StartValue = EndValue = NUMERICOBJ();
+  std::array<BYTE, sizeof(GPTYPE)> gp;
+  if (!Fp || getObjID(Fp) != objFIXEDINTERVALFLD ||
+      fread(gp.data(), 1, gp.size(), Fp) != gp.size() ||
+      !::Read(&StartValue, Fp) || !::Read(&EndValue, Fp) ||
+      !StartValue.Ok() || !EndValue.Ok())
+    {
+      StartValue = EndValue = NUMERICOBJ();
+      return false;
+    }
+  GlobalStart = getGPTYPE(gp.data(), 0);
+  return true;
 }
 
-void Read(INTERVALFLD *s, FILE *Fp)
+bool Read(INTERVALFLD *s, FILE *Fp)
 {
-  s->Read(Fp);
+  return s && s->Read(Fp);
 } 
 
 

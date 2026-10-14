@@ -47,6 +47,10 @@ size_t ScanField(Db *parent, Output *output, const STRING& field,
   return total;
 }
 
+struct NumericTerm {
+  STRING operator()(INT16 ticks) const { return NUMERICOBJ::FromTicks(ticks).ToString(); }
+};
+
 struct IntegerTerm {
   STRING operator()(INT16 value) const { return STRING(value); }
 };

@@ -105,7 +105,9 @@ void INDEX::SortNumericFieldData()
 		FieldType.IsComputed() || FieldType.IsPhonetic() ||
 		FieldType.IsHash() || FieldType.IsCaseHash() || FieldType.IsPrivHash() ||
 		FieldType.IsLexiHash() || FieldType.IsSMILES() ) {
-      NUMERICLIST().WriteIndex(Fn);
+      NumericColumnMaps.Invalidate(Fn);
+      if (!NUMERICLIST().WriteIndex(Fn))
+        message_log(LOG_ERROR, "Could not build fixed-point numerical index '%s'", Fn.c_str());
     } else if (FieldType.IsNumericalRange()) {
       INTERVALLIST().WriteIndex(Fn);
     } else if (FieldType.IsDate()) {
@@ -193,7 +195,7 @@ PIRSET INDEX::LexiHashSearch(const STRING& Term, const STRING& FieldName, INT4 R
 
 //cerr << "LexiHashSearch: " << Term << endl;
  
-  const NUMBER   fKey = encodeLexiHash(Term);
+  const NUMERICOBJ fKey = encodeLexiHash(Term);
 
 #ifdef FIELD_WILD_MATCH
   STRING          pattern(FieldName);
@@ -245,6 +247,10 @@ static void PopulateTypedResultSet(PIDBOBJ parent,
                                    const DATERANGE& dateRange,
                                    PIRSET pirset,
                                    Enumerator&& enumerate);
+
+template <class Enumerator, class HitRange>
+static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
+                                  PIRSET result, Enumerator&& enumerate, HitRange&& hitRange);
 
 
 static void MonetaryWholeUnitBounds(INT16 key, INT16 *low, INT16 *high)
@@ -529,365 +535,59 @@ PIRSET INDEX::MonetarySearchRange(const MONETARYRANGE& Range,
 
 //
 
-PIRSET INDEX::NumericSearch(const NUMBER fKey, const STRING& FieldName, INT4 Relation) 
+PIRSET INDEX::NumericSearch(const NUMERICOBJ& key, const STRING& FieldName, INT4 Relation)
 {
-  STRING      FieldType;
-  PIRSET      pirset = new IRSET( Parent );
-  SearchState Status;
-  INT4        Start=-1, End=-1, ListCount;
-  size_t      w, old_w = 0;
-  IRESULT     iresult;
-  STRING      Fn, TextFn;
-
-  if (Parent == NULL) return NULL;
-
+  if (!Parent) return NULL;
+  PIRSET result = new IRSET(Parent);
+  if (!key.Ok())
+    {
+      Parent->SetErrorCode(113);
+      message_log(LOG_WARN, "Invalid or out-of-range numerical key for field '%s'", FieldName.c_str());
+      return result;
+    }
 #ifdef FIELD_WILD_MATCH
-  STRING          pattern(FieldName);
-  const DFDT     *dfdtp = Parent->GetMainDfdt();
- 
-  if (!pattern.IsPlain() && dfdtp)
+  const STRING pattern(FieldName);
+  const DFDT *fields = Parent->GetMainDfdt();
+  if (!pattern.IsPlain() && fields)
     {
-      const size_t total = dfdtp->GetTotalEntries();
-      STRING       field;
-      FIELDTYPE    fType;
-      IRSET       *irset0 = NULL;
-      IRSET       *irset  = NULL;
-
-      // pattern.ToUpper();
-      // pattern.Replace("\\","/");
-      for (size_t i=0; i<total; i++)
-	{
-	  field = dfdtp->GetFieldName(i+1);
-	  fType = Parent->GetFieldType(field);
-	  // Is this field numerical enough?
-	  if (! fType.IsNumeric())
-	    continue;
-
-	  // Does it match?
-          // field.Replace("\\", "/");
-          if (field.GetLength() &&  FIELD_WILD_MATCH(pattern, field))
-	    {
-	      if ((irset0 = NumericSearch(fKey, field, Relation)) != NULL)
-		{
-		  if (irset)
-		    {
-		      irset->Or(*irset0);
-		      delete irset0;
-		    }
-		  else irset = irset0;
-		}
-            }
-	}
-      if (irset) return irset;
-    }
-#endif
-
-#if DEBUG
-  cerr << "Numeric Search for " << (long)fKey << " in " << FieldName << " with Rel " << Relation << endl;
-#endif
-
-  FIELDTYPE ft = Parent->GetFieldType(FieldName);
-  if (ft.IsText())
-    {
-      Parent->SetErrorCode(113); // "Unsupported attribute type"
-      message_log(LOG_DEBUG, "Can't search numeric in a mundane text field '%s'", FieldName.c_str());
-      return pirset;
-    }
-  if (ft.IsDate())
-    return DateSearch(SRCH_DATE((DOUBLE)fKey), FieldName, Relation);
-  if (ft.IsDateRange())
-    return DoDateSearch(SRCH_DATE((DOUBLE)fKey).ISOdate(), FieldName, Relation, ZStructDate);
-
-
-  if (!Parent->DfdtGetFileName(FieldName, ft, &Fn))
-    {
-      Parent->SetErrorCode(1); // Permanent System Error 
-      message_log (LOG_PANIC, "Could not create a table name for field '%s'", FieldName.c_str());
-      return pirset;
-    }
-
-  if (!FileExists(Fn))
-    {
-      Parent->SetErrorCode(113); // "Unsupported attribute type"
-      return pirset;
-    }
-
-  if (!Parent->DfdtGetFileName(FieldName, &TextFn))
-    TextFn.Clear();
-
-/*
-  if (NumFieldCache == NULL)
-    NumFieldCache = new Dictionary(31); 
-*/
-  NUMERICLIST List;
-
-#if NEW_CODE
-
-  // Find the starting and ending indexes of the matching values in the table
-  if (Relation == ZRelNE)
-    Status = List.FindIndexes(Fn,fKey, ZRelEQ,&Start, &End);
-  else
-    Status = List.FindIndexes(Fn,fKey, (ZRelation_t)Relation,&Start, &End);
-
-#if DEBUG
-  switch (Status) {
-    case TOO_LOW:  cerr << "too low"; break;
-    case TOO_HIGH: cerr << "too high"; break;
-    case NO_MATCH: cerr << "no match"; break;
-    default:       cerr << "match " << (int)Status;
-  }
-  cerr << "Start = " << Start << "   End=" << End << endl;
-#endif
-
-
-#else
-  switch (Relation) {
-
-  case ZRelEQ:			// equals
-  case ZRelNE:
-
-#if DEBUG
-  cerr << "Equals or Not-Equals.. Start with the smallest" << endl; 
-#endif
-
-    // Start is the smallest index in the table 
-    // for which fKey is <= to the table value
-    Status = List.Find(Fn, fKey, ZRelLE, &End); // was ZRelGT
-
-#if DEBUG
-  cerr << "End = " << End << endl;
-#endif
-
-    if (Status == TOO_LOW)    // We ran off the bottom end without a match
-     Status = NO_MATCH;
-
-#if DEBUG
-  cerr << "<= Status = ";
-  switch (Status) {
-    case TOO_LOW:  cerr << "too low"; break;
-    case TOO_HIGH: cerr << "too high"; break;
-    case NO_MATCH: cerr << "no match"; break;
-    default:       cerr << "match " << (int)Status;
-  }
-  cerr << endl;
-#endif
-
-    if (Status == NO_MATCH)   // No matching values - bail out
-      break;
-
-    // End is the largest index in the table for which
-    // fKey is >= to the table value;
-    Status = List.Find(Fn, fKey, ZRelGE, &Start); // was ZRelLT
-#if DEBUG
-  cerr << "Start = " << Start << endl;
-  cerr << ">= Status = "; 
-  switch (Status) {
-    case TOO_LOW:  cerr << "too low"; break;
-    case TOO_HIGH: cerr << "too high"; break;
-    case NO_MATCH: cerr << "no match"; break;
-    default:       cerr << "match " << (int)Status;
-  }
-  cerr << endl;
-#endif
-
-    if (Status == TOO_HIGH)   // We ran off the top
-      Status = NO_MATCH;
-    
-    break;
-
-  case ZRelLT:			// less than
-  case ZRelLE:			// less than or equal to
-
-    // Start at the beginning of the table
-    Start=0;
-    // End is the largest index in the table for which 
-    // fKey is <= the table value
-    Status = List.Find(Fn, fKey, Relation, &End);
-    if (Status == TOO_LOW)    // We ran off the low end without a match
-      Status = NO_MATCH;
-    break;
-
-  case ZRelGE:			// greater than or equal to
-#if DEBUG
-   cerr << "ZRelGE" << endl;
-#endif
-  case ZRelGT:			// greater than
-#if DEBUG
-  cerr << ">=" << endl;
-#endif
-
-    // Go to the end of the table
-    End = -1;
-    // Find the smallest index for which fKey is >= the table value
-    Status = List.Find(Fn, fKey, Relation, &Start);
-    if (Status == TOO_HIGH)   // We ran off the top end without a match
-      Status = NO_MATCH;
-
-#if DEBUG
-  switch (Status) {
-    case TOO_LOW:  cerr << "too low"; break;
-    case TOO_HIGH: cerr << "too high"; break;
-    case NO_MATCH: cerr << "no match"; break;
-    default:       cerr << "match " << (int)Status;
-  }
-  cerr << endl;
-#endif
-
-
-    break;
-
-#if DEBUG
-   default:
- cerr << "Unhandled relation!" << endl;
-#endif
-  }
-
-#endif
-
-  // We've now searched...
-
-#if DEBUG
-  cerr << "Search Done" << endl;
-#endif
-
-  // Bail out if we didn't find the value we were looking for
-  if (Status == NO_MATCH)
-    {
-      if (Relation == ZRelNE)
-	{
-	  if (ClippingThreshold > 0 ||
-		(Parent->GetTotalRecords() <= TooManyRecordsThreshold) )
-	    goto complement;
-	  Parent->SetErrorCode(12); //  "Too many records retrieved";
-	}
-#if DEBUG
-      cerr << "NOTHING FOUND" << endl;
-#endif
-      return pirset;
-    }
-
-
-#if !NEW_CODE
-
-  List.SetFileName(Fn);
-
-  if (Relation != ZRelEQ && Relation != ZRelNE) {
-#if DEBUG
-   cerr << "(0) Load Table (" << Start << ", " << End << ")" << endl;
-#endif
-    List.LoadTable(Start+1, End, VAL_BLOCK); // Jan 2008 // Was LoadTable(Start, End, VAL_BLOCK);
-  } else if ( (End == -1) || (Start == -1) ) {
-#if 0
-    if (Start != -1) Start++;
-    if (End != -1)   End--;
-#else
-    if (Start != -1) Start++;
-    if (End   > 0)   End--;
-#endif
-#if DEBUG
-    cerr << "(1) LoadTable(" << Start << ", " << End << ")" << endl;
-#endif
-    List.LoadTable(Start, End, VAL_BLOCK);
-    
-  } else {
-    // OK - it was equal and we found the value.  But Start points to the
-    // first value less than the hit, and End points to the first value
-    // greater than the hit, so we need to bump them to get to the right 
-    // values
-#if DEBUG
-    cerr << "(2) LoadTable(" << (Start+1) << ", " << (End-1) << ")" << endl;
-#endif
-    List.LoadTable(Start+1, End, VAL_BLOCK); // Jan 2008 // Was LoadTable(Start+1, End-1, VAL_BLOCK); //
-  }
-
-#endif /* NEW_CODE */
-
-  ListCount = List.GetCount();
-
-#if DEBUG
-  cerr << "ListCount = " << ListCount << endl;
-#endif
-
-  iresult.SetVirtualIndex( (UCHR)( Parent->GetVolume(NULL) ) );
-  iresult.SetMdt (Parent->GetMainMdt() );
-  iresult.SetHitCount (1);
-  iresult.SetAuxCount (1);
-  iresult.SetScore (0);
-
-
-  {bool isDeleted = false;
-  SRCH_DATE   rec_date;
-  FILE *fp = ffopen(TextFn, "rb");
-
-#if NEW_CODE
-  for(INT4 Pointer=Start; Pointer<=End; Pointer++) 
-#else
-  for(INT4 Pointer=0; Pointer<ListCount; Pointer++)
-#endif
-   {
-    GPTYPE Value=List.GetGlobalStart(Pointer);
-    
-#if DEBUG
-    cerr << "Looking at GP " << Value << endl;
-#endif
-
-    if ((w = Parent->GetMainMdt()->LookupByGp(Value)) == 0)
-       continue; // Not found
-
-   // Check Date Range (don't do it if != was the op)
-    if ( DateRange.Defined () && Relation != ZRelNE ) {
-      if ( w != old_w ) {
-        MDTREC          mdtrec;
-        if ( Parent->GetMainMdt()->GetEntry ( w, &mdtrec ) ) {
-          rec_date = mdtrec.GetDate ();
-          isDeleted = mdtrec.GetDeleted ();
-        } else {
-          isDeleted = true;
+      for (size_t i = 1; i <= fields->GetTotalEntries(); ++i)
+        {
+          const STRING field = fields->GetFieldName(i);
+          const FIELDTYPE type = Parent->GetFieldType(field);
+          if (!type.IsNumeric() || !FIELD_WILD_MATCH(pattern, field)) continue;
+          IRSET *part = NumericSearch(key, field, Relation);
+          if (part) { result->Or(*part); delete part; }
         }
-        old_w = w;
-      }
-      if ( isDeleted )
-        continue;               // Don't bother since its marked deleted
+      return result;
+    }
+#endif
+  const FIELDTYPE type = Parent->GetFieldType(FieldName);
+  if (type.IsDate()) { delete result; return DateSearch(SRCH_DATE((DOUBLE)key), FieldName, Relation); }
+  if (type.IsDateRange()) { delete result; return DoDateSearch(SRCH_DATE((DOUBLE)key).ISOdate(), FieldName, Relation, ZStructDate); }
+  if (type.IsText()) { Parent->SetErrorCode(113); return result; }
+  if (type.IsCurrency()) { delete result; return MonetarySearch(MONETARYOBJ(key), FieldName, Relation); }
 
-      if ( rec_date.Ok () ) {
-        // Check date range
-        if ( !DateRange.Contains ( rec_date ) ) {
-          continue;             // Out of range range
-        }
-      }
-    }
-    // Yes..
-    iresult.SetMdtIndex ( w );
-    if (Relation != ZRelNE) {
-      IRESULT::hit_type Fc(FieldCache->FcInField(Value, fp));
-      iresult.SetHitTable ( Fc ); // Don't have a lexical source of truth
-    }
-    pirset->FastAddEntry(iresult);
-  }
+  STRING filename, coordinates;
+  if (!Parent->DfdtGetFileName(FieldName, type, &filename)) { Parent->SetErrorCode(1); return result; }
+  if (!FileExists(filename)) { Parent->SetErrorCode(113); return result; }
+  Parent->DfdtGetFileName(FieldName, &coordinates);
+  FILE *fp = coordinates.IsEmpty() ? NULL : ffopen(coordinates, "rb");
+  NUMERICLIST values;
+  const clock_t started = clock();
+  const auto keepRunning = [&]() {
+    if (MaxCPU_ticks > 0 && clock()-started > MaxCPU_ticks) { CPU_ResourcesExhausted(); return false; }
+    return true;
+  };
+  PopulateTypedResultSet(Parent, DateRange, result,
+    [&](auto&& visitor) {
+      const bool ok = values.VisitMappedMatches(filename, key.GetTicks(), ZRelation_t(Relation),
+                                               NumericColumnMaps, keepRunning, visitor);
+      if (!ok && keepRunning()) Parent->SetErrorCode(113);
+      return ok;
+    },
+    [&](GPTYPE gp, UINT2) { return FieldCache->FcInField(gp, fp); });
   if (fp) ffclose(fp);
-  }
-
-//  pirset->SortBy(ByIndex);
-
-  pirset->MergeEntries ( true );
-
-#if DEBUG
-  cerr << "Got " << pirset->GetTotalEntries() << " entries" << endl;
-#endif
-
-
-  if (Relation == ZRelNE)
-    {
-complement:
-      pirset->Not (FieldName);
-    }
-
-  //  SetCache->Add(T1,Relation,FieldName,DBName,pirset);
-#if DEBUG
-  message_log (LOG_DEBUG, "NumericSearch - %ld hits in %s for term='%f' relation=%d",
-	pirset->GetTotalEntries(), FieldName.c_str(), fKey, Relation);
-#endif
-  return(pirset);
+  return result;
 }
 
 // Dump the numbers in an index
@@ -915,123 +615,33 @@ size_t INDEX::CurrencyScan(SCANLIST *List, const STRING& FieldName, size_t Start
     FIELDTYPE::currency, Start, TotalRequested, MonetaryColumnMaps, typed_scan::CurrencyTerm());
 }
 
-size_t INDEX::NumericalScan(STRLIST *Strlist, const STRING& FieldName, size_t Start, INT TotalRequested)
+size_t INDEX::NumericalScan(STRLIST *output, const STRING& field, size_t start, INT requested)
 {
-  if (!Parent || !Strlist || TotalRequested == 0) return 0;
-  FIELDTYPE    FieldType = Parent->GetFieldType(FieldName);
-
-#if DEBUG
-  cerr << "FieldName = " << FieldName << "  FieldType = " << FieldType << endl;
-#endif
-
-  if (FieldType == FIELDTYPE::integer)
-    return IntegerScan(Strlist, FieldName, Start, TotalRequested);
-  if (FieldType == FIELDTYPE::currency)
-    return CurrencyScan(Strlist, FieldName, Start, TotalRequested);
-  if (FieldType.IsDate())
-    return DateScan(Strlist, FieldName, Start, TotalRequested);
-  if (! (FieldType.IsNumerical() || FieldType.IsComputed()))
-    return 0;
-
-  STRING       Fn;
-  NUMERICLIST  List;
-  size_t       total = 0;
-  Parent->DfdtGetFileName(FieldName, FieldType, &Fn);
-  if (!FileExists(Fn))
-    {
-      Parent->SetErrorCode(123); // "Unsupported attribute combination";
-      return 0;
-    }
-
-  List.SetFileName(Fn);
-  List.LoadTable(Start, -1, VAL_BLOCK);
-
-  size_t  count = List.GetCount();
-  DOUBLE  oldVal = 0; // Set to 0 to keep lint quiet
-  for (size_t i=0; i<count; i++)
-   {
-     DOUBLE val = List.GetNumericValue(i);
-     if (i==0 || val != oldVal)
-       {
-          Strlist->AddEntry(val);
-          oldVal = val;
-          total++;
-          if (TotalRequested == (INT)total)
-            break;
-       }
-   }
-  return total;
+  if (!Parent || !output || requested == 0) return 0;
+  const FIELDTYPE type = Parent->GetFieldType(field);
+  if (type.IsInteger()) return IntegerScan(output, field, start, requested);
+  if (type.IsCurrency()) return CurrencyScan(output, field, start, requested);
+  if (type.IsDate()) return DateScan(output, field, start, requested);
+  if (!(type.IsNumerical() || type.IsComputed() || type == FIELDTYPE::boolean)) return 0;
+  return typed_scan::ScanField<NUMERIC_INDEX_TRAITS>(Parent, output, field, type, start, requested,
+                                                  NumericColumnMaps, typed_scan::NumericTerm());
 }
 
-
-size_t INDEX::NumericalScan(SCANLIST *Scanlist, const STRING& FieldName, size_t Start, INT TotalRequested)
+size_t INDEX::NumericalScan(SCANLIST *output, const STRING& field, size_t start, INT requested)
 {
-  if (!Parent || !Scanlist || TotalRequested == 0) return 0;
-  FIELDTYPE    FieldType = Parent->GetFieldType(FieldName);
-
-#if DEBUG
-  cerr << "FieldName = " << FieldName << "  FieldType = " << FieldType << endl;
-#endif
-
-  if (FieldType == FIELDTYPE::integer)
-    return IntegerScan(Scanlist, FieldName, Start, TotalRequested);
-  if (FieldType == FIELDTYPE::currency)
-    return CurrencyScan(Scanlist, FieldName, Start, TotalRequested);
-  if (FieldType.IsDate())
-    return DateScan(Scanlist, FieldName, Start, TotalRequested);
-  if (! (FieldType.IsNumerical() || FieldType.IsComputed()))
-    return 0;
-
-  STRING       Fn;
-  NUMERICLIST  List;
-  size_t       total = 0;
-  Parent->DfdtGetFileName(FieldName, FieldType, &Fn);
-  if (!FileExists(Fn))
-    {
-      Parent->SetErrorCode(123); // "Unsupported attribute combination";
-      return 0;
-    }
-
-  List.SetFileName(Fn);
-  List.LoadTable(Start, -1, VAL_BLOCK);
-
-  const size_t  count = List.GetCount();
-
-  if (count == 0)
-    return 0; // Nothing
-
-  DOUBLE  val, oldVal = List.GetNumericValue(0);
-  size_t  freq   = 1;
-
-  for (size_t i=1; i<count; i++)
-   {
-     if ((val = List.GetNumericValue(i)) != oldVal)
-       {
-          Scanlist->AddEntry(oldVal,freq);
-          oldVal = val;
-	  freq = 1;
-          total++;
-          if (TotalRequested == (INT)total)
-            break;
-       }
-     else
-       freq++;
-   }
-  if (freq > 1 && (total < (size_t)TotalRequested || TotalRequested < 0))
-   {
-      Scanlist->AddEntry(oldVal,freq);
-      total++;
-   }
-  return total;
+  if (!Parent || !output || requested == 0) return 0;
+  const FIELDTYPE type = Parent->GetFieldType(field);
+  if (type.IsInteger()) return IntegerScan(output, field, start, requested);
+  if (type.IsCurrency()) return CurrencyScan(output, field, start, requested);
+  if (type.IsDate()) return DateScan(output, field, start, requested);
+  if (!(type.IsNumerical() || type.IsComputed() || type == FIELDTYPE::boolean)) return 0;
+  return typed_scan::ScanField<NUMERIC_INDEX_TRAITS>(Parent, output, field, type, start, requested,
+                                                  NumericColumnMaps, typed_scan::NumericTerm());
 }
 
-
-
-template <class Enumerator>
-static void PopulateTypedResultSet(PIDBOBJ parent,
-                                     const DATERANGE& dateRange,
-                                     PIRSET pirset,
-                                     Enumerator&& enumerate)
+template <class Enumerator, class HitRange>
+static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
+                                  PIRSET pirset, Enumerator&& enumerate, HitRange&& hitRange)
 {
   if (parent == NULL || pirset == NULL)
     return;
@@ -1106,7 +716,7 @@ static void PopulateTypedResultSet(PIDBOBJ parent,
           }
 
         iresult.SetMdtIndex(current_w);
-        iresult.SetHitTable(FCHIT(FC(gp, gp + span)));
+        iresult.SetHitTable(FCHIT(hitRange(gp, span)));
 
         pirset->FastAddEntry(std::move(iresult));
 
@@ -1118,6 +728,15 @@ static void PopulateTypedResultSet(PIDBOBJ parent,
         iresult.SetAuxCount(1);
         iresult.SetScore(0);
       });
+}
+
+
+template <class Enumerator>
+static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
+                                  PIRSET result, Enumerator&& enumerate)
+{
+  PopulateTypedResultSet(parent, dateRange, result, enumerate,
+                        [](GPTYPE gp, UINT2 span) { return FC(gp, gp+span); });
 }
 
 

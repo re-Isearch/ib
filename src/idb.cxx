@@ -3376,12 +3376,27 @@ bool IDB::GetFieldData(GPTYPE gp, DOUBLE* Buffer)
   return GetFieldData(HitFc, FieldName, Buffer);
 }
 
+bool IDB::GetFieldData(GPTYPE gp, NUMERICOBJ *output)
+{
+  STRING field;
+  const FC hit = GetPeerFc(gp, &field);
+  return GetFieldData(hit, field, output);
+}
 
-bool IDB::GetFieldData(const FC& FieldFC, const STRING& FieldName, DOUBLE* Buffer)
+
+bool IDB::GetFieldData(const FC& field, const STRING& name, DOUBLE *output)
+{
+  NUMERICOBJ value;
+  const bool ok = GetFieldData(field, name, &value);
+  if (output) *output = ok ? (DOUBLE)value : 0;
+  return ok;
+}
+
+bool IDB::GetFieldData(const FC& FieldFC, const STRING& FieldName, NUMERICOBJ* Buffer)
 {
   STRING DfFileName;
 
-  if (Buffer) *Buffer = 0;
+  if (Buffer) *Buffer = NUMERICOBJ();
   DfdtGetFileName(FieldName, FIELDTYPE::numerical, &DfFileName);
 
   if (!FileExists(DfFileName))

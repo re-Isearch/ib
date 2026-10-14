@@ -1916,7 +1916,7 @@ MONETARYOBJ SGMLNORM::ParseCurrency(const STRING& FieldName, const STRING& Buffe
 }
 
 bool SGMLNORM::ParseRange(const STRING& Buffer, const STRING& FieldName,
-        DOUBLE* fStart, DOUBLE* fEnd) const
+        NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const
 {
   return DOCTYPE::ParseRange(_cleanBuffer(Buffer), FieldName, fStart, fEnd);
 }

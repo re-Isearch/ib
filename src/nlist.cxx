@@ -1,1619 +1,621 @@
-/*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
-It is made available and licensed under the Apache 2.0 license: see LICENSE
-*/
-/* $Id: nlist.cxx $ */
+// Fixed numerical columns: signed 128-bit ticks with 16 decimal places.
 
-/*@@@
-File:		nlist.cxx
-Version:	2.00
-Description:	Class NUMERICLIST
-@@@*/
+#include <array>
+#include <limits>
 
-#include <stdlib.h>
-#include <errno.h>
 #include "common.hxx"
 #include "nlist.hxx"
 #include "magic.hxx"
 
+namespace {
 
-#ifndef LINEAR_MAX
-# define LINEAR_MAX 4
-#endif
+enum : UCHR {
+  NUMERIC_LAYOUT_RAW     = 0,
+  NUMERIC_LAYOUT_INDEXED = 1
+};
 
-#define DEBUG 0
-#define NEW_CODE 1
+static constexpr UCHR NUMERIC_VERSION = 1;
+static constexpr size_t NUMERIC_HEADER_SIZE = 16;
 
-typedef UINT4  _Count_t;
 
-#define SIZEOF_HEADER  sizeof(_Count_t)+1 /* size of magic */
-
-void NUMERICLIST::Clear()
+struct NUMERIC_HEADER
 {
-  Count      = 0;
-  FileName.Empty();
-  Pointer    = 0;
-  StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
-}
+  UCHR  version;
+  UCHR  layout;
+  UCHR  flags;
+  UINT4 record_size;
+  UINT8 count;
+};
 
-void NUMERICLIST::Empty()
+
+bool ParseHeader(const BYTE *buf, size_t bytes, NUMERIC_HEADER *header)
 {
-  if(table) delete [] table;
-  MaxEntries = 0;
-  table      = NULL;
-
-  Count      = 0;
-  FileName.Empty();   
-  Pointer    = 0;
-  StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
-}
-
-
-
-NUMERICLIST::NUMERICLIST()
-{
-  Ncoords    = 2;
-  MaxEntries = 0;
-  table      = NULL;
-  Count      = 0;
-  Pointer    = 0;
-  StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
-}
-
-
-NUMERICLIST::NUMERICLIST(INT n)
-{
-  Ncoords    = n;
-  MaxEntries = 0;
-  table      = NULL; 
-  Count      = 0;
-  Pointer    = 0;
-  StartIndex = EndIndex = 0; // was -1;
-  table_type = NONE;
-}
-
-
-void NUMERICLIST::ResetHitPosition()
-{
-  Pointer = ( (Relation != 1) ?  StartIndex : 0 );
-}
-
-
-GPTYPE NUMERICLIST::GetNextHitPosition()
-{
-  GPTYPE Value;
-
-#if DEBUG
-  cerr << "GetNextPosition:  StartIndex=" << StartIndex << "  EndIndex=" << EndIndex << endl;
-#endif
-
-  if(StartIndex == EndIndex) // was StartIndex == -1
-    return((GPTYPE)-1);
-  if(Relation != 1) {
-    if(Pointer>EndIndex)
-      return((GPTYPE)-1);
-    Value=table[Pointer].GetGlobalStart();
-    ++Pointer;
-    return(Value);
-  } else {
-    if(Pointer >= StartIndex)
-      while(Pointer <= EndIndex)
-	++Pointer;
-    if(Pointer >= Count)
-      return((GPTYPE)-1);
-    Value=table[Pointer].GetGlobalStart();
-    ++Pointer;
-    return(Value);
-  }
-}
-
-
-static INT SortCmp(const void* x, const void* y) 
-{
-  NUMBER a=((*((PNUMERICFLD)x)).GetNumericValue()) - ((*((PNUMERICFLD)y)).GetNumericValue()) ;
-//   return Compare( (*((PDATEFLD)x)).GetValue(), (*((PDATEFLD)y)).GetValue() );
-  if (a<0)
-    return(-1);
-  if (a>0)
-    return(1);
-  return(0);
-}
-
-
-static INT SortCmpGP(const void* x, const void* y) 
-{
-  const GPTYPE gp1 = (*((PNUMERICFLD)x)).GetGlobalStart();
-  const GPTYPE gp2 = (*((PNUMERICFLD)y)).GetGlobalStart();
-
-  if (gp1 > gp2) return  1;
-  if (gp1 < gp2) return -1;
-  return 0;
-
-}
-
-
-bool NUMERICLIST::Expand(size_t Entries)
-{
-  if (Entries < MaxEntries)
-    return true;
-  return Resize(Entries +  (50*Ncoords));
-}
-
-
-bool NUMERICLIST::Resize(size_t Entries)
-{
-  if (Entries == 0)
-    {
-      Empty();
-      return true;
-    }
-
-  NUMERICFLD *temp;
-
-  try {
-    temp =new NUMERICFLD[Entries];
-  } catch(...) {
-    message_log (LOG_PANIC|LOG_ERRNO, "Could not allocate numerical list (%ld)",
-	(long)Entries);
+  if (buf == NULL || header == NULL || bytes < NUMERIC_HEADER_SIZE)
     return false;
-  }
-  size_t      CopyCount;
 
-  if(Entries>Count)
-    CopyCount=Count;
-  else
-    Count = (CopyCount=Entries);
+  if (buf[0] != (BYTE)objFIXEDNUMERICLIST)
+    return false;
 
-  for(size_t x=0; x<CopyCount; x++)
-    temp[x]=table[x];
+  header->version     = buf[1];
+  header->layout      = buf[2];
+  header->flags       = buf[3];
+  header->record_size = getINT4(buf, 4);
+  header->count       = getINT8(buf, 8);
 
-  if(table)
-    delete [] table;
+  return header->version == NUMERIC_VERSION &&
+         header->record_size == NUMERICFLD::DISK_SIZE &&
+         header->flags == NUMERICOBJ::FRACTION_DIGITS;
+}
 
-  table=temp;
-  MaxEntries=Entries;
+
+bool ReadHeader(FILE *fp, NUMERIC_HEADER *header)
+{
+  if (fp == NULL || header == NULL)
+    return false;
+
+  std::array<BYTE, NUMERIC_HEADER_SIZE> buf;
+
+  if (fseek(fp, 0, SEEK_SET) != 0)
+    return false;
+
+  if (fread(buf.data(), 1, buf.size(), fp) != buf.size())
+    return false;
+
+  return ParseHeader(buf.data(), buf.size(), header);
+}
+
+
+bool WriteHeader(FILE *fp, UCHR layout, UINT8 count)
+{
+  if (fp == NULL)
+    return false;
+
+  putObjID(objFIXEDNUMERICLIST, fp);
+
+  if (::Write((UCHR)NUMERIC_VERSION, fp) != 1 ||
+      ::Write(layout, fp) != 1 ||
+      ::Write((UCHR)NUMERICOBJ::FRACTION_DIGITS, fp) != 1 ||
+      ::Write((UINT4)NUMERICFLD::DISK_SIZE, fp) != 4 ||
+      ::Write(count, fp) != 8)
+    return false;
+
   return true;
 }
 
 
-void NUMERICLIST::Sort()
+STRING TempName(const STRING& fn)
 {
-  QSORT((void *)table, Count, sizeof(table[0]),SortCmp);
+  STRING tmp = fn + "~";
+
+  for (size_t i = 0; FileExists(tmp); ++i)
+    tmp.form("%s~.%lu", fn.c_str(), (unsigned long)i);
+
+  return tmp;
 }
 
 
-void NUMERICLIST::SortByGP()
+bool ReplaceFile(const STRING& tmp, const STRING& fn)
 {
-  QSORT((void *)table, Count, sizeof(table[0]),SortCmpGP);
-}
-
-
-SearchState NUMERICLIST::Matcher(NUMBER Key, NUMBER A, NUMBER B, NUMBER C, 
-	ZRelation_t Relation, INT4 Type)
-{
-	
-  switch (Relation) {
-  case ZRelGE:			// greater than or equals
-    if ((B>=Key) && (Type==-1 || A<Key))
-      return(MATCH);		// exact place - lower boundary
-    else if (A>=Key)
-      return(TOO_LOW);		// key too low
-    else
-      return(TOO_HIGH);		// key too high
-
-  case ZRelGT:			// greater than
-    if ((B>Key) && (Type==-1 || A<=Key))
-      return(MATCH);		// exact place - lower boundary
-    else if (A>Key)
-      return(TOO_LOW);		// key too low
-    else
-      return(TOO_HIGH);		// key too high
-
-  case ZRelLE:			// less than or equals
-    if ((B<=Key) && (Type==0 || C>Key))
-      return(MATCH);		// exact place - upper boundary
-    else if (C<=Key)
-      return(TOO_HIGH);
-    else
-      return(TOO_LOW);
-
-  case ZRelLT:			// less than
-    if ((B<Key) && (Type==0 || C>=Key))
-      return(MATCH);		// exact place - upper boundary
-    else if (C<Key)
-      return(TOO_HIGH);
-    else
-      return(TOO_LOW);
-
-  case ZRelEQ:			// equals
-    if (B == Key)
-      return(MATCH);
-    else if (B > Key)
-      return(TOO_LOW);		// current bucket too high, search lower half
-    else
-      return(TOO_HIGH);		// current bucket too low, search upper half
-
-  default:
-    message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-    break;
-  }
-
-  message_log (LOG_PANIC, "Hideous Matching Error");
-  return(NO_MATCH);
-}
-
-
-// A:= Lower B:= Value C:= Upper
-SearchState NUMERICLIST::Matcher(GPTYPE Key, GPTYPE A, GPTYPE B, GPTYPE C, 
-		     ZRelation_t Relation, INT4 Type)
-{
-  switch (Relation) {
-  case ZRelGE:			// greater than or equals
-    if ((B>=Key) && (Type==-1 || A<Key))
-      return(MATCH);		// exact place - lower boundary
-    else if (A>=Key)
-      return(TOO_LOW);		// key too low
-    else
-      return(TOO_HIGH);		// key too high
-
-  case ZRelGT:			// greater than
-    if ((B>Key) && (Type==-1 || A<=Key))
-      return(MATCH);		// exact place - lower boundary
-    else if (A>Key)
-      return(TOO_LOW);		// key too low
-    else
-      return(TOO_HIGH);		// key too high
-
-  case ZRelLE:			// less than or equals
-    if ((B<=Key) && (Type==0 || C>Key))
-      return(MATCH);		// exact place - upper boundary
-    else if (C<=Key)
-      return(TOO_HIGH);
-    else
-      return(TOO_LOW);
-
-  case ZRelLT:			// less than
-    if ((B<Key) && (Type==0 || C>=Key))
-      return(MATCH);		// exact place - upper boundary
-    else if (C<Key)
-      return(TOO_HIGH);
-    else
-      return(TOO_LOW);
-
-  case ZRelEQ:			// equals
-    if (B == Key)
-      return(MATCH);
-    else if (B > Key)
-      return(TOO_LOW);		// current bucket too high, search lower half
-    else
-      return(TOO_HIGH);		// current bucket too low, search upper half
-
-   default:
-     message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-     break;
-  }
-
-  message_log (LOG_PANIC, "Hideous Matching Error");
-  return(NO_MATCH);
-}
-
-
-// Ultimately, this routine will try to load the table in one chunk of
-// memory.  If it succeeds, it'll call MemFind to do the search in memory.
-// Otherwise, it'll call DiskFind to do the search on disk.
-SearchState NUMERICLIST::Find(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *Index)
-{
-  SetFileName(Fn);
-
-#if DEBUG
-  cerr << "Find(" << Fn << ", " << Key << ", " << Relation << ")" << endl;
-#endif
-
-#if NEW_CODE
-  // Numeric searches require the value-sorted block.
-  if (LoadTable(VAL_BLOCK) > 0)
-    return MemFind(Key, Relation, Index);
-#endif
-  return DiskFind(Fn, Key, Relation, Index);
-}
-
-
-SearchState NUMERICLIST::Find(NUMBER Key, ZRelation_t Relation, INT4 *Index)
-{
-#if NEW_CODE
-  // Numeric searches require the value-sorted block.
-  if (LoadTable(VAL_BLOCK) > 0)
-    return MemFind(Key, Relation, Index);
-#endif
-  return DiskFind(FileName, Key, Relation, Index);
-}
-
-#if 0
-SearchState NUMERICLIST::MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index)
-{
-  return NO_MATCH;
-}
-#else
-
-SearchState NUMERICLIST::MemFind(NUMBER Key, ZRelation_t Relation, INT4 *Index) {
-  SearchState fStatus = NO_MATCH;
-  Status search_status = MATCH_FAILED;
-
-  INT4   index = -1;
-  *Index = -1;
-
-  if (Count == 0 || table == NULL)
-    return NO_MATCH;
-
-  // Linear search for now
-  switch (Relation) {
-
-  case ZRelEQ:  // find the first table value which equals Key
-    search_status = Match(GE, Key, &index);
-    if (search_status == MATCH_GOOD &&
-        (index < 0 || index >= (INT4)Count ||
-         table[index].GetNumericValue() != Key)) {
-      search_status = MATCH_FAILED;
-      index = -1;
-    }
-    break;
-
-  case ZRelLT:  // find all table values which are less than Key
-    search_status=Match(LT,Key,&index);
-    break;
-
-  case ZRelLE:  // find all table values which are less than or equal to Key
-    search_status=Match(LE,Key,&index);
-    break;
-
-  case ZRelGT:  // find all table values which are greater than Key
-    search_status=Match(GT,Key,&index);
-    break;
-
-  case ZRelGE:  // find all table values which are greater than or equal to Key
-    search_status=Match(GE,Key,&index);
-    break;
-
-  case ZRelNE:  // not going there...
-    break;
-
-  default:
-    message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-    break;
-
-  }
-
-  if (search_status == MATCH_FAILED)
-    return NO_MATCH;
-  else if (index < 0) // no lower bound
-    fStatus = TOO_LOW;
-  else if (index >= (INT4)Count) // no upper bound
-    fStatus = TOO_HIGH;
-  else
-    fStatus = MATCH;
-
-  *Index = index;
-
-  return fStatus;
-}
-
-SearchState NUMERICLIST::MemFindGp(GPTYPE Key, ZRelation_t Relation, INT4 *Index)
-{
-  INT4 found = -1;
-  *Index = -1;
-
-  if (Count == 0 || table == NULL)
-    return NO_MATCH;
-
-  // The GP block is sorted in ascending global-start order.
-  switch (Relation) {
-  case ZRelEQ:
-    for (INT4 x = 0; x < (INT4)Count; ++x) {
-      const GPTYPE val = table[x].GetGlobalStart();
-      if (val == Key) {
-        found = x;
-        break;
-      }
-      if (val > Key)
-        break;
-    }
-    break;
-
-  case ZRelLT:
-    for (INT4 x = 0; x < (INT4)Count; ++x) {
-      if (table[x].GetGlobalStart() >= Key)
-        break;
-      found = x;
-    }
-    break;
-
-  case ZRelLE:
-    for (INT4 x = 0; x < (INT4)Count; ++x) {
-      if (table[x].GetGlobalStart() > Key)
-        break;
-      found = x;
-    }
-    break;
-
-  case ZRelGT:
-    for (INT4 x = 0; x < (INT4)Count; ++x) {
-      if (table[x].GetGlobalStart() > Key) {
-        found = x;
-        break;
-      }
-    }
-    break;
-
-  case ZRelGE:
-    for (INT4 x = 0; x < (INT4)Count; ++x) {
-      if (table[x].GetGlobalStart() >= Key) {
-        found = x;
-        break;
-      }
-    }
-    break;
-
-  case ZRelNE:
-    break; // A single index cannot represent both non-equal ranges.
-
-  default:
-    message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-    break;
-  }
-
-  *Index = found;
-  return (found >= 0 && found < (INT4)Count) ? MATCH : NO_MATCH;
-}
-
-// Read just the header record count of the value-sorted (VAL_BLOCK) table
-// on disk. Used by the disk-search fallback in FindIndexes() below to know
-// where the last element of the value-sorted table lives, without loading
-// the whole table into memory.
-static long NlistDiskValCount(const STRING& Fn)
-{
-  PFILE Fp = fopen(Fn, "rb");
-  if (Fp == NULL)
-    return -1;
-  if (getObjID(Fp) != objNLIST) {
-    fclose(Fp);
-    return -1;
-  }
-  _Count_t Total;
-  Read(&Total, Fp);
-  fclose(Fp);
-  return (long)Total;
-}
-
-SearchState NUMERICLIST::FindIndexes(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *StartIndex, INT4 *EndIndex)
-{
-  SearchState Status = NO_MATCH;
-  INT nRecs;
-
-  SetFileName(Fn);
-#if DEBUG
-cerr << "LOAD TABLE" << endl;
-#endif
-  nRecs = LoadTable(VAL_BLOCK); // Load up the data
-
-#if DEBUG
-cerr << "nRrecs = " << nRecs << endl;
-#endif
-
-  if (nRecs > 0) { // WAS >=
-    Status =
-      MemFindIndexes(Key, Relation, StartIndex, EndIndex);
-  } else {
-    // Failed to load the table into memory, so fall back to a disk
-    // search. DiskFind() only ever locates a single matching position,
-    // so bracket the full [StartIndex, EndIndex] range ourselves,
-    // mirroring what MemFindIndexes() does for the in-memory case.
-    INT4 first = -1, last = -1;
-
-    switch (Relation) {
-    case ZRelEQ:
-      // First index with value >= Key, then last index with value <= Key.
-      Status = DiskFind(FileName, Key, ZRelGE, &first);
-      if (Status == MATCH)
-        Status = DiskFind(FileName, Key, ZRelLE, &last);
-      break;
-
-    case ZRelLT:
-    case ZRelLE:
-      first = 0;
-      Status = DiskFind(FileName, Key, Relation, &last);
-      break;
-
-    case ZRelGT:
-    case ZRelGE:
-      Status = DiskFind(FileName, Key, Relation, &first);
-      if (Status == MATCH) {
-	long Total = NlistDiskValCount(FileName);
-	last = (Total > 0) ? (INT4)(Total - 1) : -1;
-      }
-      break;
-
-    case ZRelNE:
-      break; // not going there...
-
-    default:
-      message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-      break;
-    }
-
-    if (Status == MATCH && first >= 0 && last >= first) {
-      // table[] is still empty/NULL at this point (that's why we're in
-      // this fallback branch at all), but callers such as
-      // INDEX::NumericSearch index directly into table[StartIndex..EndIndex].
-      // So actually load just the matched [first,last] disk range into
-      // table before handing back indices, instead of returning indices
-      // into an array that was never populated.
-      const INT4 BaseCount = (INT4)Count;
-      size_t nLoaded = LoadTable(first + 1, last, VAL_BLOCK); // NOTE: LoadTable(Start,End,Offset) decrements Start by one internally
-
-      if (nLoaded > 0) {
-        *StartIndex = BaseCount;
-        *EndIndex   = BaseCount + (INT4)nLoaded - 1;
-      } else {
-        Status = NO_MATCH;
-        *StartIndex = *EndIndex = -1;
-      }
-    } else {
-      Status = NO_MATCH;
-      *StartIndex = *EndIndex = -1;
-    }
-  }
-  return Status;
-}
-
-SearchState NUMERICLIST::MemFindIndexes(NUMBER Key, ZRelation_t Relation, INT4 *StartIndex, INT4 *EndIndex)
-{
-  SearchState fStatus = NO_MATCH;
-  Status      search_status = MATCH_FAILED;
-  INT4        first = -1;
-  INT4        last  = -1;
-
-  // Linear search for now
-  switch (Relation) {
-
-  case ZRelEQ:  // find all table values which equal Key
-    search_status=Match(GE,Key,&first);
-    if (search_status == MATCH_GOOD)
-      search_status=Match(LE,Key,&last);
-    break;
-
-  case ZRelLT:  // find all table values which are less than Key
-    search_status=Match(LT,Key,&last);
-    if (last >= 0)
-      first=0;
-
-    break;
-
-  case ZRelLE:  // find all table values which are less than or equal to Key
-    search_status=Match(LE,Key,&last);
-    if (last >= 0)
-      first=0;
-    break;
-
-  case ZRelGT:  // find all table values which are greater than Key
-    search_status=Match(GT,Key,&first);
-    if (first >= 0)
-      last=Count-1;
-    break;
-
-  case ZRelGE:  // find all table values which are greater than or equal to Key
-    search_status=Match(GE,Key,&first);
-    if (first >= 0)
-      last=Count-1;
-    break;
-
-  case ZRelNE:  // not going there...
-    break;
-
-  default:
-   message_log (LOG_DEBUG, "No semantics for relation=%d", Relation);
-   break;
-  }
-
-  if (search_status == MATCH_FAILED)
-    return NO_MATCH;
-
-  if ((first < 0) && (last < 0)) // nothing matched
-    fStatus = NO_MATCH;
-
-  else if (first < 0) // no lower bound
-    fStatus = TOO_LOW;
-
-  else if (last < 0) // no upper bound
-    fStatus = TOO_HIGH;
-
-  else
-    fStatus = MATCH;
-
-  *StartIndex = first;
-  *EndIndex = last;
-  return fStatus;
-}
-
-#endif
-
-
-SearchState NUMERICLIST::DiskFind(STRING Fn, NUMBER Key, ZRelation_t Relation, INT4 *Index)
-{
-  //  INT4 B;
-  PFILE  Fp = fopen(Fn, "rb");
-
-  if (Fp == NULL) {
-
-    message_log (LOG_ERRNO, "Can't open numeric list index '%s'", Fn.c_str());
-    *Index = -1;
-    return NO_MATCH;
-
-  } else {
-    NUMERICFLD lowerBound, upperBound, numericValue;
-    _Count_t     Total;
-    const size_t ElementSize = numericValue.Sizeof(); // sizeof(GPTYPE) + sizeof(NUMBER);
-
-    if (getObjID(Fp) != objNLIST)
-      {
-	fclose(Fp);
-        message_log (LOG_PANIC, "%s not a numerical index??", Fn.c_str());
-        *Index = -1;
-        return NO_MATCH;
-      }
-
-    Read(&Total, Fp);
-#if DEBUG
-    cerr << Total << " elements" << endl;
-#endif
-
-    if (Total == 0) return NO_MATCH;
-
-    long Low = 0;
-    long High = Total - 1;
-    long OX, X = High / 2;
-
-    enum IntType Type=AT_START;
-
-    do {
-      OX = X;
-
-      if ((X > 0) && (X < High)) {
-	if (-1 == fseek(Fp, SIZEOF_HEADER + (X-1) * ElementSize, SEEK_SET))
-	  message_log (LOG_ERRNO, "Seek failure on %s [X-1//X=%ld]", Fn.c_str());
-	Type=INSIDE;
-
-      } else if (X <= 0) {
-	if (-1 == fseek(Fp, SIZEOF_HEADER + X * ElementSize, SEEK_SET))
-	  message_log (LOG_ERRNO, "Seek failure on %s [X=%ld]", Fn.c_str(), (long)X);
-	Type=AT_START;
-
-      } else if (X >= High) {
-	if (-1 == fseek(Fp, SIZEOF_HEADER + (X-1) * ElementSize, SEEK_SET))
-	  message_log (LOG_ERRNO, "Seek failure on %s [X-1//X=%ld]", Fn.c_str(), (long)X);
-	Type=AT_END;
-      }
-	
-      if (Type != AT_START)
-	lowerBound.Read(Fp);
-
-      numericValue.Read(Fp);
-
-      // If we're at the start, we need to read the first value into
-      // NumericValue, but we don't want to leave LowerBound 
-      // uninitialized.  This will also handle the case when we only
-      // have two values in the index.
-      if (Type == AT_START)
-	lowerBound = numericValue;
-	
-      if(Type != AT_END)
-	upperBound.Read(Fp);
-
-	
-      // Similarly, if we're at the end and can't read in a new value
-      // for UpperBound, we don't want it uninitialized, either.
-      if (Type == AT_END)
-	upperBound = numericValue;
-
-      SearchState State = Matcher(Key, lowerBound.GetNumericValue(),
-	numericValue.GetNumericValue(),
-	upperBound.GetNumericValue(),
-	Relation, Type);
-	
-      if (State == MATCH) {
-	// We got a match
-	fclose(Fp);
-	*Index = X;
-	return MATCH;
-      } else if ((State == TOO_HIGH) && (Type == AT_END)) {
-	// We didn't get a match, but we ran off the upper end, so
-	// the key is bigger than anything indexed
-	fclose(Fp);
-	*Index = -1;
-	return State;
-      } else if ((State == TOO_LOW) && (Type == AT_START)) {
-	// We didn't get a match, but we ran off the lower end, so 
-	// the key is smaller than anything indexed
-	fclose(Fp);
-	*Index = -1;
-	return State;
-      } else if (Low >= High) {
-	// If Low is >= High, there aren't any more values to check
-	// so we're done whether we got a match or not, and if we got
-	// here, there wasn't a match.  This probably won't happen - 
-	// at least, we expect that these conditions will be caught
-	// by one of the preceeding, but it pays to be safe.
-	fclose(Fp);
-	*Index = -1;
-	return NO_MATCH;
-      }
-
-      if (State == TOO_LOW) {
-	High = X;
-      } else {
-	Low = X + 1;
-      }
-	
-      X = (Low + High) / 2;
-      if (X < 0) {
-	X = 0;
-      } else {
-	if (X >= Total) {
-	  X = Total - 1;
-	}
-      }
-    } while (X != OX);
-  }
-  fclose(Fp);
-  *Index = -1;
-  return NO_MATCH;
-}
-
-
-// Search for the GP INT4 values
-// Ultimately, this routine will try to load the table in one chunk of
-// memory.  If it succeeds, it'll call MemFind to do the search in memory.
-// Otherwise, it'll call DiskFind to do the search on disk.
-SearchState NUMERICLIST::Find(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 *Index)
-{
-  SetFileName(Fn);
-
-#if NEW_CODE
-  if (LoadTable(GP_BLOCK) > 0)
-    return MemFindGp(Key, Relation, Index);
-#endif
-
-  return DiskFind(Fn, Key, Relation, Index);
-}
-
-
-SearchState NUMERICLIST::Find(GPTYPE Key, ZRelation_t Relation, INT4 *Index)
-{
-#if NEW_CODE
-  if (LoadTable(GP_BLOCK) > 0)
-    return MemFindGp(Key, Relation, Index);
-#endif
-  return  DiskFind(FileName, Key, Relation, Index);
-}
-
-
-SearchState NUMERICLIST::MemFind(GPTYPE Key, ZRelation_t Relation, INT4 *Index)
-{
-#if NEW_CODE
-  return MemFindGp(Key, Relation, Index);
-#else
-  return NO_MATCH;
-#endif
-}
-
-
-// This one searches for Gps!!!
-SearchState NUMERICLIST::DiskFind(STRING Fn, GPTYPE Key, ZRelation_t Relation, INT4 *Index)
-{
-  PFILE  Fp = fopen(Fn, "rb");
-
-#if DEBUG
-  cerr << "DiskFind (" << Fn << ", " << Key << ", " << Relation << ")" << endl;
-#endif
-
-  if (!Fp) {
-    message_log (LOG_ERRNO, "Index open faolure '%s'", Fn.c_str());
-    *Index = -1;
-    return NO_MATCH;
-
-  } else {
-
-    INT4         Total;
-    INT          Low, High, X, OX;
-    SearchState  State;
-    enum IntType Type=AT_START;
-
-    if (getObjID(Fp) != objNLIST)
-      {
-	fclose(Fp);
-        message_log (LOG_PANIC, "%s not a numerical index??", FileName.c_str());
-	*Index = -1;
-        return NO_MATCH;
-      }
-
-    Read(&Total,Fp);
-
-#if DEBUG
-   cerr << "Total = " << Total << endl;
-#endif
-
-    Low = 0;
-    High = Total - 1;
-    X = High / 2;
-
-    NUMERICFLD Value, Lower, Upper;
-    const size_t  ElementSize = Value.Sizeof();
-
-
-    do {
-      OX = X;
-
-      if ((X > 0) && (X < High)) {
-	fseek(Fp, SIZEOF_HEADER + (Total+X-1) * ElementSize, SEEK_SET);
-	Type=INSIDE;
-
-      } else if (X <= 0) {
-	fseek(Fp, SIZEOF_HEADER + (Total+X) * ElementSize, SEEK_SET);
-	Type=AT_START;
-
-      } else if (X >= High) {
-	fseek(Fp, SIZEOF_HEADER + (Total+X-1) * ElementSize, SEEK_SET);
-	Type=AT_END;
-      }
-	
-      if (Type != AT_START)
-	Read(&Lower, Fp);
-	
-      Read(&Value, Fp);
-
-      // If we're at the start, we need to read the first value into
-      // NumericValue, but we don't want to leave LowerBound 
-      // uninitialized.  This will also handle the case when we only
-      // have two values in the index.
-      if (Type == AT_START)
-	Lower = Value;
-	
-      if(Type != AT_END)
-	Read(&Upper,Fp);
-	
-      // Similarly, if we're at the end and can't read in a new value
-      // for UpperBound, we don't want it uninitialized, either.
-      if (Type == AT_END)
-	Upper = Value;
-
-      State = Matcher(Key,
-	(GPTYPE)Lower.GetGlobalStart(), (GPTYPE)Value.GetGlobalStart(), (GPTYPE)Upper.GetGlobalStart(),
-	Relation, Type);
-	
-      if (State == MATCH) {
-	// We got a match
-	fclose(Fp);
-	*Index = X;
-	return MATCH;
-      } else if ((State == TOO_HIGH) && (Type == AT_END)) {
-	// We didn't get a match, but we ran off the upper end, so
-	// the key is bigger than anything indexed
-	fclose(Fp);
-	*Index = -1;
-	return State;
-      } else if ((State == TOO_LOW) && (Type == AT_START)) {
-	// We didn't get a match, but we ran off the lower end, so 
-	// the key is smaller than anything indexed
-	fclose(Fp);
-	*Index = -1;
-	return State;
-      } else if (Low >= High) {
-	// If Low is >= High, there aren't any more values to check
-	// so we're done whether we got a match or not, and if we got
-	// here, there wasn't a match.  This probably won't happen - 
-	// at least, we expect that these conditions will be caught
-	// by one of the preceeding, but it pays to be safe.
-	fclose(Fp);
-	*Index = -1;
-	return NO_MATCH;
-      }
-
-      if (State == TOO_LOW) {
-	High = X;
-      } else {
-	Low = X + 1;
-      }
-	
-      X = (Low + High) / 2;
-      if (X < 0) {
-	X = 0;
-      } else {
-	if (X >= Total) {
-	  X = Total - 1;
-	}
-      }
-    } while (X != OX);
-  }
-  fclose(Fp);
-  *Index = -1;
-  return NO_MATCH;
-}
-
-
-
-
-void NUMERICLIST::Dump(ostream& os) const
-{
-  for(_Count_t x=0; x<Count; x++)
-    table[x].Dump(os);
-}
-
-
-void NUMERICLIST::Dump(INT4 start, INT4 end, ostream& os) const
-{
-  if (start < 0)
-    start = 0;
-  if (end > Count)
-    end = Count;
-
-  for(_Count_t x=start; x<end; x++)
-    table[x].Dump(os);
-}
-
-
-// Load the entire table in one gulp
-size_t NUMERICLIST::LoadTable(NumBlock Offset)
-{
-  if (FileName.IsEmpty()) {
-    message_log (LOG_PANIC, "Numeric List FileName not set");
-    return 0;
-  }
-  if (table_type == Offset)
-    return Count;
-
-  // Do not append a differently sorted block to the current table.
-  if (table_type != NONE) {
-    Count = 0;
-    Pointer = 0;
-    StartIndex = EndIndex = 0;
-    table_type = NONE;
-  }
-
-  FILE  *fp; 
-  size_t nRecs=0;
-  if ((fp = fopen(FileName,"rb")) != NULL) {
-    // Bump past Count, then offset to the right starting point
-    // Note - there are two tables in the file - one sorted by starting
-    // value, one sorted by ending value.  There are Count entries in each
-    // version.
-    if (getObjID(fp) != objNLIST)
-      {
-	message_log (LOG_PANIC, "%s not a numerical index??", FileName.c_str());
-	fclose(fp);
-	table_type = NONE;
-	return 0;
-      }
-    _Count_t nCount;
-    ::Read(&nCount, fp);
-    nRecs = LoadTable(0,nCount-1,Offset);
-    fclose(fp);
-    table_type = Offset;
-  } else {
-    table_type = NONE;
-  }
-  return nRecs;
-}
-
-
-// This loads an intermediate table for merging into
-// a real TABLE for search and retrieval.
-// It DOES not yet have the magic header!!!!!
-size_t NUMERICLIST::LoadTable(INT4 Start, INT4 End)
-{
-  FILE   *fp;
-  size_t  nRecs=0;
-  
- if (FileName.IsEmpty() ) {
-    message_log (LOG_PANIC, "Numeric List FileName not set");
-    return 0;
-  }
-
-#if DEBUG
-  cerr << "NUMERICLIST::LoadTable(" << Start << "," << End << ")" << endl; 
-#endif
-
-  const off_t  fileSize = GetFileSize(FileName);
-  const size_t size     = table[0].Sizeof();
-  const long   Elements = fileSize/size;
-
-  if (Elements == 0)
-    {
-      if (!FileExists(FileName))
-	message_log (LOG_ERROR, "NUMERICLIST: '%s' does not exist?", FileName.c_str());
-      else if (fileSize == 0)
-	message_log (LOG_WARN, "NUMERICLIST: '%s' is empty (%lu/%u)!", FileName.c_str(),
-		(unsigned long)fileSize, size);
-      else
-	message_log (LOG_ERROR, "NUMERICLIST: Short write (%lu/%u)?",
-		(unsigned long)fileSize, size); 
-      return nRecs;
-    }
-  if (Start > Elements)
-    {
-      message_log (LOG_WARN, "NUMERICLIST: Start %d > element count (%ld). Nothing to load.",
-        (int)Start, Elements);
-      return nRecs;
-    }
-
-  
-  if ((fp=fopen(FileName,"rb")) != NULL) {
-    // NOTE: don't have a magic header yet!
-    if ((End==-1) || (End>=Elements))   End  = (INT4)(Elements - 1);
-    if (Start==-1)                      Start= 0;
-
-    if (Start)
-      {
-	if (fseek(fp,  (off_t)Start*size, SEEK_SET) != 0)
-	  message_log (LOG_ERRNO, "Can't seek in '%s'[%ld]", FileName.c_str(), (long) Start*size);
-      }
-    Resize(Count + End-Start + 1);
-
-    for (size_t i=Start;i<=End;i++){
-      if (feof(fp))
-	break;
-#if DEBUG
-      cerr << "--> Read element " << Count << endl;
-#endif
-      ::Read(&table[Count], fp);
-      nRecs++;
-      if(++Count==MaxEntries)
-	{
-	  if (Expand() == false)
-	    break;
-	}
-    }
-    fclose(fp);
-    //Cleanup();
-  } else
-    message_log (LOG_ERROR, "Could not open '%s'", FileName.c_str());
-
-  return nRecs;
-}
-
-
-size_t NUMERICLIST::LoadTable(INT4 Start, INT4 End, NumBlock Offset)
-{
-#if DEBUG
-  cerr << "NUMERICLIST::LoadTable(" << Start << "," << End << "," << (int)Offset << ")" << endl;
-#endif
-
-  // Start is the starting index (i.e., 0 based), and End is the ending
-  // index, so this will load End-Start+1 items into table[Start] through
-  // table[End]
   //
-  // Return the actual number of items read in this load
-  size_t nRecs = 0;
-  const size_t size = table[0].Sizeof();
+  // POSIX rename() replaces atomically. RenameFile() should therefore
+  // normally succeed directly on our target platforms.
+  //
+  if (RenameFile(tmp, fn) == 0)
+    return true;
 
-  if (FileName.IsEmpty()) {
-    message_log (LOG_PANIC, "Numeric List FileName not set");
-    return 0;
-  }
-  if (GetFileSize(FileName) == 0)
-    return 0; // Empty
+  message_log(LOG_ERRNO,
+              "Could not replace '%s' with '%s'",
+              fn.c_str(), tmp.c_str());
 
-  FILE *fp = fopen(FileName,"rb");
-  if (fp) {
+  return false;
+}
 
-    // This is the organized table so it HAS a magic header...
-    if (getObjID(fp) != objNLIST)
-      {
-	fclose(fp);
-        message_log (LOG_PANIC, "%s not a Numerical list??", FileName.c_str());
-	return 0;
-      }
+} // namespace
 
-    // Bump past Count, then offset to the right starting point
-    // Note - there are two tables in the file - one sorted by starting
-    // value, one sorted by ending value.  There are Count entries in each
-    // version.  
-    _Count_t nCount;
 
-    Read(&nCount, fp);
 
-    if ((End >= nCount) || (End < 0))
-      End = nCount-1;
+bool NUMERIC_INDEX_TRAITS::LoadRawBlock(
+    const STRING& FileName,
+    std::vector<field_type> *result)
+{
+  if (result == NULL)
+    return false;
 
-    if (--Start < 0) // Was 2007 Dec 10:  if (Start < 0)  we now decrement
-      Start = 0;
+  result->clear();
 
-#if DEBUG
-    cerr << "Start = " << Start << "  End =" << End << "   nCount= " << nCount << endl;
-#endif
-  
-    if ((Start < nCount) && !feof(fp)) {
-      off_t MoveTo;
+  FILE *fp = fopen(FileName, "rb");
+  if (fp == NULL)
+    return false;
 
-      if (Offset == VAL_BLOCK)
-	MoveTo = SIZEOF_HEADER + (Start * size);
-      else if (Offset == GP_BLOCK)
-	MoveTo = SIZEOF_HEADER + ((nCount+Start) * size);
-      else 
-	MoveTo = 1; // +1 for the magic // 2022 November
+  NUMERIC_HEADER header;
 
-#if DEBUG
-      cerr << "Moving " << MoveTo << " bytes into the file and reading "
-	   << (End - Start +1) << " elements (of " << nCount << ") starting at table[" << Count << "]"
-	   << endl;
-#endif
-      if (MoveTo != SIZEOF_HEADER)
-	if (-1 == fseek(fp, MoveTo, SEEK_SET))
-	  message_log (LOG_ERRNO, "Seek failure to %lu on '%s'", (unsigned long)MoveTo, FileName.c_str());
-
-      errno = 0;
-      Resize (Count + End - Start + 1);
-      for (size_t i=Start; i<=End; i++) {
-	if (feof(fp))
-	  {
-	    message_log (LOG_ERRNO, "Premature numeric list read-failure in '%s' (%d of %d)",
-		FileName.c_str(), i, End);
-	    break;
-	  }
-	::Read(&table[Count],  fp);
-#if DEBUG
-	cerr << "*Read " << Count << "   "<< table[Count] << endl;
-#endif
-
-	nRecs++;
-	if(++Count == MaxEntries)
-	  if (Expand() == false)
-	    break;
-      }
-    }
+  if (!ReadHeader(fp, &header) ||
+      header.layout != NUMERIC_LAYOUT_RAW)
+  {
     fclose(fp);
-  } else
-    message_log (LOG_ERROR, "Could not open '%s'", FileName.c_str());
-#if DEBUG
-  cerr <<"** Read " << nRecs << endl;
-#endif
-  return nRecs;
-}
-
-
-// First generation write
-void NUMERICLIST::WriteTable()
-{
-  FILE  *fp;
-
-  if ( FileName.IsEmpty() ) 
-    return;
-
-#if DEBUG
-  cerr << "First generation WriteTable" << endl;
-#endif
-
-  if ((fp=fopen(FileName,"wb")) != NULL)
-    {
-      for(size_t i=0; i<Count; i++)
-	Write(table[i], fp);
-      fclose(fp);
-    }
-}
-
-
-// Write the combined table
-//
-void NUMERICLIST::WriteTable(INT Offset)
-{
-  FILE  *fp;
-
-  if ( FileName.IsEmpty())
-    return;
-
-  // Offset = 0 is start of file
-  if ((fp = fopen (FileName, (Offset == 0) ? "wb" : "a+b")) != NULL)
-    {
-      // First, write out the count
-      if (Offset == 0)
-	{
-	  putObjID(objNLIST, fp);
-	  Write((_Count_t)Count, fp);
-	}
-
-      // Now, go to the specified offset and write the table
-      off_t  MoveTo = (off_t)(Offset* table[0].Sizeof()) + SIZEOF_HEADER;
-
-      // cout << "Offsetting " << MoveTo << " bytes into the file." << endl;
-
-      if (fseek(fp, MoveTo, SEEK_SET) == 0)
-	{
-	  for (_Count_t x=0; x<Count; x++)
-	    Write(table[x], fp);
-	}
-      else message_log (LOG_ERRNO, "Seek error in NUMERICLIST");
-      fclose(fp);
-   }
-}
-
-
-void NUMERICLIST::WriteIndex(const STRING& Fn)
-{
-  SetFileName(Fn);
-
-#if DEBUG
-  cerr << "Load table... " << endl;
-#endif
-  LoadTable(0,-1);
-  if (Count > 0)
-    {
-      Sort();  
-      WriteTable(0);
-      SortByGP();
-      WriteTable(Count);
-    }
-}
-
-
-// Reduce the two tables down to one to allow for a simple
-// write append
-//
-FILE *NUMERICLIST::OpenForAppend(const STRING& Fn)
-{
-  FILE *Fp;
-
-  // New file?
-  if (GetFileSize(Fn) == 0) {
-    Fp = fopen(Fn, "a+b");
-    return Fp; 
+    return false;
   }
-  Fp = fopen(Fn, "rb"); // Read and write
 
-  if (Fp == NULL)
-   {
-      message_log (LOG_ERRNO, "NUMERICLIST:: Can't open '%s' for reading/writing", Fn.c_str());
+  const off_t file_size = GetFileSize(FileName);
+
+  if (file_size < (off_t)NUMERIC_HEADER_SIZE)
+  {
+    fclose(fp);
+    return false;
+  }
+
+  const off_t bytes = file_size - (off_t)NUMERIC_HEADER_SIZE;
+
+  const size_t count = (size_t)(bytes / NUMERICFLD::DISK_SIZE);
+
+  const size_t remainder = (size_t)(bytes % NUMERICFLD::DISK_SIZE);
+
+
+  if (remainder != 0)
+  {
+    message_log(LOG_ERROR,
+                "Truncated NUMERIC raw index '%s' (%lu trailing byte(s))",
+                FileName.c_str(),
+                (unsigned long)remainder);
+    fclose(fp);
+    return false;
+  }
+
+  result->reserve(count);
+
+  if (fseek(fp, NUMERIC_HEADER_SIZE, SEEK_SET) != 0)
+  {
+    fclose(fp);
+    return false;
+  }
+
+  for (size_t i = 0; i < count; ++i)
+  {
+    field_type field;
+
+    if (!field.Read(fp))
+    {
+      fclose(fp);
+      result->clear();
+      return false;
+    }
+
+    result->push_back(field);
+  }
+
+  fclose(fp);
+  return true;
+}
+
+
+
+bool NUMERIC_INDEX_TRAITS::LoadValueBlock(
+    const STRING& FileName,
+    std::vector<field_type> *result)
+{
+  if (result == NULL)
+    return false;
+
+  result->clear();
+
+  FILE *fp = fopen(FileName, "rb");
+  if (fp == NULL)
+    return false;
+
+  NUMERIC_HEADER header;
+
+  if (!ReadHeader(fp, &header) ||
+      header.layout != NUMERIC_LAYOUT_INDEXED)
+  {
+    fclose(fp);
+    return false;
+  }
+
+  const UINT8 count = header.count;
+  if (count > (UINT8(std::numeric_limits<off_t>::max()) - NUMERIC_HEADER_SIZE) /
+              (2 * NUMERICFLD::DISK_SIZE) ||
+      count > std::numeric_limits<size_t>::max() / NUMERICFLD::DISK_SIZE)
+    { fclose(fp); return false; }
+
+  const off_t expected =
+      (off_t)NUMERIC_HEADER_SIZE +
+      (off_t)(2 * count * NUMERICFLD::DISK_SIZE);
+
+  if (GetFileSize(FileName) != expected)
+  {
+    message_log(LOG_ERROR,
+                "Truncated NUMERIC index '%s'",
+                FileName.c_str());
+
+    fclose(fp);
+    return false;
+  }
+
+  result->reserve((size_t)count);
+
+  if (fseek(fp, NUMERIC_HEADER_SIZE, SEEK_SET) != 0)
+  {
+    fclose(fp);
+    return false;
+  }
+
+  for (UINT8 i = 0; i < count; ++i)
+  {
+    field_type field;
+
+    if (!field.Read(fp))
+    {
+      fclose(fp);
+      result->clear();
+      return false;
+    }
+
+    result->push_back(field);
+  }
+
+  fclose(fp);
+  return true;
+}
+
+
+
+bool NUMERIC_INDEX_TRAITS::MapIndexed(
+    const STRING& FileName,
+    MultiMMapSession& Sessions,
+    mapped_type *view)
+{
+  if (view == NULL)
+    return false;
+
+  *view = mapped_type{};
+
+  //
+  // Deliberately MapNormal.  Query selectivity is unknown here: equality
+  // touches only a few pages, while inequalities may consume a substantial
+  // contiguous slice.  Let the VM use its normal heuristics.
+  //
+  const unsigned char *base =
+      Sessions.GetMemoryBase(FileName, MapNormal);
+
+  if (base == NULL)
+    return false;
+
+  const size_t bytes = Sessions.Size(FileName);
+
+  NUMERIC_HEADER header;
+
+  if (!ParseHeader(base, bytes, &header) ||
+      header.layout != NUMERIC_LAYOUT_INDEXED)
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t count = static_cast<size_t>(header.count);
+
+  if (static_cast<UINT8>(count) != header.count)
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t max_size = std::numeric_limits<size_t>::max();
+
+  if (count >
+      (max_size - NUMERIC_HEADER_SIZE) /
+      (2 * NUMERICFLD::DISK_SIZE))
+    {
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  const size_t block_bytes = count * NUMERICFLD::DISK_SIZE;
+  const size_t expected =
+      NUMERIC_HEADER_SIZE + 2 * block_bytes;
+
+  if (bytes != expected)
+    {
+      message_log(LOG_ERROR,
+                  "Truncated NUMERIC index '%s'",
+                  FileName.c_str());
+
+      Sessions.Invalidate(FileName);
+      return false;
+    }
+
+  view->value_block = base + NUMERIC_HEADER_SIZE;
+  view->gp_block    = view->value_block + block_bytes;
+  view->count       = count;
+
+  return true;
+}
+
+
+bool NUMERIC_INDEX_TRAITS::WriteIndex(
+    const STRING& FileName,
+    const std::vector<field_type>& valueBlock,
+    const std::vector<field_type>& gpBlock)
+{
+  if (valueBlock.size() != gpBlock.size())
+    return false;
+
+  const STRING tmp = TempName(FileName);
+
+  FILE *fp = fopen(tmp, "wb");
+  if (fp == NULL)
+    return false;
+
+  const UINT8 count = (UINT8)valueBlock.size();
+
+  if (!WriteHeader(fp, NUMERIC_LAYOUT_INDEXED, count))
+  {
+    fclose(fp);
+    UnlinkFile(tmp);
+    return false;
+  }
+
+  for (const auto& field : valueBlock)
+  {
+    if (!field.Write(fp))
+    {
+      fclose(fp);
+      UnlinkFile(tmp);
+      return false;
+    }
+  }
+
+  for (const auto& field : gpBlock)
+  {
+    if (!field.Write(fp))
+    {
+      fclose(fp);
+      UnlinkFile(tmp);
+      return false;
+    }
+  }
+
+  if (fclose(fp) != 0)
+  {
+    UnlinkFile(tmp);
+    return false;
+  }
+
+  return ReplaceFile(tmp, FileName);
+}
+
+
+
+FILE *NUMERIC_INDEX_TRAITS::OpenForAppend(const STRING& FileName)
+{
+  //
+  // Brand new field.
+  //
+  if (GetFileSize(FileName) == 0)
+  {
+    FILE *fp = fopen(FileName, "w+b");
+
+    if (fp == NULL)
       return NULL;
-   }
-  if (getObjID(Fp)!= objNLIST)
+
+    if (!WriteHeader(fp, NUMERIC_LAYOUT_RAW, 0))
     {
-      fclose(Fp);
-      Fp = fopen(Fn, "a+b");
-      return Fp;
+      fclose(fp);
+      return NULL;
     }
 
-  _Count_t Total;
-  Read(&Total, Fp);
-  if (Total == 0) 
+    return fp; // positioned immediately after header
+  }
+
+
+  FILE *in = fopen(FileName, "rb");
+  if (in == NULL)
+    return NULL;
+
+  NUMERIC_HEADER header;
+
+  if (!ReadHeader(in, &header))
+  {
+    message_log(LOG_ERROR,
+                "'%s' is not a fixed-point NUMERIC index; reindex required",
+                FileName.c_str());
+
+    fclose(in);
+    return NULL;
+  }
+
+
+  //
+  // Already a raw append stream.
+  //
+  if (header.layout == NUMERIC_LAYOUT_RAW)
+  {
+    fclose(in);
+
+    const off_t bytes =
+        GetFileSize(FileName) - (off_t)NUMERIC_HEADER_SIZE;
+
+    if (bytes < 0 ||
+        (bytes % NUMERICFLD::DISK_SIZE) != 0)
     {
-      // Nothing in there so
-      fclose(Fp);
-      return fopen(Fn, "wb"); // Can start from scratch
+      message_log(LOG_ERROR,
+                  "NUMERIC append file '%s' has an incomplete record",
+                  FileName.c_str());
+
+      return NULL;
     }
 
-  STRING TmpName = Fn + "~";
+    return fopen(FileName, "a+b");
+  }
 
-  // Look for a non-existing....
-  for (size_t i =0; FileExists(TmpName); i++)
+
+  if (header.layout != NUMERIC_LAYOUT_INDEXED)
+  {
+    fclose(in);
+    return NULL;
+  }
+
+
+  //
+  // Convert the optimized representation back into a raw GP-ordered
+  // append stream.
+  //
+  // IMPORTANT: copy the GP block, not the value block.
+  //
+  const UINT8 count = header.count;
+
+  if (count > (UINT8(std::numeric_limits<off_t>::max()) - NUMERIC_HEADER_SIZE) /
+              (2 * NUMERICFLD::DISK_SIZE) ||
+      GetFileSize(FileName) != off_t(NUMERIC_HEADER_SIZE) + off_t(2)*count*NUMERICFLD::DISK_SIZE)
+    { fclose(in); return NULL; }
+
+  const off_t gp_offset =
+      (off_t)NUMERIC_HEADER_SIZE +
+      (off_t)(count * NUMERICFLD::DISK_SIZE);
+
+  if (fseek(in, gp_offset, SEEK_SET) != 0)
+  {
+    fclose(in);
+    return NULL;
+  }
+
+  const STRING tmp = TempName(FileName);
+
+  FILE *out = fopen(tmp, "wb");
+  if (out == NULL)
+  {
+    fclose(in);
+    return NULL;
+  }
+
+  if (!WriteHeader(out, NUMERIC_LAYOUT_RAW, 0))
+  {
+    fclose(in);
+    fclose(out);
+    UnlinkFile(tmp);
+    return NULL;
+  }
+
+  for (UINT8 i = 0; i < count; ++i)
+  {
+    field_type field;
+
+    if (!field.Read(in) || !field.Write(out))
     {
-      TmpName.form ("%s.%d", Fn.c_str(), (int)i);
+      fclose(in);
+      fclose(out);
+      UnlinkFile(tmp);
+      return NULL;
     }
-  // Open it... (Racing condition??)
-  FILE *oFp = fopen(TmpName, "wb");
-  if (oFp == NULL)
+  }
+
+  fclose(in);
+
+  if (fclose(out) != 0)
+  {
+    UnlinkFile(tmp);
+    return NULL;
+  }
+
+  if (!ReplaceFile(tmp, FileName))
+  {
+    UnlinkFile(tmp);
+    return NULL;
+  }
+
+  return fopen(FileName, "a+b");
+}
+
+
+size_t NUMERICLIST::LoadTable(INT4 start, INT4 end, NumBlock block)
+{
+  Clear();
+  std::vector<NUMERICFLD> rows;
+  if (block == NONE)
     {
-      // Fall into scatch (we might not have writing permission
-      STRING tmp = GetTempFilename(Fn, true) ;
-
-      message_log (LOG_WARN, "Could not create '%s', trying tmp '%s'", TmpName.c_str(), tmp.c_str());
-      if ((oFp = tmp.fopen("wb")) == NULL)
-	{
-	  message_log (LOG_ERRNO, "Can't create a temporary numlist '%s'", Fn.c_str());
-	  fclose(Fp);
-	  return NULL;
-	}
-      TmpName = tmp; // Set it
+      if (!NUMERIC_INDEX_TRAITS::LoadRawBlock(FileName, &rows)) return 0;
     }
-
-  // Copy over
-  NUMERICFLD fld;
-  for (_Count_t i=0; i< Total; i++)
+  else if (block == VAL_BLOCK)
     {
-      fld.Read(Fp);
-      fld.Write(oFp);
+      if (!NUMERIC_INDEX_TRAITS::LoadValueBlock(FileName, &rows)) return 0;
     }
-  fclose(Fp);
-  fclose(oFp);
-  if (::remove(Fn) == -1)
-    message_log (LOG_ERRNO, "Can't remove '%s'", Fn.c_str());
-  if (RenameFile(TmpName, Fn) == -1)
-    message_log (LOG_ERRNO, "Can't rename '%s' to '%s'", TmpName.c_str(), Fn.c_str());
-
-  // Now open for append
-  if ((Fp = fopen(Fn, "a+b")) == NULL)
-    message_log (LOG_ERRNO, "Could not open '%s' for nlist append", Fn.c_str());
   else
-    message_log (LOG_DEBUG, "Opening '%s' for nlist append", Fn.c_str());
-  return Fp;
-}
-
-
-
-NUMERICLIST::~NUMERICLIST()
-{
-  if (table)
-    delete [] table;
-}
-
-#if 1
-// This is all the new search code
-
-// Checks the test value (key) against the array value (val) to see
-// on whether key is greater than, less than or equal to val.
-Status NUMERICLIST::n_compare(NUMBER val, NUMBER key)
-{
-  if (key<val) // key is below the comparison value
-    return MATCH_LOWER;
-
-  else if (key>val) // key is above the comparison value
-    return MATCH_UPPER;
-
-  else // key must equal the comparison value
-    return MATCH_MID;
-}
-
-
-// Matches by walking up the array from the bottom until it finds
-// a value that is strictly larger than the Key
-Status NUMERICLIST::LinearMatchLE(NUMBER Key,int bottom,int top,int* Index)
-{
-  int i=bottom;
-  if (Key < table[bottom].GetNumericValue()) // Nothing in table matches
-    return MATCH_FAILED;
-  else if (Key >= table[top].GetNumericValue()) { // Everything in table matches
-    *Index=top;
-    return MATCH_GOOD;
-  }
-
-  while ((i <= top) && (table[i].GetNumericValue() <= Key)) {
-    *Index=i;
-    i++;
-  }
-  return MATCH_GOOD;
-}
-
-
-/* Matches by walking down the array from the top until it finds
- * a value that is strictly smaller than the Key
- */
-Status NUMERICLIST::LinearMatchDownLT(NUMBER Key,int bottom,int top,int* Index)
-{
-  int i=top;
-  Status ret;
-  ret = MATCH_FAILED;
-
-  if (Key<=table[bottom].GetNumericValue()) // Nothing in table matches
-    return MATCH_FAILED;
-  else if (Key>table[top].GetNumericValue()) { // Everything in table matches
-    *Index=top;
-    return MATCH_GOOD;
-  }
-
-  while ((i >= bottom) && (Key <= table[i].GetNumericValue())) {
-    i--;
-  }
-
-  if (i >= bottom) {
-    *Index=i;
-    ret = MATCH_GOOD;
-  }
-  return ret;
-}
-
-
-/* Matches by walking down the array from the top until it finds
- * a value that is strictly smaller than the Key
- */
-Status NUMERICLIST::LinearMatchGE(NUMBER Key,int bottom,int top,int* Index)
-{
-  int i=top;
-  if (Key <= table[bottom].GetNumericValue()) { // Everything in this range matches
-    *Index=bottom;
-    return MATCH_GOOD;
-  } else if (Key > table[top].GetNumericValue()) { // Nothing in this range matches
-    return MATCH_FAILED;
-  }
-
-  while ((i >= bottom) && (table[i].GetNumericValue() >= Key)) {
-    *Index=i;
-    i--;
-  }
-  return MATCH_GOOD;
-}
-
-Status NUMERICLIST::LinearMatchUpGT(NUMBER Key,int bottom,int top,int* Index)
-{
-  int i=bottom;
-  Status ret;
-  ret = MATCH_FAILED;
-
-#if DEBUG
-  cerr << "LinearMatchUpGT" << endl;
-#endif
-
-  if (Key>=table[top].GetNumericValue()) // Nothing in table matches
-    return MATCH_FAILED;
-  else if (Key<table[bottom].GetNumericValue()) { // Everything in table matches
-    *Index=bottom;
-    return MATCH_GOOD;
-  }
-
-  while ((i <= top) && (Key >= table[i].GetNumericValue())) {
-    i++;
-  }
-  if (i <= top) {
-    *Index=i;
-    ret = MATCH_GOOD;
-  }
-
-  return ret;
-}
-
-
-/* 
- * Does a binary search in table, looking for the largest
- * array index i for which table[i] < Key, and for which
- * table[i+1]>=Key
- */
-Status NUMERICLIST::BestMatchLE(NUMBER Key,int first, int last, int* Index)
-{
-  Status found;
-  int mid;
-
-  if (table[first].GetNumericValue() > Key)
-    return MATCH_FAILED;
-  if (table[last].GetNumericValue() <= Key) {
-    *Index=last;
-    return MATCH_GOOD;
-  }
-
-  found = MATCH_FAILED;
-  mid = (first + last) / 2;
-  while (found != MATCH_GOOD && last-first>LINEAR_MAX) {
-    found=n_compare(table[mid].GetNumericValue(),Key);
-    if (found == MATCH_MID) {
-      // bail and start the linear search
-      found = MATCH_GOOD;
-    } else {
-      if (found == MATCH_LOWER) {
-	last = mid;
-      } else {
-	first = mid;
-      }
-      mid = (first + last) / 2;
+    {
+      MultiMMapSession maps;
+      NUMERIC_INDEX_TRAITS::mapped_type view;
+      if (!NUMERIC_INDEX_TRAITS::MapIndexed(FileName, maps, &view)) return 0;
+      rows.reserve(view.count);
+      for (size_t i = 0; i < view.count; ++i)
+        rows.emplace_back(NUMERIC_INDEX_TRAITS::MappedGlobalStartAt(view.gp_block, i),
+                          NUMERICOBJ::FromTicks(NUMERIC_INDEX_TRAITS::MappedValueAt(view.gp_block, i)));
     }
-  }
-
-  // To match strict inequality, when we match the midpoint or when
-  // we get indexes close enough, we can just do the linear search
-  found = LinearMatchLE(Key,first,last,Index);
-  return found;
+  const size_t first = start < 0 ? 0 : size_t(start);
+  const size_t last = end < 0 ? rows.size() : std::min(rows.size(), size_t(end)+1);
+  if (first >= last) return 0;
+  Reserve(last-first);
+  for (size_t i = first; i < last; ++i) Add(rows[i]);
+  return GetCount();
 }
 
-
-/* 
- * Does a binary search in table, looking for the smallest
- * array index i for which table[i]>Key and for which
- * table[i-1]<=Key
- */
-Status NUMERICLIST::BestMatchGE(NUMBER Key,int first, int last, int* Index)
+SearchState NUMERICLIST::FindIndexes(const STRING& name, const NUMERICOBJ& key,
+                                    ZRelation_t relation, INT4 *first, INT4 *last)
 {
-  Status found;
-  int mid;
-
-  if (table[last].GetNumericValue()<Key) // Nothing matches
-    return MATCH_FAILED;
-  else if (table[first].GetNumericValue()>=Key) { // Everything matches
-    *Index=first;
-    return MATCH_GOOD;
-  }
-
-  found = MATCH_FAILED;
-
-  mid = (first + last) / 2;
-  while (found != MATCH_GOOD && last-first>LINEAR_MAX) {
-    found=n_compare(table[mid].GetNumericValue(),Key);
-    if (found == MATCH_MID) {
-      found = MATCH_GOOD;
-    } else {
-      if (found == MATCH_LOWER) {
-	last = mid;
-      } else {
-	first = mid;
-      }
-      mid = (first + last) / 2;
-    }
-  }
-
-  // To match strict inequality, when we match the midpoint or when
-  // we get indexes close enough, we can just do the linear search
-  found = LinearMatchGE(Key,first,last,Index);
-  return found;
+  FileName = name;
+  if (first) *first = -1;
+  if (last) *last = -1;
+  if (!key.Ok() || !LoadValueBlock(name)) return NO_MATCH;
+  const auto range = base_type::Find(key.GetTicks(), relation);
+  if (range.empty() || range.last-1 > size_t(std::numeric_limits<INT4>::max())) return NO_MATCH;
+  StartIndex = range.first; EndIndex = range.last; Relation = relation;
+  if (first) *first = INT4(range.first);
+  if (last) *last = INT4(range.last-1);
+  return MATCH;
 }
 
-
-// Finds the index of table which best matches Key against the
-// NumericValue for the given Relation.  Best match is defined as
-// the index in the table which is closest to the actual value.
-// 
-// This is a little complicated because we do not always have
-// the key value in the table.  We just try to get as close as we
-// can.  Because the table may have repeated values, as well, we
-// have to find a close match, then do a linear walk of the table
-// in the appropriate direction to account for the repeats.
-//
-// Also, for LT and GT, we have to make sure that we find the first
-// value which strictly matches.
-//
-// Obviously, we cannot handle NE, which would require the return of
-// two ranges of indexes.
-
-Status NUMERICLIST::Match(SortType Relation, NUMBER Key, int* Index)
+SearchState NUMERICLIST::Find(const STRING& name, const NUMERICOBJ& key,
+                             ZRelation_t relation, INT4 *index)
 {
-  Status  ret = MATCH_FAILED;
-  int Len;
-
-  Len=Count;
-
-  *Index=-1; // Just in case, at least it's defined
-  if (Len <= 0 || table == NULL)
-    return MATCH_FAILED;
-  
-  switch (Relation) {
-  case LE: // find biggest index for which array value is less than Key
-    ret = BestMatchLE(Key,0,Len-1,Index);
-    break;
-
-  case GE: // find smallest index for which array value is greater than Key
-    ret = BestMatchGE(Key,0,Len-1,Index);
-    break;
-
-  case LT:
-    ret = BestMatchLE(Key,0,Len-1,Index);
-
-    // When we get here, we know table[Index] is no bigger than Key.
-    // It might be equal, though.  If it is equal, we have to walk
-    // down table from table[Index] to find the first value which is
-    // actually less than Key.
-    if ((ret == MATCH_GOOD) 
-	&& (*Index >= 0) 
-	&& (table[*Index].GetNumericValue()==Key)) {
-	// We are not at the bottom of the list
-	ret = LinearMatchDownLT(Key,0,*Index,Index);
-    }
-    break;
-
-  case GT:
-    ret = BestMatchGE(Key,0,Len-1,Index);
-
-    // When we get here, we know table[Index] is not smaller than Key.
-    // It might be equal, though.  If it is equal, we have to walk
-    // down table from table[Index] to find the first value which is
-    // actually smaller than Key.
-    if ((ret == MATCH_GOOD) 
-	&& (*Index >= 0) 
-	&& (table[*Index].GetNumericValue()==Key)) {
-      // We are not at the bottom of the list
-      ret = LinearMatchUpGT(Key,*Index,Len-1,Index);
-    }
-    break;
-
-  case EQ:
-  case NE:
-    break;
-  }
-  return ret;
+  FileName = name;
+  if (!LoadValueBlock(name)) return NO_MATCH;
+  return Find(key, relation, index);
 }
-
-#endif
-
+SearchState NUMERICLIST::Find(const NUMERICOBJ& key, ZRelation_t relation, INT4 *index)
+{
+  if (index) *index = -1;
+  if (!key.Ok()) return NO_MATCH;
+  const auto range = base_type::Find(key.GetTicks(), relation);
+  if (range.empty()) return NO_MATCH;
+  const size_t found = relation == ZRelLT || relation == ZRelLE ? range.last-1 : range.first;
+  if (found > size_t(std::numeric_limits<INT4>::max())) return NO_MATCH;
+  if (index) *index = INT4(found);
+  return MATCH;
+}
+SearchState NUMERICLIST::Find(const STRING& name, GPTYPE key, ZRelation_t relation, INT4 *index)
+{
+  FileName = name;
+  LoadTable(GP_BLOCK);
+  return Find(key, relation, index);
+}
+SearchState NUMERICLIST::Find(GPTYPE key, ZRelation_t relation, INT4 *index)
+{
+  if (index) *index = -1;
+  const auto lower = std::lower_bound(begin(), end(), key,
+    [](const NUMERICFLD& field, GPTYPE value) { return field.GetGlobalStart() < value; });
+  const auto upper = std::upper_bound(begin(), end(), key,
+    [](GPTYPE value, const NUMERICFLD& field) { return value < field.GetGlobalStart(); });
+  size_t found = GetCount();
+  switch (relation) {
+    case ZRelEQ: if (lower != upper) found = size_t(lower-begin()); break;
+    case ZRelGE: found = size_t(lower-begin()); break;
+    case ZRelGT: found = size_t(upper-begin()); break;
+    case ZRelLT: if (lower != begin()) found = size_t(lower-begin()-1); break;
+    case ZRelLE: if (upper != begin()) found = size_t(upper-begin()-1); break;
+    default: break;
+  }
+  if (found >= GetCount() || found > size_t(std::numeric_limits<INT4>::max())) return NO_MATCH;
+  if (index) *index = INT4(found);
+  return MATCH;
+}
+void NUMERICLIST::Dump(ostream& os) const { for (const auto& field : *this) field.Dump(os); }
+void NUMERICLIST::Dump(INT4 first, INT4 last, ostream& os) const {
+  for (INT4 i = std::max(INT4(0), first); i <= last && size_t(i) < GetCount(); ++i) (*this)[size_t(i)].Dump(os);
+}

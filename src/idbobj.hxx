@@ -28,6 +28,7 @@ class  FCACHE;
 class  FPT;
 class  SCANLIST;
 class  QUERY;
+class  NUMERICOBJ;
 
 
 typedef enum MergeStatus { iNothing = 0, iOptimize, iMerge, iCollapse, iIncremental } t_merge_status;
@@ -103,6 +104,7 @@ public:
   virtual bool GetFieldData(const RESULT&, const STRING&, PSTRLIST, const DOCTYPE * = NULL) { return false; }
 
   virtual bool GetFieldData(GPTYPE, DOUBLE*) {return false; }
+  virtual bool GetFieldData(GPTYPE, NUMERICOBJ*) {return false; }
   virtual bool GetFieldData(GPTYPE, SRCH_DATE* ) {return false; }
   virtual bool GetFieldData(GPTYPE, STRING*) {return false; }
 
