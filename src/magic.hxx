@@ -55,6 +55,8 @@ typedef enum OBJ_IDS  {
   objFIXEDNUMERICLIST, // 41: signed INT128, decimal scale in the header
   objFIXEDINTERVALLIST, // 42: fixed-point interval endpoints
   objFIXEDINTERVALFLD, // 43: identifies raw fixed-point interval rows
+  objFLOAT64LIST, // 44: native IEEE 754 binary64 column
+  objFLOAT64FLD,  // 45: GP and binary64 row
   // .inx magic
   objINDEXm = 0x49, // MSB Index
   objINDEXl = 0x69 // LSB Index

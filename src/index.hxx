@@ -24,6 +24,7 @@ Description:	Class INDEX
 #include "intlist.hxx"
 #include "integerlist.hxx"
 #include "monetarylist.hxx"
+#include "floatlist.hxx"
 #include "gpolylist.hxx"
 #include "bboxlist.hxx"
 #include "fuzzy.hxx"
@@ -170,6 +171,10 @@ public:
 	INT TotalRequested = -1);
   size_t CurrencyScan(STRLIST *List, const STRING& FieldName, size_t Start = 0,
 	INT TotalRequested = -1);
+  size_t Float64Scan(SCANLIST *List, const STRING& FieldName, size_t Start = 0,
+        INT TotalRequested = -1);
+  size_t Float64Scan(STRLIST *List, const STRING& FieldName, size_t Start = 0,
+        INT TotalRequested = -1);
   size_t GPolyScan(SCANLIST *List, const STRING& FieldName, size_t Start = 0,
 	INT TotalRequested = -1);
   size_t GPolyScan(STRLIST *Strlist, const STRING& FieldName, size_t Start = 0,
@@ -185,6 +190,9 @@ public:
   PIRSET IntegerSearchRange(const INTEGERRANGE& Range, const STRING& FieldName,
                             INT4 Relation = ZRelEQ);
   PIRSET NumericSearch(const NUMERICOBJ& fKey, const STRING& FieldName, INT4 Relation = ZRelEQ);
+  PIRSET NumericSearchTerm(const STRING& term, const STRING& FieldName, INT4 Relation = ZRelEQ);
+  PIRSET Float64Search(const STRING& term, const STRING& FieldName, INT4 Relation = ZRelEQ);
+  PIRSET Float64Search(DOUBLE key, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearch(const MONETARYOBJ& Price, const STRING& FieldName, INT4 Relation = ZRelEQ);
   PIRSET MonetarySearchRange(const MONETARYRANGE& Range, const STRING& FieldName,
                              INT4 Relation = ZRelEQ);
@@ -460,6 +468,7 @@ private:
   // unpinned pointers and another FCACHE mapping could evict them.
   MultiMMapSession      IntegerColumnMaps;
   MultiMMapSession NumericColumnMaps;
+  MultiMMapSession Float64ColumnMaps;
   MultiMMapSession      MonetaryColumnMaps;
 
   volatile Dictionary  *NumFieldCache;

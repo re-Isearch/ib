@@ -130,10 +130,10 @@ PIRSET INDEX::DateSearch(const STRING& Term, const STRING& FieldName, INT4 Relat
 
   if (Term.IsNumber())
     {
-      if (ft.IsNumerical() || ft.IsComputed())
+      if (ft.IsNumerical() || ft.IsComputed() || ft.IsFloat64())
 	{
 	  // Not a date but a number and we have a number
-	  return NumericSearch(NUMERICOBJ(Term), FieldName, Relation);
+	  return NumericSearchTerm(Term, FieldName, Relation);
 	}
 
       long val = Term.GetLong();

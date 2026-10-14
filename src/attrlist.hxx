@@ -19,7 +19,7 @@ public:
 	dotnumber, phonhash, phonhash2, metaphone, metaphone2, hash, casehash,
 	lexi, smiles, privhash, isbn, telnumber, creditcardnum, iban, bic,
 	db_string, callback, callback1, callback2, callback3, callback4, callback5, callback6, callback7,
-	db_hnsw_raw, db_hnsw, db_hnsw2, db_hnsw3, db_nsg, db_IVFFlat, db_image, special, __last=255};
+	db_hnsw_raw, db_hnsw, db_hnsw2, db_hnsw3, db_nsg, db_IVFFlat, db_image, special, float64, __last=255};
 
   FIELDTYPE();
   FIELDTYPE(const FIELDTYPE& OtherFieldType);
@@ -54,10 +54,11 @@ public:
   bool    IsBoolean() const  { return (Type == numerical) || (Type == boolean); }
 
   bool    IsText() const     { return Type <= text || Type == isbn;      }
-  bool    IsExtern() const   { return Type >= db_string; } // This include HNSW!
+  bool    IsExtern() const   { return Type >= db_string && Type <= special; }
   bool    IsString() const   { return IsText() || IsPhonetic() || IsHash() ||
 			IsCaseHash() || IsPrivHash() || IsLexiHash(); }
-  bool    IsNumeric() const { return Type == numerical || Type == computed || Type == currency || Type == dotnumber; }
+  bool    IsNumeric() const { return Type == numerical || Type == computed || Type == currency || Type == dotnumber || Type == float64; }
+  bool    IsFloat64() const { return Type == float64; }
   bool    IsNumerical() const{ return Type == numerical || Type == dotnumber || Type == ttl; }
   bool    IsInteger() const  { return Type == integer; }
   bool    IsComputed() const { return Type == computed;  }

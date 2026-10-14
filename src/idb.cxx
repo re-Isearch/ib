@@ -3250,6 +3250,15 @@ bool IDB::GetFieldData(const FC& FieldFC, const STRING& FieldName, STRING* Buffe
           return true;
         }
     }
+  else if (ft.IsFloat64())
+    {
+      DOUBLE value;
+      if (IDB::GetFieldData(FieldFC, FieldName, &value))
+        {
+          if (Buffer) *Buffer = float64::ToString(value);
+          return true;
+        }
+    }
   else if (ft.IsNumerical() || ft.IsComputed())
     {
       DOUBLE fVal;
@@ -3281,6 +3290,15 @@ bool IDB::GetFieldData (const RESULT& ResultRecord, const STRING& FieldName,
 	  *StringBuffer = date.ISOdate();
 	  return true;
 	}
+    }
+  else if (ft.IsFloat64())
+    {
+      DOUBLE value;
+      if (IDB::GetFieldData(ResultRecord, FieldName, &value))
+        {
+          *StringBuffer = float64::ToString(value);
+          return true;
+        }
     }
   else if (ft.IsNumerical() || ft.IsComputed())
     {
@@ -3386,6 +3404,13 @@ bool IDB::GetFieldData(GPTYPE gp, NUMERICOBJ *output)
 
 bool IDB::GetFieldData(const FC& field, const STRING& name, DOUBLE *output)
 {
+  if (GetFieldType(name).IsFloat64())
+    {
+      STRING filename;
+      if (output) *output = 0;
+      return DfdtGetFileName(name, FIELDTYPE::float64, &filename) &&
+             FLOATLIST().ReadValue(filename, field, output);
+    }
   NUMERICOBJ value;
   const bool ok = GetFieldData(field, name, &value);
   if (output) *output = ok ? (DOUBLE)value : 0;
@@ -3497,6 +3522,8 @@ bool IDB::GetFieldData(GPTYPE gp, STRING* Buffer)
   STRING      FieldName;
   FC FieldFC  (GetPeerFc (gp, &FieldName));
   FIELDTYPE ft = GetFieldType(FieldName);
+
+  if (ft.IsFloat64()) return GetFieldData(FieldFC, FieldName, Buffer);
 
   if (ft.IsNumerical() || ft.IsComputed())
     {

@@ -1334,6 +1334,10 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
   if (!FileName.IsEmpty()) // We want the right method to open for append
     switch ( (INT)FieldType )
       {
+        case FIELDTYPE::float64:
+          Float64ColumnMaps.Invalidate(FileName);
+          fp = FLOATLIST().OpenForAppend(FileName);
+          break;
         case FIELDTYPE::ttl:
         case FIELDTYPE::computed:
         case FIELDTYPE::numerical:
@@ -1884,6 +1888,23 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	      break;
 	    }
 #endif
+            case FIELDTYPE::float64:
+            {
+              DOUBLE value;
+              if (!DocTypePtr->ParseFloat64(STRING(Buffer.c_ustr()), &value))
+                {
+                  message_log(LOG_WARN, "Invalid or out-of-range float64 value in field '%s' at GP %lld",
+                              FieldName.c_str(), (long long)gp);
+                }
+              else if (FLOATFLD(gp, value).Write(fp)) ++items;
+              else
+                {
+                  ++errors;
+                  message_log(LOG_ERROR | LOG_ERRNO, "Failed writing float64 field '%s' at GP %lld",
+                              FieldName.c_str(), (long long)gp);
+                }
+              break;
+            }
 	    case FIELDTYPE::dotnumber:
             case FIELDTYPE::numerical:
             {
@@ -2289,6 +2310,7 @@ src=\"%s\" version=\"0.1\">\n",
                   case FIELDTYPE::integer:
                   case FIELDTYPE::currency:
                   case FIELDTYPE::numerical:
+                  case FIELDTYPE::float64:
                     count = NumericalScan(&sList, fieldName);
                     break;
                   case FIELDTYPE::gpoly:
@@ -4373,6 +4395,11 @@ PIRSET INDEX::Search (const QUERY& Query)
                     Structure=ZStructDateRange;
                   NewIrset=DoDateSearch(Term,FieldName,Relation,Structure);
                 }
+              else if (FieldType.IsFloat64() || aFieldType.IsFloat64())
+                {
+                  if (gotRelation == false) Relation = ZRelEQ;
+                  NewIrset = Float64Search(Term, FieldName, Relation);
+                }
 #if HAVE_INTEGER
               else if (FieldType.IsInteger() || aFieldType.IsInteger())
                 {
@@ -4416,7 +4443,7 @@ PIRSET INDEX::Search (const QUERY& Query)
                 {
                   if (gotRelation==false) Relation=ZRelEQ;
 //cerr << "Numeric Search for: " << Term << " rel=" << Relation << endl;
-                  NewIrset=NumericSearch(NUMERICOBJ(Term), FieldName, Relation);
+                  NewIrset=NumericSearchTerm(Term, FieldName, Relation);
                 }
               else if (aFieldType.IsCurrency() || FieldType.IsCurrency()) // FIELDTYPE::currency
                 {
@@ -8840,6 +8867,33 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		    }
 		    break;
 
+                  case FIELDTYPE::float64:
+                    {
+                      FLOATLIST list;
+                      if (!list.LoadGpBlock(Fn)) break;
+                      if ((out_fp = OpenForAppend(fieldName, fieldType)) != NULL)
+                        {
+                          size_t count = 0;
+                          for (const auto& field : list)
+                            {
+                              if (!field.Write(out_fp, offset))
+                                {
+                                  message_log(LOG_ERROR | LOG_ERRNO,
+                                    "Failed importing float64 field '%s'", fieldName.c_str());
+                                  break;
+                                }
+                              ++count;
+                            }
+                          if (fclose(out_fp) != 0)
+                            message_log(LOG_ERROR | LOG_ERRNO,
+                              "Failed closing float64 field '%s' after import", fieldName.c_str());
+                          ActiveFieldStreams.erase(std::make_pair(fieldName.toStdString(), fieldType));
+                          objects += count;
+                        }
+                      else message_log(LOG_ERROR | LOG_ERRNO,
+                        "Could not append to float64 field '%s'", fieldName.c_str());
+                    }
+                    break;
 		  case FIELDTYPE::ttl:
 		  case FIELDTYPE::computed:
 		  case FIELDTYPE::boolean:

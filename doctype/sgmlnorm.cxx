@@ -1905,6 +1905,11 @@ NUMERICOBJ SGMLNORM::ParseNumeric(const STRING& Buffer) const
   return DOCTYPE::ParseNumeric(_cleanBuffer(Buffer));
 }
 
+bool SGMLNORM::ParseFloat64(const STRING& Buffer, DOUBLE *value) const
+{
+  return DOCTYPE::ParseFloat64(_cleanBuffer(Buffer), value);
+}
+
 INTEGEROBJ SGMLNORM::ParseInteger(const STRING& Buffer) const
 {
   return DOCTYPE::ParseInteger(_cleanBuffer(Buffer));

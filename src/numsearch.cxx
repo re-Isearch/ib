@@ -97,7 +97,11 @@ void INDEX::SortNumericFieldData()
 
     message_log (LOG_INFO, "Creating %s [%s]", DfdRecord.GetFieldName().c_str(), FieldType.c_str());
 
-    if (FieldType.IsInteger()) {
+    if (FieldType.IsFloat64()) {
+      Float64ColumnMaps.Invalidate(Fn);
+      if (!FLOATLIST().WriteIndex(Fn))
+        message_log(LOG_ERROR, "Could not build float64 index '%s'", Fn.c_str());
+    } else if (FieldType.IsInteger()) {
       INTEGERLIST().WriteIndex(Fn);
     } else if (FieldType.IsCurrency()) {
       MONETARYLIST().WriteIndex(Fn);
@@ -535,6 +539,95 @@ PIRSET INDEX::MonetarySearchRange(const MONETARYRANGE& Range,
 
 //
 
+PIRSET INDEX::NumericSearchTerm(const STRING& term, const STRING& FieldName, INT4 Relation)
+{
+  if (!Parent) return NULL;
+  // Keep the original spelling until the destination datatype is known.
+  const auto searchField = [&](const STRING& field, const FIELDTYPE& type) -> PIRSET {
+    if (type.IsFloat64()) {
+      DOUBLE value;
+      return float64::Parse(term, &value) ? Float64Search(value, field, Relation) : NULL;
+    }
+    if (type.IsInteger()) {
+      const INTEGEROBJ value(term);
+      return value.Ok() ? IntegerSearch((INT16)value, field, Relation) : NULL;
+    }
+    if (type.IsCurrency()) {
+      const MONETARYOBJ value(term);
+      return value.Ok() ? MonetarySearch(value, field, Relation) : NULL;
+    }
+    const NUMERICOBJ value(term);
+    return value.Ok() ? NumericSearch(value, field, Relation) : NULL;
+  };
+  const STRING pattern(FieldName);
+  const DFDT *fields = Parent->GetMainDfdt();
+  if (!pattern.IsPlain() && fields) {
+    PIRSET result = new IRSET(Parent);
+    for (size_t i = 1; i <= fields->GetTotalEntries(); ++i) {
+      const STRING field = fields->GetFieldName(i);
+      const FIELDTYPE type = Parent->GetFieldType(field);
+      if (!(type.IsNumeric() || type.IsInteger() || type.IsNumerical() || type.IsBoolean()) ||
+          !FIELD_WILD_MATCH(pattern, field)) continue;
+      PIRSET part = searchField(field, type);
+      if (part) { result->Or(*part); delete part; }
+    }
+    return result;
+  }
+  PIRSET result = searchField(FieldName, Parent->GetFieldType(FieldName));
+  if (result) return result;
+  Parent->SetErrorCode(113);
+  return new IRSET(Parent);
+}
+
+PIRSET INDEX::Float64Search(const STRING& term, const STRING& FieldName, INT4 Relation)
+{
+  if (!Parent) return NULL;
+  DOUBLE value;
+  if (float64::Parse(term, &value)) return Float64Search(value, FieldName, Relation);
+  Parent->SetErrorCode(113);
+  return new IRSET(Parent);
+}
+
+PIRSET INDEX::Float64Search(DOUBLE key, const STRING& FieldName, INT4 Relation)
+{
+  if (!Parent) return NULL;
+  PIRSET result = new IRSET(Parent);
+  if (!std::isfinite(key)) { Parent->SetErrorCode(113); return result; }
+  const STRING pattern(FieldName);
+  const DFDT *fields = Parent->GetMainDfdt();
+  if (!pattern.IsPlain() && fields) {
+    for (size_t i = 1; i <= fields->GetTotalEntries(); ++i) {
+      const STRING field = fields->GetFieldName(i);
+      if (!Parent->GetFieldType(field).IsFloat64() || !FIELD_WILD_MATCH(pattern, field)) continue;
+      PIRSET part = Float64Search(key, field, Relation);
+      if (part) { result->Or(*part); delete part; }
+    }
+    return result;
+  }
+  const FIELDTYPE type = Parent->GetFieldType(FieldName);
+  if (!type.IsFloat64()) { Parent->SetErrorCode(113); return result; }
+  STRING filename, coordinates;
+  if (!Parent->DfdtGetFileName(FieldName, type, &filename)) { Parent->SetErrorCode(1); return result; }
+  Parent->DfdtGetFileName(FieldName, &coordinates);
+  FILE *fp = coordinates.IsEmpty() ? NULL : ffopen(coordinates, "rb");
+  FLOATLIST values;
+  const clock_t started = clock();
+  const auto keepRunning = [&]() {
+    if (MaxCPU_ticks > 0 && clock()-started > MaxCPU_ticks) { CPU_ResourcesExhausted(); return false; }
+    return true;
+  };
+  PopulateTypedResultSet(Parent, DateRange, result,
+    [&](auto&& visitor) {
+      const bool ok = values.VisitMappedMatches(filename, key, ZRelation_t(Relation),
+                                               Float64ColumnMaps, keepRunning, visitor);
+      if (!ok && keepRunning()) Parent->SetErrorCode(113);
+      return ok;
+    },
+    [&](GPTYPE gp, UINT2) { return FieldCache->FcInField(gp, fp); });
+  if (fp) ffclose(fp);
+  return result;
+}
+
 PIRSET INDEX::NumericSearch(const NUMERICOBJ& key, const STRING& FieldName, INT4 Relation)
 {
   if (!Parent) return NULL;
@@ -545,23 +638,15 @@ PIRSET INDEX::NumericSearch(const NUMERICOBJ& key, const STRING& FieldName, INT4
       message_log(LOG_WARN, "Invalid or out-of-range numerical key for field '%s'", FieldName.c_str());
       return result;
     }
-#ifdef FIELD_WILD_MATCH
   const STRING pattern(FieldName);
   const DFDT *fields = Parent->GetMainDfdt();
   if (!pattern.IsPlain() && fields)
     {
-      for (size_t i = 1; i <= fields->GetTotalEntries(); ++i)
-        {
-          const STRING field = fields->GetFieldName(i);
-          const FIELDTYPE type = Parent->GetFieldType(field);
-          if (!type.IsNumeric() || !FIELD_WILD_MATCH(pattern, field)) continue;
-          IRSET *part = NumericSearch(key, field, Relation);
-          if (part) { result->Or(*part); delete part; }
-        }
-      return result;
+      delete result;
+      return NumericSearchTerm(key.ToString(), FieldName, Relation);
     }
-#endif
   const FIELDTYPE type = Parent->GetFieldType(FieldName);
+  if (type.IsFloat64()) { delete result; return Float64Search((DOUBLE)key, FieldName, Relation); }
   if (type.IsDate()) { delete result; return DateSearch(SRCH_DATE((DOUBLE)key), FieldName, Relation); }
   if (type.IsDateRange()) { delete result; return DoDateSearch(SRCH_DATE((DOUBLE)key).ISOdate(), FieldName, Relation, ZStructDate); }
   if (type.IsText()) { Parent->SetErrorCode(113); return result; }
@@ -615,10 +700,23 @@ size_t INDEX::CurrencyScan(SCANLIST *List, const STRING& FieldName, size_t Start
     FIELDTYPE::currency, Start, TotalRequested, MonetaryColumnMaps, typed_scan::CurrencyTerm());
 }
 
+size_t INDEX::Float64Scan(STRLIST *output, const STRING& field, size_t start, INT requested)
+{
+  return typed_scan::ScanField<FLOAT_INDEX_TRAITS>(Parent, output, field, FIELDTYPE::float64,
+    start, requested, Float64ColumnMaps, typed_scan::Float64Term());
+}
+
+size_t INDEX::Float64Scan(SCANLIST *output, const STRING& field, size_t start, INT requested)
+{
+  return typed_scan::ScanField<FLOAT_INDEX_TRAITS>(Parent, output, field, FIELDTYPE::float64,
+    start, requested, Float64ColumnMaps, typed_scan::Float64Term());
+}
+
 size_t INDEX::NumericalScan(STRLIST *output, const STRING& field, size_t start, INT requested)
 {
   if (!Parent || !output || requested == 0) return 0;
   const FIELDTYPE type = Parent->GetFieldType(field);
+  if (type.IsFloat64()) return Float64Scan(output, field, start, requested);
   if (type.IsInteger()) return IntegerScan(output, field, start, requested);
   if (type.IsCurrency()) return CurrencyScan(output, field, start, requested);
   if (type.IsDate()) return DateScan(output, field, start, requested);
@@ -631,6 +729,7 @@ size_t INDEX::NumericalScan(SCANLIST *output, const STRING& field, size_t start,
 {
   if (!Parent || !output || requested == 0) return 0;
   const FIELDTYPE type = Parent->GetFieldType(field);
+  if (type.IsFloat64()) return Float64Scan(output, field, start, requested);
   if (type.IsInteger()) return IntegerScan(output, field, start, requested);
   if (type.IsCurrency()) return CurrencyScan(output, field, start, requested);
   if (type.IsDate()) return DateScan(output, field, start, requested);

@@ -762,6 +762,7 @@ add_library(ibSearch
     ${SRC_DIR}/dsearch.cxx      ${SRC_DIR}/geosearch.cxx
     ${SRC_DIR}/nlist.cxx        ${SRC_DIR}/dlist.cxx
     ${SRC_DIR}/integerlist.cxx ${SRC_DIR}/monetarylist.cxx
+    ${SRC_DIR}/floatfield.cxx  ${SRC_DIR}/floatlist.cxx
     ${SRC_DIR}/nfldmgr.cxx      ${SRC_DIR}/intlist.cxx
     ${SRC_DIR}/intfield.cxx     ${SRC_DIR}/gpolylist.cxx
     ${SRC_DIR}/gpolyfield.cxx   ${SRC_DIR}/bboxfield.cxx
@@ -784,6 +785,14 @@ add_library(ibSearch
     ${SRC_DIR}/support.cxx      ${SRC_DIR}/defs.cxx
 )
 ib_common_includes(ibSearch)
+# IEEE value parsing, signed zero and subnormal comparisons must retain their
+# semantics even when the rest of an optimized build enables fast-math.
+set_property(SOURCE
+    ${SRC_DIR}/floatfield.cxx ${SRC_DIR}/floatlist.cxx ${SRC_DIR}/numsearch.cxx
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/float64.cpp"
+    APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-fno-fast-math>"
+)
 target_include_directories(ibSearch PUBLIC "${GDBM_INCLUDE}")
 target_link_libraries(
     ibSearch
@@ -954,6 +963,10 @@ if(IB_BUILD_SCORING_TESTS)
     ib_common_includes(fixed_numerical_test)
     target_link_libraries(fixed_numerical_test PRIVATE ibSearch ibDoc ibProcess ibIO)
     add_test(NAME fixed_numerical COMMAND fixed_numerical_test)
+    add_executable(float64_test tests/float64.cpp)
+    ib_common_includes(float64_test)
+    target_link_libraries(float64_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME float64 COMMAND float64_test)
 endif()
 
 add_subdirectory(doctype/plugins)
