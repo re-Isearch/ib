@@ -54,7 +54,7 @@ static struct DataType {
 } DataTypes[] = {
   {"any",       "", FIELDTYPE::any, "Any"},  // 2022 EXPERIMENTAL  
   {"string",    "", FIELDTYPE::text, "String (full text)"},
-  {"integer",   in, FIELDTYPE::integer, "128-bit signed integer" },
+  {"integer",   in, FIELDTYPE::integer, "Signed 128-bit integer domain; adaptive 32/128-bit storage" },
   {"numerical", n,  FIELDTYPE::numerical, "128-bit decimal fixed point (16 fraction digits)"},
   {"computed",  n,  FIELDTYPE::computed,  "Computed Numerical"},
   {"range",     r,  FIELDTYPE::numericalrange, "Range of Numerbers"},

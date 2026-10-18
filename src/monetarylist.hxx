@@ -12,6 +12,12 @@ using MONETARYFLD = INTEGERFLD;
 struct MONETARY_INDEX_TRAITS : public INTEGER_INDEX_TRAITS
 {
   using field_type = MONETARYFLD;
+  struct mapped_type
+  {
+    const BYTE *value_block = nullptr;
+    const BYTE *gp_block = nullptr;
+    size_t count = 0;
+  };
 
   static constexpr const char *Name()
   {

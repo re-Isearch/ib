@@ -102,7 +102,9 @@ void INDEX::SortNumericFieldData()
       if (!FLOATLIST().WriteIndex(Fn))
         message_log(LOG_ERROR, "Could not build float64 index '%s'", Fn.c_str());
     } else if (FieldType.IsInteger()) {
-      INTEGERLIST().WriteIndex(Fn);
+      IntegerColumnMaps.Invalidate(Fn);
+      if (!INTEGERLIST().WriteIndex(Fn))
+        message_log(LOG_ERROR, "Could not build integer index '%s'", Fn.c_str());
     } else if (FieldType.IsCurrency()) {
       MONETARYLIST().WriteIndex(Fn);
     } else if (FieldType.IsNumerical() || FieldType.Equals(FIELDTYPE::boolean) ||

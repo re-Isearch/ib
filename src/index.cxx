@@ -8796,6 +8796,19 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		}
 	       else
 		newField = false;
+              if (fieldType.IsInteger() && !newField)
+                {
+                  DFD existing;
+                  if (Dfdtptr->GetDfdRecord(fieldName, &existing) &&
+                      !existing.GetFieldType().IsInteger())
+                    {
+                      message_log(LOG_ERROR,
+                        "Cannot import integer field '%s' into type '%s'",
+                        fieldName.c_str(), existing.GetFieldType().c_str());
+                      ++errors;
+                      continue;
+                    }
+                }
 	      // Append Text field
 	      IndexPtr->Parent->DfdtGetFileName (fieldName, &in_fn); // TEXT
 	      Parent->DfdtGetFileName(fieldName, &out_fn);
@@ -8837,6 +8850,46 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 	      IndexPtr->Parent->DfdtGetFileName(fieldName, fieldType, &Fn);
 	      switch ((int)fieldType)
 		{
+                  case FIELDTYPE::integer:
+                    {
+                      INTEGERLIST list;
+                      if (!list.LoadGpBlock(Fn))
+                        {
+                          message_log(LOG_ERROR, "Could not read integer field '%s' for import",
+                            fieldName.c_str());
+                          ++errors;
+                          break;
+                        }
+                      if (list.Empty()) break;
+                      if ((out_fp = OpenForAppend(fieldName, fieldType)) == NULL)
+                        {
+                          message_log(LOG_ERROR | LOG_ERRNO,
+                            "Could not append to integer field '%s'", fieldName.c_str());
+                          ++errors;
+                          break;
+                        }
+                      size_t count = 0;
+                      for (const auto& field : list)
+                        {
+                          if (!field.Write(out_fp, offset))
+                            {
+                              message_log(LOG_ERROR | LOG_ERRNO,
+                                "Failed importing integer field '%s'", fieldName.c_str());
+                              ++errors;
+                              break;
+                            }
+                          ++count;
+                        }
+                      if (fclose(out_fp) != 0)
+                        {
+                          message_log(LOG_ERROR | LOG_ERRNO,
+                            "Failed closing integer field '%s' after import", fieldName.c_str());
+                          ++errors;
+                        }
+                      ActiveFieldStreams.erase(std::make_pair(fieldName.toStdString(), fieldType));
+                      objects += count;
+                    }
+                    break;
 		  case FIELDTYPE::currency:
 		    {
 		      MONETARYLIST List;

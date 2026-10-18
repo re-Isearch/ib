@@ -13,6 +13,11 @@ typedef NumBlock blktype;
 
 struct NUMERIC_INDEX_TRAITS : public INTEGER_INDEX_TRAITS {
   using field_type = NUMERICFLD;
+  struct mapped_type {
+    const BYTE *value_block = nullptr;
+    const BYTE *gp_block = nullptr;
+    size_t count = 0;
+  };
   static constexpr const char *Name() { return "NUMERICAL"; }
   static value_type Value(const field_type& field) { return field.GetNumericValue().GetTicks(); }
   static GPTYPE GlobalStart(const field_type& field) { return field.GetGlobalStart(); }
