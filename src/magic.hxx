@@ -57,6 +57,10 @@ typedef enum OBJ_IDS  {
   objFIXEDINTERVALFLD, // 43: identifies raw fixed-point interval rows
   objFLOAT64LIST, // 44: native IEEE 754 binary64 column
   objFLOAT64FLD,  // 45: GP and binary64 row
+  objRECORDGP,    // 46: RECORD with GPTYPE source offsets and a width tag
+  objRESULTGP,    // 47: RESULT with GPTYPE source offsets and a width tag
+  objRECLISTGP,   // 48: collection of wide-offset records
+  objRSETGP,      // 49: collection of wide-offset results
   // .inx magic
   objINDEXm = 0x49, // MSB Index
   objINDEXl = 0x69 // LSB Index

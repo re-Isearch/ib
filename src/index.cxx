@@ -2666,6 +2666,16 @@ memory_allocation: // This is where we try to get memory
                 }
               else
                 {
+                  if (RecordStart >= MyMemoryMap.Size() ||
+                      (RecordEnd != 0 && (RecordEnd < RecordStart || RecordEnd > MyMemoryMap.Size())))
+                    {
+                      message_log(LOG_ERROR, "Invalid source range [%llu-%llu] in '%s'; skipping record",
+                        (unsigned long long)RecordStart, (unsigned long long)RecordEnd,
+                        DataFileName.c_str());
+                      ++Error;
+                      ++CurrentRecord;
+                      continue;
+                    }
                   const GPTYPE DataFileSize = ((RecordEnd == 0) ?
                                                MyMemoryMap.Size() - 1 /* added EDZ Sun Nov 16 --> */ - RecordStart:
                                                RecordEnd - RecordStart ) + 1;

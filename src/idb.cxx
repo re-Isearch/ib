@@ -4128,8 +4128,8 @@ bool IDB::AddRecord (const RECORD& NewRecord)
   bool Result = false;
   const STRING FileName ( NewRecord.GetFullFileName() );
   const off_t fileLength = GetFileSize(FileName);
-  UINT4       End        = NewRecord.GetRecordEnd();
-  UINT4       Start      = NewRecord.GetRecordStart();
+  GPTYPE      End        = NewRecord.GetRecordEnd();
+  GPTYPE      Start      = NewRecord.GetRecordStart();
 
   bool        remote     = FileName.Search("://") != 0;
 
@@ -4140,8 +4140,8 @@ bool IDB::AddRecord (const RECORD& NewRecord)
     message_log (LOG_INFO, "Skipping '%s' (empty or non-accesible)", FileName.c_str());
   else if (End > fileLength || Start > fileLength || (End >0 && Start > End))
     {
-      message_log (LOG_NOTICE, "Skipping '%s'[%u-%lu], specified record out of bounds.",
-	FileName.c_str(), Start, End == 0 ? fileLength : End);
+      message_log (LOG_NOTICE, "Skipping '%s'[%llu-%llu], specified record out of bounds.",
+	FileName.c_str(), (unsigned long long)Start, (unsigned long long)(End == 0 ? fileLength : End));
     }
   else if (remote || !IsSystemFile (FileName)) // Only add non-system files
     {
@@ -4207,24 +4207,33 @@ void IDB::DocTypeAddRecord (const RECORD& NewRecord)
       return;
     }
 
-  const UINT4 Start = NewRecord.GetRecordStart ();
-  UINT4       End   = NewRecord.GetRecordEnd ();
-
-  if (End > 0)
+  const GPTYPE Start = NewRecord.GetRecordStart();
+  GPTYPE End = NewRecord.GetRecordEnd();
+  if (End == 0)
     {
-      if (((UINT4)(End-Start) >= MaximumRecordSize))
+      const off_t fileSize = GetFileSize(NewRecord.GetFullFileName());
+      if (fileSize <= 0 || UINT8(fileSize-1) > MAX_GPTYPE || Start >= UINT8(fileSize))
         {
-	  message_log (LOG_NOTICE, "Record '%s'[%u-%u] is larger than MaxRecordSize (%u). Skipping!",
-	    NewRecord.GetFullFileName ().c_str(), (unsigned)Start, (unsigned)End, MaximumRecordSize);
-	  return;
-	}
-      else if (End <= Start)
-	{
-	  message_log (LOG_NOTICE, "Record '%s' End(%u)<=Start(%u). Skipping!",
-	    NewRecord.GetFullFileName ().c_str(), (unsigned)End, (unsigned)Start);
-	  return;
-	}
+          message_log(LOG_NOTICE, "Record '%s' has an invalid source-file range. Skipping!",
+            NewRecord.GetFullFileName().c_str());
+          return;
+        }
+      End = GPTYPE(fileSize-1);
     }
+  if (End <= Start)
+    {
+      message_log(LOG_NOTICE, "Record '%s' End(%llu)<=Start(%llu). Skipping!",
+        NewRecord.GetFullFileName().c_str(), (unsigned long long)End, (unsigned long long)Start);
+      return;
+    }
+  if (End-Start >= GPTYPE(MaximumRecordSize))
+    {
+      message_log(LOG_NOTICE, "Record '%s'[%llu-%llu] is larger than MaxRecordSize (%u). Skipping!",
+        NewRecord.GetFullFileName().c_str(), (unsigned long long)Start,
+        (unsigned long long)End, (unsigned)MaximumRecordSize);
+      return;
+    }
+  if (End-Start <= 2) return; // Preserve the existing minimum record size.
 
 // cerr << "OPEN QUEUE" << endl;
   FILE *fp;
@@ -4237,38 +4246,11 @@ void IDB::DocTypeAddRecord (const RECORD& NewRecord)
   if ((fp = IDB::ffopen (IndexingQueueFn, "ab")) != NULL)
     {
       lockfd(fileno (fp), 0);
-      if (End == 0)
-        {
-	  // Get the real end...
-	  RECORD record (NewRecord);
-          // Length of file..
-          const STRING fn (NewRecord.GetFullFileName ());
-          off_t fileSize = GetFileSize (fn); 
-	  if (fileSize > 0)
-	    {
-	      if ((fileSize-Start) > MaximumRecordSize)
-		{
-		  message_log (LOG_NOTICE, "Record '%s' is larger than MaxRecordSize (%uk). Skipping!",
-		 	fn.c_str(), (unsigned)(MaximumRecordSize/1024));
-		  fileSize = 0;
-		}
-	    }
-	  else message_log (LOG_NOTICE, "Record '%s' is empty!", fn.c_str());
-	  if ((End = (UINT4)fileSize) != 0 && ((off_t)End - (off_t)Start) > 2)
-	    {
-	      record.SetRecordEnd(End-1);
-	      // Write it...
-	      Write ((BYTE)BOUNDARY, fp);
-	      record.Write (fp);
-	      Ok = true;
-	    }
-        }
-      else if ((off_t)End - (off_t)Start > 2)
-	{
-	  Write ((BYTE)BOUNDARY, fp);
-	  NewRecord.Write (fp);
-	  Ok = true;
-	}
+      RECORD record(NewRecord);
+      record.SetRecordEnd(End);
+      Write(BYTE(BOUNDARY), fp);
+      record.Write(fp);
+      Ok = true;
 
       unlockfd(fileno (fp));
 
@@ -5768,7 +5750,7 @@ STRING IDB::XMLHitTable(const RESULT& Result)
       message_log (LOG_ERROR, "IDB::XMLHitTable Can't resolve record!");
       return NulString;
     } 
-  int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+  const GPTYPE offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
 
   auto HitTable ( Result.GetHitTable() );
   size_t z = HitTable.GetTotalEntries();
@@ -5844,7 +5826,7 @@ STRING IDB::JsonHitTable(const RESULT& Result)
       return NulString;
     }
 
-  int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+  const GPTYPE offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
   auto HitTable = Result.GetHitTable();
   size_t z = HitTable.GetTotalEntries();
 

@@ -160,7 +160,7 @@ bool RSET::Read (PFILE fp)
   HighScore = MINSCORE;
 
   obj_t obj = getObjID (fp);
-  if (obj != objRSET)
+  if (obj != objRSETGP)
     {
       // Not a RSET!
       PushBackObjID (obj, fp);
@@ -170,10 +170,11 @@ bool RSET::Read (PFILE fp)
       // Is a RSET
       UINT4 NewTotal;
       ::Read(&NewTotal, fp);
+      if (feof(fp) || ferror(fp)) return false;
       Resize (NewTotal);
       for (UINT4 i=0; i < NewTotal; i++)
 	{
-	  Table[i].Read(fp);
+          if (!Table[i].Read(fp)) return false;
 	}
       TotalEntries = NewTotal;
 #ifdef PORTABLE
@@ -191,7 +192,8 @@ bool RSET::Read (PFILE fp)
       ::Read(&Timestamp, fp);
       ::Read(&i4, fp); TotalFound = i4;
     }
-  return obj == objRSET;
+  if (feof(fp) || ferror(fp)) { TotalEntries = 0; return false; }
+  return obj == objRSETGP;
 }
 
 void RSET::Write (PFILE fp) const
@@ -199,7 +201,7 @@ void RSET::Write (PFILE fp) const
   size_t i;
 //INT4 *Offsets = new INT4[TotalEntries];
 
-  ::Write((CHR)objRSET, fp);
+  ::Write((CHR)objRSETGP, fp);
   ::Write((UINT4)TotalEntries, fp);
   for (i=0; i < TotalEntries; i++)
     {

@@ -117,14 +117,17 @@ void RESULT::GetRecordData(STRING *StringBuffer, DOCTYPE *DoctypePtr) const
 
   StringBuffer->Clear();
   if (RecordEnd <= RecordStart)
-    message_log (LOG_ERROR, "Element Error (%ld-%ld) in '%s'!", RecordStart, RecordEnd, fn.c_str());
+    message_log (LOG_ERROR, "Element Error (%llu-%llu) in '%s'!",
+      (unsigned long long)RecordStart, (unsigned long long)RecordEnd, fn.c_str());
   else if (::GetRecordData(fn, StringBuffer, RecordStart, (size_t)(RecordEnd - RecordStart + 1), DoctypePtr) == 0)
-    message_log (LOG_ERRNO, "Element %ld-%ld read error in '%s'!", RecordStart, RecordEnd, fn.c_str()); // ERROR
+    message_log (LOG_ERRNO, "Element %llu-%llu read error in '%s'!",
+      (unsigned long long)RecordStart, (unsigned long long)RecordEnd, fn.c_str());
 }
 
 void RESULT::Write(FILE *fp) const
 {
-  putObjID (objRESULT, fp);
+  putObjID (objRESULTGP, fp);
+  ::Write(BYTE(sizeof(GPTYPE)), fp);
   ::Write(Index, fp);
   ::Write(ExtIndex, fp);
   ::Write(Key, fp);
@@ -147,12 +150,14 @@ void RESULT::Write(FILE *fp) const
 bool RESULT::Read(FILE *fp)
 {
   obj_t obj = getObjID(fp);
-  if (obj != objRESULT)
+  if (obj != objRESULTGP)
     {
       PushBackObjID(obj, fp);
     }
   else
     {
+      BYTE width = 0;
+      if (!::Read(&width, fp) || width != sizeof(GPTYPE)) return false;
       ::Read(&Index, fp);
       ::Read(&ExtIndex, fp);
       ::Read(&Key, fp);
@@ -169,9 +174,9 @@ bool RESULT::Read(FILE *fp)
       ::Read(&Score, fp);
       ::Read(&AuxCount, fp);
       ::Read(&Category, fp);
-      HitTable.Read(fp);
+      if (!HitTable.Read(fp)) return false;
     }
-  return obj == objRESULT;
+  return obj == objRESULTGP && !feof(fp) && !ferror(fp);
 }
 
 STRING RESULT::XMLHitTable() const

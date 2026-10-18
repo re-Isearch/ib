@@ -86,6 +86,19 @@ MDTHASHTABLE *_globalMDTHashTable = NULL;
 
 #define SIZEOF_MAGIC 16 /* See mdtrec.cxx */
 
+static bool CompatibleMdtHeader(FILE *fp, const char *magic)
+{
+  BYTE header[SIZEOF_MAGIC];
+  if (!fp || fseek(fp, 0, SEEK_SET) != 0 ||
+      fread(header, 1, sizeof(header), fp) != sizeof(header)) return false;
+  const size_t recordSize = (size_t(header[6]) << 8) | header[7];
+#if !USE_MDTHASHTABLE
+  if (((size_t(header[10]) << 8) | header[11]) != MaxDocPathNameSize) return false;
+#endif
+  return memcmp(header, magic, 4) == 0 && recordSize == sizeof(MDTREC) &&
+         header[8] == DocumentKeySize && header[9] == DocumentTypeSize;
+}
+
 static UINT8 MdtMaximumFileOffset()
 {
 #ifdef _WIN32
@@ -332,7 +345,7 @@ typedef MDTREC MDTRECORD;
  * widths in the version so an incompatible cache is rebuilt automatically.
  */
 static const GPTYPE CacheVersion =
-  static_cast<GPTYPE>(0x0200U + sizeof(GPTYPE) * 0x10U + sizeof(_index_id_t));
+  static_cast<GPTYPE>(0x0300U + sizeof(GPTYPE) * 0x10U + sizeof(_index_id_t));
 
 static bool CacheFileSize(size_t entries, size_t *bytes)
 {
@@ -430,7 +443,7 @@ static int InstanceCount = 0;
 
 int  MDT::Version() const
 {
-  return  (2*1000)+sizeof(MDTRECORD);
+  return  (3*1000)+sizeof(MDTRECORD);
 }
 
 
@@ -514,9 +527,9 @@ void MDT::Init()
   message_log(LOG_DEBUG, "MDT::Init() instance %d", InstanceCount);
 
   if (IsBigEndian())
-    Magic = MdtWrongEndian ? "!MDT" : "<MDT";
+    Magic = MdtWrongEndian ? "!MD3" : "<MD3";
   else
-    Magic = MdtWrongEndian ? "!mdt" : "!MDT";
+    Magic = MdtWrongEndian ? "!md3" : "!MD3";
 
   if (useIndexMap)
     IndexMap.Unmap();
@@ -535,8 +548,29 @@ void MDT::Init()
   MdtIndex = NULL;
   TotalEntries = 0;
   NextGlobalGp = 0;
+  MaxEntries = 0;
+  lastIndex = lastKeyIndex = 0;
+  Changed = false;
+  KeyIndexSorted = GpIndexSorted = true;
   MdtName = FileStem + DbExtMdt;
   MdtIndexName = FileStem + DbExtMdtIndex;
+
+  // Reject a different row layout before mapping records or rebuilding any
+  // lookup cache. An old file length may accidentally be divisible by the
+  // new record size; that must never authorize reading or rewriting it.
+  if (FILE *existing = fopen(MdtName, "rb"))
+    {
+      const bool compatible = CompatibleMdtHeader(existing, Magic);
+      fclose(existing);
+      if (!compatible)
+        {
+          ReadOnly = true;
+          useMdtMap = useIndexMap = false;
+          message_log(LOG_ERROR, "MDT '%s' has an incompatible record-offset format; rebuild the index",
+            MdtName.c_str());
+          return;
+        }
+    }
 
   if (useMdtMap)
     {
@@ -992,38 +1026,7 @@ void MDT::WriteHeader() const
 
 bool MDT::Ok() const
 {
-  if (MdtFp && TotalEntries)
-    {
-      if (fseek(MdtFp, 0, SEEK_SET) != -1)
-	{
-	  UINT2 val;
- 	  UCHR ch;
-	  char  tmp[5];
-#pragma GCC diagnostic ignored "-Wunused-result"
-	  fread(tmp, 4, sizeof(char), MdtFp);
-	  if (memcmp(tmp, Magic, 4) != 0)
-	    return false;
-	  ::Read(&val, MdtFp); // Number of indexes
-	  ::Read(&val, MdtFp);
-	  if (val != sizeof(MDTRECORD))
-	    {
-	      message_log (LOG_NOTICE, "MDT's records are not compatible with this version.");
-	      return false;
-	    }
-	  ::Read(&ch, MdtFp);
-	  if (ch != (UCHR)DocumentKeySize)
-	    return false;
-	  ::Read(&ch, MdtFp);
-	  if (ch != (UCHR)DocumentTypeSize)
-	    return false;
-#if! USE_MDTHASHTABLE
-	  ::Read(&val, MdtFp);
-	  if (val != (UINT2)MaxDocPathNameSize)
-	    return false;
-#endif
-	}
-    }
-  return true;
+  return CompatibleMdtHeader(MdtFp, Magic);
 }
 
 bool MDT::IsSystemFile (const STRING& Filename)
@@ -1033,6 +1036,11 @@ bool MDT::IsSystemFile (const STRING& Filename)
 
 size_t MDT::AddEntry(const MDTREC& MdtRecord)
 {
+  if (!MdtRecord.HasValidRecordRange())
+    {
+      message_log(LOG_ERROR, "Cannot add MDT record with an invalid or oversized local span");
+      return 0;
+    }
   if (ReadOnly)
     return 0;
 
@@ -1455,6 +1463,11 @@ bool MDT::IsDeleted(const size_t Index) const
 
 void MDT::SetEntry(const size_t Index, const MDTREC& MdtRecord)
 {
+  if (!MdtRecord.HasValidRecordRange())
+    {
+      message_log(LOG_ERROR, "Cannot update MDT record with an invalid or oversized local span");
+      return;
+    }
   if (ReadOnly || Index == 0 || Index > TotalEntries)
     return;
 

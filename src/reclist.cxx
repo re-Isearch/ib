@@ -79,7 +79,7 @@ size_t RECLIST::GetTotalEntries () const
 
 void RECLIST::Write(PFILE Fp) const
 {
-  putObjID (objRECLIST, Fp);
+  putObjID (objRECLISTGP, Fp);
   ::Write((UINT4)TotalEntries, Fp); // Write count
   for (size_t i = 0; i < TotalEntries; i++)
     {
@@ -91,25 +91,31 @@ bool RECLIST::Read(PFILE Fp)
 {
   UINT4 Entries = 0;
   obj_t obj = getObjID (Fp);
-  if (obj != objRECLIST)
+  if (obj != objRECLISTGP)
     {
       PushBackObjID (obj, Fp);
+      return false;
     }
   else
     {
       ::Read(&Entries, Fp); // Get count
-      PRECORD OldTable = Table;
-      MaxEntries = Entries;
-      Table = new RECORD[MaxEntries];
+      if (feof(Fp) || ferror(Fp)) return false;
+      PRECORD NewTable = new RECORD[Entries];
 
       for (size_t i=0; i < Entries; i++)
 	{
-	  Table[i].Read(Fp);
+          if (!NewTable[i].Read(Fp))
+            {
+              delete[] NewTable;
+              return false;
+            }
 	}
-      if (OldTable) delete[] OldTable;
+      delete[] Table;
+      Table = NewTable;
+      MaxEntries = Entries;
     }
   TotalEntries = Entries;
-  return obj == objRECLIST;
+  return obj == objRECLISTGP;
 }
 
 RECLIST::~RECLIST ()

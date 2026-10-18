@@ -117,8 +117,8 @@ void COLONGRP::ParseFields (PRECORD NewRecord)
       return;			// ERROR
     }
 
-  INT4 RecStart = NewRecord->GetRecordStart ();
-  INT4 RecEnd = NewRecord->GetRecordEnd ();
+  off_t RecStart = NewRecord->GetRecordStart ();
+  off_t RecEnd = NewRecord->GetRecordEnd ();
   if ((RecEnd == 0) || (RecEnd == -1))
     {
       fseek (fp, 0, 2);
