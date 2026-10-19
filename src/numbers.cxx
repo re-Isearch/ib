@@ -426,19 +426,20 @@ static void TrimMoneySpaces(const unsigned char *begin, const unsigned char *&en
       if (end <= begin)
         return;
 
+      // Consume UTF-8 before testing its final byte as a single-byte space.
+      if (end - begin >= 2 &&
+          end[-2] == 0xC2 && end[-1] == 0xA0)
+        {
+          end -= 2;
+          continue;
+        }
+
       // ASCII / legacy single-byte space.
       if (end[-1] == ' ' ||
           (end[-1] >= '\t' && end[-1] <= '\r') ||
           end[-1] == 0xA0)
         {
           --end;
-          continue;
-        }
-
-      if (end - begin >= 2 &&
-          end[-2] == 0xC2 && end[-1] == 0xA0)
-        {
-          end -= 2;
           continue;
         }
 
@@ -583,13 +584,6 @@ static bool ConsumeCurrencySymbol(const unsigned char *&p, const unsigned char *
 
 static bool ConsumeCentSuffix(const unsigned char *&end, const unsigned char *begin)
 {
-  // Legacy ¢.
-  if (end > begin && end[-1] == 162)
-    {
-      --end;
-      return true;
-    }
-
   // UTF-8 U+00A2 ¢
   if (end - begin >= 2 && end[-2] == 0xC2 && end[-1] == 0xA2)
     {
@@ -597,7 +591,27 @@ static bool ConsumeCentSuffix(const unsigned char *&end, const unsigned char *be
       return true;
     }
 
+  // Legacy ¢. Test after UTF-8 so its final byte is not consumed alone.
+  if (end > begin && end[-1] == 162)
+    {
+      --end;
+      return true;
+    }
+
   return false;
+}
+
+bool MONETARYOBJ::IsExplicitCurrency(const STRING& s)
+{
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(s.c_str());
+  const unsigned char *end = p + s.GetLength();
+  SkipMoneySpaces(p, end);
+  TrimMoneySpaces(p, end);
+
+  // Reuse the parser's marker rules before doing any amount conversion.
+  if (!ConsumeCurrencySymbol(p, end, nullptr) && !ConsumeCentSuffix(end, p))
+    return false;
+  return MONETARYOBJ(s).Ok();
 }
 
 

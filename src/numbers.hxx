@@ -281,6 +281,9 @@ public:
 
   bool Ok() const { return Valid; }
 
+  // Autodetection needs a symbol or cent suffix; Set also accepts plain amounts.
+  static bool IsExplicitCurrency(const STRING& s);
+
   bool Set(const NUMBER x);
   bool Set(const STRING& s);
   bool SetTicks(INT16 ticks, bool fractionSpecified = true) {

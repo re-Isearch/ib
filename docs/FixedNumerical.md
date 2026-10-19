@@ -14,6 +14,9 @@ The representable endpoints are:
 Decimal and scientific notation are parsed directly into ticks. Additional
 fraction digits are rounded to nearest, with ties to even. Zero is valid;
 missing values, malformed input, nonfinite values and overflow are invalid.
+For example, `0.00012294500029437535` has 20 decimal places and is stored as
+`0.0001229450002944`. The 16-place scale limits decimal places, rather than
+total significant digits.
 Multiplication and division use a 256-bit intermediate and the same
 rounding rule. Arithmetic overflow and division by zero produce an invalid
 object. Integer arguments remain exact, including mixed arithmetic.
@@ -25,6 +28,16 @@ continues to retrieve full field coordinates from the coordinate cache.
 Scans emit exact decimal strings, trim trailing fractional zeroes, and
 count duplicate values. The integer and monetary columns retain their
 own formats and scan methods.
+
+Currency autodetection requires explicit notation: a supported currency
+symbol prefix or a cent suffix, followed by validation with the monetary
+parser. An ordinary decimal, coordinate or score is not currency merely
+because the monetary parser can read it. Explicitly declared currency fields
+still accept unmarked amounts. Plain decimals continue to infer `numerical`;
+extra decimal places do not select a floating-point type automatically.
+Fields already inferred as currency retain their stored type; recreate the
+affected index with corrected field types to recover their numerical values
+from the source.
 
 `GetFieldData` accepts a `NUMERICOBJ*` for exact retrieval. Existing
 floating callback and `DOUBLE*` interfaces convert explicitly at their

@@ -1,5 +1,6 @@
 #include "fieldtype_promotion.hxx"
 #include "dfdt.hxx"
+#include "numbers.hxx"
 #include <cstdlib>
 #include <iostream>
 
@@ -36,8 +37,8 @@ static void promotion_regressions()
 {
   const INT integer = FIELDTYPE::integer, number = FIELDTYPE::numerical;
   const INT money = FIELDTYPE::currency;
-  require(STRING("42").IsCurrency() && STRING("12.50").IsCurrency(),
-          "plain numbers also pass the monetary parser");
+  require(MONETARYOBJ(STRING("42")).Ok() && MONETARYOBJ(STRING("12.50")).Ok(),
+          "explicitly typed monetary fields still accept plain amounts");
 
   for (bool frozen : {false, true})
     {
@@ -46,11 +47,13 @@ static void promotion_regressions()
       check_promotion(integer, "170141183460469231731687303715884105727",
                       frozen, integer, 1, 0, 0, 0);
       check_promotion(integer, "12.50", frozen, frozen ? integer : number, 1, 1, 0, 1);
+      check_promotion(integer, "0.00012294500029437535", frozen, frozen ? integer : number, 1, 1, 0, 1);
       check_promotion(integer, "1e3", frozen, frozen ? integer : number, 1, 1, 0, 1);
       check_promotion(integer, "$12.50", frozen, frozen ? integer : money, 1, 1, 1, 1);
       check_promotion(integer, "no amount here", frozen, integer, 1, 1, 1, 0);
       check_promotion(number, "42", frozen, number, 0, 1, 0, 0);
       check_promotion(number, "12.50", frozen, number, 0, 1, 0, 0);
+      check_promotion(number, "0.00012294500029437535", frozen, number, 0, 1, 0, 0);
       check_promotion(number, "1e3", frozen, number, 0, 1, 0, 0);
       check_promotion(number, "$12.50", frozen, frozen ? number : money, 0, 1, 1, 1);
       check_promotion(number, "no amount here", frozen, number, 0, 1, 1, 0);
@@ -58,6 +61,26 @@ static void promotion_regressions()
         if (type != integer && type != number)
           check_promotion(type, "$12.50", frozen, type, 0, 0, 0, 0);
     }
+}
+
+static void currency_detection_regressions()
+{
+  for (const char *text : {"42", "12.50", "-73.9857", "40.7484", "0.00012294500029437535",
+                           "1e-12", "  -12.50  ", "1,234.56", "1.234,56", "1'234.56",
+                           "", "$", "$12x", "NaN", "USD12.50", "12.50USD"})
+    require(!STRING(text).IsCurrency(), "currency detection needs a marker and a valid amount");
+  for (const char *text : {"$12.50", "  $ -12.50  ", "\xc2\xa3" "12.50", "\xc2\xa5" "12.50",
+                           "\xc2\xa4" "12.50", "\xe2\x82\xac" "1.234,56", "\xe2\x82\xb9" "1,234.50",
+                           "\xe2\x82\xbf" "0.01", "25\xc2\xa2", " -25 \xc2\xa2 ",
+                           "$12.50\xc2\xa0", "\xc2\xa0" "$12.50\xc2\xa0", "25\xc2\xa2\xc2\xa0",
+                           "\xa3" "12.50", "\xa4" "12.50", "\xa5" "12.50", "25\xa2"})
+    require(STRING(text).IsCurrency(), text);
+  require(MONETARYOBJ(STRING("25\xc2\xa2")).GetTicks() == 12500 &&
+          MONETARYOBJ(STRING("$12.50\xc2\xa0")).GetTicks() == 625000,
+          "UTF-8 suffixes retain the whole amount");
+  const STRING score("0.00012294500029437535");
+  require(score.IsNumber() && !score.IsIntegralNumber() && !score.IsCurrency(),
+          "Cirrus popularity score is numerical, not an integer or currency");
 }
 
 static void add_field(DFDT& fields, const char *name, INT type)
@@ -149,6 +172,7 @@ static void type_metadata_regressions()
 
 int main()
 {
+  currency_detection_regressions();
   promotion_regressions();
   state_regressions();
   type_metadata_regressions();

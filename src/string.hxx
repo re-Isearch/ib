@@ -225,7 +225,7 @@ public:
     /// Date Range
   bool IsDateRange() const;
     /// Is it currency?
-  bool IsCurrency() const;
+  bool IsCurrency() const; // Explicit currency notation, not an unmarked amount.
     /// Is a Box?
   bool IsGeoBoundedBox() const;
     /// Is a word
