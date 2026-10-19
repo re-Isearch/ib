@@ -17,6 +17,15 @@ locale-dependent decimal separator is involved. The index accepts finite
 values. Invalid syntax, NaN, infinity, overflow and inputs below the
 representable range are rejected.
 
+CMake checks floating-point `from_chars` and `to_chars` against the target
+standard library and macOS deployment target. When unavailable, parsing uses
+`strtod_l` with a private C locale and strict decimal syntax. Representable
+subnormals are retained even if libc reports underflow. The formatter also has
+a classic-locale fallback that finds the first significant-digit precision
+which round-trips. Neither fallback changes the process or thread locale.
+To exercise both fallbacks, configure with `-DIB_HAVE_FLOAT_FROM_CHARS=OFF`
+and `-DIB_HAVE_FLOAT_TO_CHARS=OFF`, then run the `float64` regression.
+
 The value occupies eight bytes on disk in network-order IEEE encoding,
 alongside its GP. A distinct, versioned column header identifies the
 format and row size. Value-sorted and GP-sorted blocks support the shared

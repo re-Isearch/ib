@@ -3,6 +3,8 @@
 #include "typedscan.hxx"
 #include "fieldtype_promotion.hxx"
 #include <cstdlib>
+#include <clocale>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <locale>
@@ -26,16 +28,37 @@ static void parsing()
   require(value("1e-300") == 1e-300 && value("1e300") == 1e300, "wide exponent range");
   require(value("1.7976931348623157e308") == std::numeric_limits<DOUBLE>::max(), "maximum finite value");
   require(value("5e-324") == std::numeric_limits<DOUBLE>::denorm_min(), "smallest subnormal");
+  require(value("2.2250738585072014e-308") == std::numeric_limits<DOUBLE>::min(), "smallest normal");
+  require(value("-5e-324") == -std::numeric_limits<DOUBLE>::denorm_min(), "negative subnormal");
+  require(value(".125") == 0.125 && value("1.") == 1.0, "decimal point with digits on either side");
+  require(value(" \t\n\r\f\v+1.25E+2 \t\n\r\f\v") == 125, "whitespace and explicit exponent sign");
+  require(value("0e-9999") == 0 && std::signbit(value("-0.000e-9999")), "zero mantissas are not underflow");
   require(std::signbit(value("-0")), "parse IEEE negative zero");
   require(value("1.0000000000000002") == std::nextafter(1.0, 2.0), "adjacent binary64 values remain distinct");
-  for (const char *text : {"", "+", "+-1", ".", "1e", "1,25", "1x", "1e309", "1e-999",
-                           "NaN", "nan(1)", "inf", "-Infinity", "0x1p4"}) {
+  for (const char *text : {"", "+", "+-1", "++1", "-", "--1", ".", "1e", "1e+", "1e-",
+                           "1,25", "1 25", "1x", "1e309", "-1e309", "1e-999", "-1e-999",
+                           "2e-324", "-2e-324", "NaN", "nan(1)", "inf", "-Infinity", "0x1p4",
+                           "0x10", "-0x1p4"}) {
     DOUBLE output = 42;
     require(!float64::Parse(STRING(text), &output) && output == 0, text);
   }
+  DOUBLE invalid = 42;
+  require(!float64::Parse(STRING("1\0x", size_t(3)), &invalid) && invalid == 0,
+          "embedded NUL never hides trailing input");
+  require(float64::Parse(STRING("1.25"), nullptr) && !float64::Parse(STRING("1x"), nullptr),
+          "validation without an output pointer");
   for (DOUBLE number : {0.1, -0.1, 1e-300, 1e300, std::nextafter(1.0, 2.0),
                        std::numeric_limits<DOUBLE>::max(), std::numeric_limits<DOUBLE>::denorm_min()})
     require(value(float64::ToString(number).c_str()) == number, "shortest decimal term round-trips");
+  std::uint64_t bits = 0x9e3779b97f4a7c15ULL;
+  for (int i = 0; i < 512; ++i) {
+    bits ^= bits << 13; bits ^= bits >> 7; bits ^= bits << 17;
+    DOUBLE number;
+    std::memcpy(&number, &bits, sizeof(number));
+    if (std::isfinite(number))
+      require(value(float64::ToString(number).c_str()) == number,
+              "round-trip across binary64 signs, exponents and significands");
+  }
   require(float64::ToString(0.1) == "0.1", "scan output avoids unnecessary decimal digits");
   require(float64::ToString(-0.0) == "0", "signed zeros have one scan term");
   require(float64::ToString(std::numeric_limits<DOUBLE>::infinity()).IsEmpty(), "nonfinite values have no term");
@@ -44,6 +67,17 @@ static void parsing()
   const std::locale previous = std::locale::global(std::locale(std::locale::classic(), new Comma));
   require(value("1.25") == 1.25 && float64::ToString(1.25) == "1.25", "locale-independent parser and formatter");
   std::locale::global(previous);
+
+  const std::string numeric_locale = std::setlocale(LC_NUMERIC, nullptr);
+  for (const char *name : {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"}) {
+    if (!std::setlocale(LC_NUMERIC, name)) continue;
+    const std::string active_locale = std::setlocale(LC_NUMERIC, nullptr);
+    require(value("1.25") == 1.25 && float64::ToString(1.25) == "1.25" &&
+            !float64::Parse(STRING("1,25"), nullptr), "independent of the process C numeric locale");
+    require(std::setlocale(LC_NUMERIC, nullptr) == active_locale, "conversion leaves the process locale unchanged");
+    break;
+  }
+  require(std::setlocale(LC_NUMERIC, numeric_locale.c_str()) != nullptr, "restore numeric locale");
 }
 
 static void metadata()

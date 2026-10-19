@@ -785,6 +785,30 @@ add_library(ibSearch
     ${SRC_DIR}/support.cxx      ${SRC_DIR}/defs.cxx
 )
 ib_common_includes(ibSearch)
+# Floating charconv support can depend on the standard library and, on macOS,
+# the deployment target. Probe both overloads independently, including linkage.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([=[
+    #include <charconv>
+    int main() {
+        const char text[] = "1.25";
+        double value;
+        const auto result = std::from_chars(text, text + 4, value, std::chars_format::general);
+        return result.ec == std::errc() && value == 1.25 ? 0 : 1;
+    }
+]=] IB_HAVE_FLOAT_FROM_CHARS)
+check_cxx_source_compiles([=[
+    #include <charconv>
+    int main() {
+        char text[64];
+        const auto result = std::to_chars(text, text + sizeof(text), 1.25, std::chars_format::general);
+        return result.ec == std::errc() ? 0 : 1;
+    }
+]=] IB_HAVE_FLOAT_TO_CHARS)
+set_property(SOURCE ${SRC_DIR}/floatfield.cxx APPEND PROPERTY COMPILE_DEFINITIONS
+    IB_HAVE_FLOAT_FROM_CHARS=$<BOOL:${IB_HAVE_FLOAT_FROM_CHARS}>
+    IB_HAVE_FLOAT_TO_CHARS=$<BOOL:${IB_HAVE_FLOAT_TO_CHARS}>
+)
 # IEEE value parsing, signed zero and subnormal comparisons must retain their
 # semantics even when the rest of an optimized build enables fast-math.
 set_property(SOURCE
