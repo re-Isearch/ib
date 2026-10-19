@@ -17,6 +17,7 @@ Author:		Jim Fullton, Jim.Fullton@cnidr.org
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "defs.hxx"
@@ -42,9 +43,13 @@ MERGEUNIT::MERGEUNIT()
   ItemsToMerge=TotalLoaded=0;
 }
 
-static void LocalGetSistring(STRING *s, size_t Gp, const UCHR *buf)
+static void LocalGetSistring(STRING *s, size_t Gp, const UCHR *buf, size_t size)
 {
-  s->SetTermLower(&buf[Gp], StringCompLength);
+  if (Gp >= size) { s->Clear(); return; }
+  extern bool _is_globalUTF8;
+  // Complete a character crossing the SIS window before folding its prefix.
+  const size_t limit = StringCompLength + (_is_globalUTF8 ? 4 : 0);
+  s->SetTermLower(buf+Gp, std::min(limit, size-Gp));
 }
 
 bool MERGEUNIT::CacheLoad()
@@ -109,7 +114,7 @@ bool MERGEUNIT::CacheLoad()
 	}
       p[size]='\0';
 
-      LocalGetSistring(&sistrings[i],list[i]-gp, (const UCHR *)p);
+      LocalGetSistring(&sistrings[i],list[i]-gp, (const UCHR *)p, size);
       Tag[i]=1;
       count++;
       for(size_t j=i; j<LoadLim; j++){ // inside loop - find all later entries 
@@ -117,7 +122,7 @@ bool MERGEUNIT::CacheLoad()
 	if(Tag[j]==0){ // not visited already
 	  GPTYPE tmpgp=Start[j];
 	  if(tmpgp==gp){		// same record
-	    LocalGetSistring(&sistrings[j],list[j]-gp, (const  UCHR *)p);
+          LocalGetSistring(&sistrings[j],list[j]-gp, (const  UCHR *)p, size);
 	    Tag[j]=1;
 	    count++;
 	    ncount++;

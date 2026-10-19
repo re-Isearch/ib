@@ -108,6 +108,7 @@ extern bool _is_globalUTF8;
 #include "metaphone.hxx"
 #include "doctype.hxx"
 #include <assert.h>
+#include <algorithm>
 #include "lock.hxx"
 //#include "dfdt.hxx"
 #include <iomanip>
@@ -1207,38 +1208,6 @@ GPTYPE INDEX::GpOf(GPTYPE *Ptr, size_t Index) const
     return GpSwab(Ptr[Index]);
   return Ptr[Index];
 }
-
-static inline int SisCompare(const UCHR *p1, const UCHR *p2, int MaxLen = StringCompLength)
-{
-  int x = 0, diff;
-  while ((diff = _ib_diff(*p1, *p2)) == 0 &&  __IB_cclass[*p1])
-    {
-      if (++x >= MaxLen) break;
-      p1++, p2++;
-    }
-  return diff;
-}
-
-#if 1
-#define SisCompare2 SisCompare
-#else
-static int SisCompare2(const UCHR *p1, const UCHR *p2, int MaxLen = StringCompLength)
-{
-  int x = 0, diff;
-
-  while ((diff = _ib_diff(*p1, *p2)) == 0 &&  __IB_cclass[*p1] && __IB_cclass[*p2])
-    {
-      if (++x >= MaxLen) break;
-      p1++, p2++;
-    }
-  if (diff == 0 && x < MaxLen)
-    {
-      return __IB_cclass[*p1] - __IB_cclass[*p2];
-    }
-  return diff;
-}
-#endif
-
 
 #if 0
 bool INDEX::ExtractFieldTable(INT Number)
@@ -2976,18 +2945,21 @@ INT INDEX::SisWrite(const STRING Str, FILE *dp)
     }
 
   if (Str.GetLength() == 0 ||
-      SisCompare((const UCHR *)lastSIString, (const UCHR *)Str, SisLimit) < 0)
+      _ib_SisCompare((const UCHR *)lastSIString, (const UCHR *)Str, SisLimit) < 0)
     {
       size_t len;
       const unsigned char *ptr = (const unsigned char *)lastSIString;
-      for (len = 0; len < SisLimit; len++)
+      if (_is_globalUTF8)
+        len = std::min(SisLimit, _ib_UTF8TermLength(ptr, lastSIString.GetLength()));
+      else for (len = 0; len < SisLimit && len < lastSIString.GetLength(); len++)
         {
           if (!IsTermChr(ptr+len))
             break;
         } // for
       putc(len & 0xFF, dp);
-      // Write SisLimit so that we can bsearch on it..
-      fwrite(ptr, sizeof(UCHR), SisLimit, dp);
+      // Pad short keys rather than reading beyond a STRING allocation.
+      fwrite(ptr, sizeof(UCHR), len, dp);
+      for (size_t i = len; i < SisLimit; ++i) putc(0, dp);
       ::putGPTYPE (SIScount-1, dp); // Write which SIS word..
       lastSIString = Str;
       return 1;
@@ -3067,11 +3039,21 @@ bool INDEX::CollapseIndexFiles()
             message_log (LOG_ERRNO, "Collapse: Could not Map '%s'", s.c_str());
             return false;
           }
+        if (SisFiles[j].Size() < 2)
+          {
+            message_log(LOG_ERROR, "Collapse: truncated SIS header in '%s'", s.c_str());
+            return false;
+          }
         if (DebugMode) message_log (LOG_DEBUG, "Mapped %s", s.c_str());
 
         const size_t compLength = (unsigned char)Map[0];
         //size of a sistring record
         const size_t dsiz = compLength + sizeof(GPTYPE)+1;
+        if (!compLength || (SisFiles[j].Size()-2) % dsiz)
+          {
+            message_log(LOG_ERROR, "Collapse: invalid SIS row size in '%s'", s.c_str());
+            return false;
+          }
         SisInfo[j].charsetId = (BYTE)Map[1];
         SisInfo[j].buf       = Map + 2;
         SisInfo[j].compLength= compLength;
@@ -3107,6 +3089,13 @@ bool INDEX::CollapseIndexFiles()
             SisInfo[0].charsetId, SisInfo[1].charsetId);
       return false;
     }
+  if (SisInfo[0].compLength != SisInfo[1].compLength)
+    {
+      message_log(LOG_ERROR, "Can't collapse different SIS prefix widths (%lu != %lu). Rebuild with one SIS limit.",
+                  (unsigned long)SisInfo[0].compLength, (unsigned long)SisInfo[1].compLength);
+      return false;
+    }
+  const CHARSET mergeCharset(SisInfo[0].charsetId);
 
   // Name of the Temp Index (for output)
   TmpIndexFile.form("%s.%d.%d", IndexFileName.c_str(), First, mypid);
@@ -3167,8 +3156,9 @@ bool INDEX::CollapseIndexFiles()
         {
           term1 = SisInfo[0].buf + pos1*SisInfo[0].dsiz;
           term2 = SisInfo[1].buf + pos2*SisInfo[1].dsiz;
-          size_t len = *term1 > *term2 ? *term1 : *term2;
-          dif =  SisCompare2(&term2[1], &term1[1], len);
+          const size_t len1 = std::min(size_t(*term1), SisInfo[0].compLength);
+          const size_t len2 = std::min(size_t(*term2), SisInfo[1].compLength);
+          dif = mergeCharset.CompareSIS(term2+1, len2, term1+1, len1);
         }
       if (dif >= 0)
         {
@@ -3642,7 +3632,7 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
               repeat = strncmp((const char *)&MemoryData[ NewMemoryIndex[i-1] ],
                                (const char *)&MemoryData[ NewMemoryIndex[i] ], SisLimit);
 #else
-              repeat = SisCompare(&MemoryData[ NewMemoryIndex[i-1] ], &MemoryData[ NewMemoryIndex[i] ], SisLimit);
+              repeat = _ib_SisCompare(&MemoryData[ NewMemoryIndex[i-1] ], &MemoryData[ NewMemoryIndex[i] ], SisLimit);
 #endif
             }
         }

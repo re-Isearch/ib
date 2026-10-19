@@ -1427,6 +1427,16 @@ STRING& STRING::EraseAfter (const STRINGINDEX Index)
 // Special Code
 void STRING::SetTermLower (const UCHR *Ptr, const STRINGINDEX len)
 {
+  extern bool _is_globalUTF8;
+  if (_is_globalUTF8)
+    {
+      size_t length = 0;
+      while (length < len && Ptr[length]) ++length;
+      AssignCopy(length, reinterpret_cast<const char *>(Ptr));
+      _utf_StrToLowerBuf(reinterpret_cast<UCHR *>(m_pchData), unsigned(length), true, ' ');
+      _ib_ZapNonTermASCII(reinterpret_cast<UCHR *>(m_pchData), unsigned(length), ' ');
+      return;
+    }
   size_t i = 0;
 
   if (len)

@@ -40,6 +40,11 @@ const CHR  *Id2Charset(BYTE CharsetId);
 
 int         UTFTo(UINT2 *dest, const char *buf, size_t len);
 
+// SIS inputs are already folded. Limits and lengths are byte counts; a stored
+// prefix may end inside a UTF-8 sequence and must never read into the GP field.
+int _ib_SisCompare(const UCHR *left, const UCHR *right, size_t limit);
+size_t _ib_UTF8TermLength(const UCHR *text, size_t length);
+
 class CHARSET {
 friend class LOCALE;
 friend class MDTREC;
@@ -122,6 +127,8 @@ public:
   int (* SisCompare ()) (const void *, const void *)         { return cclassComp; }
   int (* SisKeys())     (const void *, const void *)         { return sisComp;    }
   int (* Compare())     (const void *, const void *, size_t) { return nComp;      }
+  int CompareSIS(const UCHR *left, size_t leftLength,
+                 const UCHR *right, size_t rightLength) const;
 
   // Destruction
   ~CHARSET();
