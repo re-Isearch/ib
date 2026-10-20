@@ -354,6 +354,7 @@ public:
   bool CheckIntegrity() const;
 
 private:
+  bool ZipIndexFiles();
   void  CPU_ResourcesExhausted (); // Exception
 
   long TermFreq(const STRING& Word, bool Truncate=false);

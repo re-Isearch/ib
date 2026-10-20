@@ -1,161 +1,224 @@
 /*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
+Copyright (c) 2020-26 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
-#pragma ident  "@(#)merge.cxx  1.3 06/27/00 20:30:54 BSN"
-
-/************************************************************************
-************************************************************************/
-
-/*@@@
-File:		merge.cxx
-Version:	1.00
-Description:	Class IDB
-Author:		Jon Magid, jem@cnidr.org
-@@@*/
-
-#include <memory.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include "common.hxx"
 #include "merge.hxx"
+#include "mergeunit.hxx"
+#include "common.hxx"
+#include "dirent.hxx"
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <limits>
 
-void MERGE::printint(int *data, int nel) {
-	for (int i = 0; i < nel; i++)
-		printf("%d ", *(data + i));
-	puts("");
+namespace {
+struct Output {
+  MERGE::INPUT names;
+  FILE *index = nullptr, *sis = nullptr;
+  std::vector<char> indexBuffer, sisBuffer;
+  bool keep = false;
+  explicit Output(const MERGE::INPUT& paths) : names(paths) {}
+  ~Output() {
+    if (index) fclose(index);
+    if (sis) fclose(sis);
+    if (!keep) { UnlinkFile(names.index); UnlinkFile(names.sis); }
+  }
+  bool Open() {
+    index = fopen(names.index, "wb");
+    sis = fopen(names.sis, "wb");
+    if (!index || !sis) return false;
+    indexBuffer.resize(256*1024); sisBuffer.resize(64*1024);
+    return setvbuf(index, indexBuffer.data(), _IOFBF, indexBuffer.size()) == 0 &&
+           setvbuf(sis, sisBuffer.data(), _IOFBF, sisBuffer.size()) == 0;
+  }
+  bool Finish() {
+    const bool goodStreams = !ferror(index) && !ferror(sis);
+    const bool goodIndex = fclose(index) == 0; index = nullptr;
+    const bool goodSis = fclose(sis) == 0; sis = nullptr;
+    return keep = goodStreams && goodIndex && goodSis;
+  }
+};
+
+// A winner tree stores input indices, not keys or posting objects. Replaying
+// one changed leaf needs at most ceil(log2(k)) key comparisons. Equal keys are
+// resolved by input order, preserving the existing partition order of postings.
+class Tournament {
+public:
+  explicit Tournament(const std::vector<std::unique_ptr<MERGEUNIT>>& streams,
+                      MERGE::STATS& counts)
+    : inputs(streams), stats(counts), charset(streams.front()->CharsetId()) {
+    while (leaves < inputs.size()) leaves *= 2;
+    nodes.assign(2*leaves, None);
+    for (size_t i = 0; i < inputs.size(); ++i)
+      if (!inputs[i]->Empty()) nodes[leaves+i] = i;
+    for (size_t i = leaves; --i;) nodes[i] = Winner(nodes[2*i], nodes[2*i+1]);
+  }
+  size_t Head() const { return nodes[1]; }
+  void Replay(size_t input) {
+    size_t i = leaves+input;
+    nodes[i] = inputs[input]->Empty() ? None : input;
+    while ((i /= 2) != 0) nodes[i] = Winner(nodes[2*i], nodes[2*i+1]);
+  }
+  static constexpr size_t None = size_t(-1);
+
+private:
+  size_t Winner(size_t a, size_t b) {
+    if (a == None) return b;
+    if (b == None) return a;
+    ++stats.comparisons;
+    const int cmp = charset.CompareSIS(inputs[a]->Key(), inputs[a]->KeyLength(),
+                                       inputs[b]->Key(), inputs[b]->KeyLength());
+    return cmp < 0 || (cmp == 0 && a < b) ? a : b;
+  }
+  const std::vector<std::unique_ptr<MERGEUNIT>>& inputs;
+  MERGE::STATS& stats;
+  CHARSET charset;
+  size_t leaves = 1;
+  std::vector<size_t> nodes;
+};
+
+bool ZipPass(const std::vector<MERGE::INPUT>& paths, const MERGE::INPUT& destination,
+             UINT2 magic, unsigned long long capacity, long commonThreshold,
+             std::vector<STRING> *commonWords, MERGE::STATS& stats)
+{
+  std::vector<std::unique_ptr<MERGEUNIT>> inputs;
+  capacity = std::min(capacity, (unsigned long long)std::numeric_limits<GPTYPE>::max());
+  unsigned long long count = 0;
+  for (const auto& path : paths) {
+    auto input = std::make_unique<MERGEUNIT>();
+    if (!input->Open(path.index, path.sis, magic)) return false;
+    if (!inputs.empty() && (input->Width() != inputs.front()->Width() ||
+                           input->CharsetId() != inputs.front()->CharsetId())) {
+      message_log(LOG_ERROR, "Merge: incompatible SIS prefix widths or character sets");
+      return false;
+    }
+    if (input->PostingCount() >= capacity || count >= capacity-input->PostingCount()) {
+      message_log(LOG_ERROR, "Merge: posting capacity exceeded");
+      return false;
+    }
+    count += input->PostingCount();
+    inputs.emplace_back(std::move(input));
+  }
+  Output output(destination);
+  if (!output.Open()) {
+    message_log(LOG_ERRNO, "Merge: cannot create '%s' and '%s'",
+                destination.index.c_str(), destination.sis.c_str());
+    return false;
+  }
+  if (::Write(magic, output.index) != 2 ||
+      putc(int(inputs.front()->Width()), output.sis) == EOF ||
+      putc(inputs.front()->CharsetId(), output.sis) == EOF)
+    return false;
+
+  Tournament tree(inputs, stats);
+  const CHARSET charset(inputs.front()->CharsetId());
+  const size_t width = inputs.front()->Width();
+  std::vector<UCHR> buffer(1024*1024), key(width+1);
+  GPTYPE written = 0;
+  size_t terms = 0;
+  while (tree.Head() != Tournament::None) {
+    const MERGEUNIT& first = *inputs[tree.Head()];
+    std::copy(first.Row(), first.Row()+width+1, key.begin());
+    const size_t keyLength = std::min(size_t(key[0]), width);
+    const GPTYPE start = written;
+    do {
+      const size_t selected = tree.Head();
+      MERGEUNIT& input = *inputs[selected];
+      const GPTYPE add = input.HeadCount();
+      if (!input.CopyPostings(output.index, buffer)) return false;
+      written += add;
+      if (!input.Advance()) return false;
+      tree.Replay(selected);
+      if (tree.Head() == Tournament::None) break;
+    } while (charset.CompareSIS(key.data()+1, keyLength, inputs[tree.Head()]->Key(),
+                               inputs[tree.Head()]->KeyLength()) == 0);
+
+    if (fwrite(key.data(), 1, key.size(), output.sis) != key.size() ||
+        ::Write(written-1, output.sis) != int(sizeof(GPTYPE)))
+      return false;
+    ++terms;
+    if (commonWords && written-start > GPTYPE(std::max(0L, commonThreshold))) {
+      STRING word; word.Assign(reinterpret_cast<const char *>(key.data()+1), keyLength);
+      commonWords->push_back(word);
+    }
+  }
+  if (written != count || !output.Finish()) return false;
+  stats.postings = written; stats.terms = terms;
+  return true;
 }
 
-void MERGE::buildGpHeap(GPTYPE *data, size_t heapsize, 
-	int (*compar)(const void *, const void *), int position, int reverse) {
+struct Temporaries {
+  std::vector<MERGE::INPUT> paths;
+  ~Temporaries() {
+    for (const auto& path : paths) { UnlinkFile(path.index); UnlinkFile(path.sis); }
+  }
+};
+} // namespace
 
-	int childpos;
-	GPTYPE value;
+bool MERGE::Zip(const std::vector<INPUT>& sources, const INPUT& output, UINT2 magic,
+                unsigned long long capacity, long commonThreshold,
+                std::vector<STRING> *commonWords, STATS *statistics)
+{
+  if (sources.empty() || capacity == 0) return false;
+  for (const auto& source : sources)
+    if (source.index == output.index || source.sis == output.sis ||
+        source.index == output.sis || source.sis == output.index)
+      return false;
 
-	value = data[position];
+  // Reserve descriptors for the database, outputs, and unrelated open files.
+  const int descriptorLimit = _IB_kernel_max_file_descriptors();
+  size_t fanIn = MaxFanIn;
+  if (descriptorLimit > 0)
+    fanIn = std::min(fanIn, size_t(std::max(2, (descriptorLimit-64)/2)));
 
-	while (position < heapsize) {
-		childpos = position * 2 + 1;
-		if (childpos < heapsize) {
-			if ((childpos < heapsize) && 
-				( ((*compar)( ((void *)(data + childpos + 1)), 
-					((void *)(data + childpos)))) == 1 ))
-						childpos++;
-			if ( ((*compar)((void *)&value, (void *)(data + childpos))) > 0) {
-				data[position] = value;
-				return;
-			}
-			else {
-				data[position] = data[childpos];
-				position = childpos;
-			}
-		}
-		else {
-			data[position] = value;
-			return;
-		}
-	}
+  Temporaries temporary;
+  STATS stats;
+  std::vector<INPUT> inputs(sources);
+  size_t pass = 0;
+  while (inputs.size() > fanIn) {
+    std::vector<INPUT> next;
+    for (size_t begin = 0; begin < inputs.size(); begin += fanIn) {
+      const size_t end = std::min(begin+fanIn, inputs.size());
+      if (end-begin == 1) { next.push_back(inputs[begin]); continue; }
+      const STRING suffix = STRING().form(".zip.%lu.%lu",
+                                          (unsigned long)pass, (unsigned long)next.size());
+      const INPUT destination = {output.index+suffix, output.sis+suffix};
+      temporary.paths.push_back(destination);
+      const std::vector<INPUT> group(inputs.begin()+begin, inputs.begin()+end);
+      if (!ZipPass(group, destination, magic, capacity, commonThreshold, nullptr, stats))
+        return false;
+      next.push_back(destination);
+    }
+    inputs.swap(next);
+    ++pass;
+  }
+  std::vector<STRING> words;
+  if (!ZipPass(inputs, output, magic, capacity, commonThreshold,
+               commonWords ? &words : nullptr, stats))
+    return false;
+  if (commonWords) commonWords->swap(words);
+  stats.passes = pass+1;
+  if (statistics) *statistics = stats;
+  return true;
 }
 
-void MERGE::buildHeap(void *data, size_t heapsize, size_t width,  
-	int (*compar) (const void *, const void *), int position, int reverse) {
-
-	int childpos, cmpstatus; 
-	void *value;
-
-	value = (void *)malloc(width);
-	memcpy(value, ((char *)data + (width * position) ), width);
-
-	while (position < heapsize) {
-		childpos = position * 2 + 1;
-
-		//if there is a child...
-		if (childpos < heapsize) {
-
-			//if there is another child
-			if (childpos + 1 < heapsize) {
-				
-				//make childpos equal to the greatest child
-				//(unless we're reversed)
-				cmpstatus =  (*compar)( ((char *)data + (width * (childpos + 1))), 
-					((char *)data + (width * childpos)) );
-
-				if  ( cmpstatus > 0 && !reverse)
-					childpos++;
-				else if (cmpstatus < 0 && reverse)
-					childpos++;
-			
-			}
-			
-			//is unlocated value larger than the largest child?
-			cmpstatus = ( (*compar)( value, ((char *)data + (width * childpos) )) );
-
-			//unless we're reversed (smaller than the smallest child)
-			if (reverse) 
-				cmpstatus = 0 - cmpstatus;
-
-			//value is bigger, we're done.
-			if (cmpstatus > 0) {
-					memcpy( ((char *)data + (position * width) ), value, width);
-					free(value);
-					return;
-			} //child is bigger or same size, back through the loop 
-			//again to find a place for value
-			else {
-					memcpy( ((char *)data + (position * width) ), 
-						((char *)data + (childpos * width) ), width);
-					position=childpos;
-			}
-		}
-
-		//node has no child. loop is finished
-		else {
-			memcpy(((char *)data+ (position * width) ), value, width);
-			free(value);
-			return;
-		}
-	}
+void MERGE::RemoveTemporaries(const INPUT& output)
+{
+  for (const STRING& path : {output.index, output.sis}) {
+    const std::string name(path.c_str());
+    const size_t slash = name.find_last_of("/\\");
+    const std::string directory = slash == std::string::npos ? "." : name.substr(0, slash+1);
+    const std::string prefix = name.substr(slash == std::string::npos ? 0 : slash+1)+".zip.";
+    DIR *dir = opendir(directory.c_str());
+    if (!dir) continue;
+    while (const auto *entry = readdir(dir)) {
+      const std::string file(entry->d_name);
+      if (file.compare(0, prefix.size(), prefix) != 0) continue;
+      unsigned long pass, group;
+      char extra;
+      if (sscanf(file.c_str()+prefix.size(), "%lu.%lu%c", &pass, &group, &extra) == 2)
+        UnlinkFile(STRING((directory+"/"+file).c_str()));
+    }
+    closedir(dir);
+  }
 }
-
-void MERGE::GpHsort(GPTYPE *data, size_t nel, int (*compar) 
-	(const void *, const void *)) {
-
-	int i, tmp;
-	for (i = nel/2; i > 0; i--)
-		buildGpHeap(data, nel, compar, i, 0);
-	
-	for (i = nel - 1; i > 0; i--) {
-		tmp = data[i];
-		data[i] = data[0];
-		data[0] = tmp;
-		buildGpHeap(data, i, compar, 0, 0);
-	}
-}
-
-void MERGE::hsort(void *data, size_t nel, size_t width, 
-	int (*compar) (const void *, const void *)) {
-
-	int i;
-	void *tmp;
-	for (i = nel/2; i >=0; i--) 
-		buildHeap(data, nel, width, compar, i, 0);
-
-/*	FILE *fp = fopen("heap.dbg","wb");
-	if (!fp) {
-		perror("heap.dbg");
-		exit(1);
-	}
-	fwrite(data, width, nel, fp);
-	fclose(fp);
-*/
-
-	tmp = malloc(width);
-	for (i = nel - 1; i > 0; i--) {
-		memcpy(tmp, ((char *)data + (i * width)), width);
-		memcpy(((char *)data + (i * width)), data, width);
-		memcpy(data, tmp, width);
-		buildHeap(data, i, width, compar, 0, 0);
-	}
-	free(tmp);
-}
-

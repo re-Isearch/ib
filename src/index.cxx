@@ -117,7 +117,7 @@ extern bool _is_globalUTF8;
 #include "dictionary.hxx"
 
 #include "filemap.hxx" /* NEW INDEX STRATEGY */
-#include "mergeunit.hxx" /* NEW INDEX STRATEGY */
+#include "merge.hxx"
 #include "stoplist.hxx"
 
 #include "error.hxx"
@@ -3354,6 +3354,73 @@ bool INDEX::CollapseIndexFiles()
   return true;
 }
 
+// Merge a fixed snapshot of completed numbered shards. New output is private
+// until both streams have closed successfully; numbered inputs remain available
+// to the existing live-search path throughout the merge.
+bool INDEX::ZipIndexFiles()
+{
+  const INT count = GetIndexNum();
+  if (count < 1) return true;
+  std::vector<MERGE::INPUT> inputs;
+  inputs.reserve(count);
+  for (INT i = 1; i <= count; ++i) {
+    const STRING suffix = STRING().form(".%d", i);
+    inputs.push_back({IndexFileName+suffix, SisFileName+suffix});
+  }
+  const STRING suffix = STRING().form(".1.%d", (int)getpid());
+  const MERGE::INPUT output = {IndexFileName+suffix, SisFileName+suffix};
+  MERGE zipper;
+  MERGE::STATS stats;
+  std::vector<STRING> common;
+  if (!zipper.Zip(inputs, output, IndexMagic, maxWordsCapacity,
+                  CommonWordsThreshold, &common, &stats)) {
+    Parent->SetErrorCode(2);
+    return false;
+  }
+  if (GetIndexNum() != count) {
+    message_log(LOG_ERROR, "Merge: shard count changed while merging; retaining original shards");
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  // RenameFile also accepts directory destinations. Index publication must
+  // replace these exact filenames, never move a temporary inside a directory.
+  if (DirectoryExists(IndexFileName) || DirectoryExists(SisFileName)) {
+    message_log(LOG_ERROR, "Merge: an output filename names a directory");
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  // Keep the existing numbered-shard publication protocol: readers switch to
+  // the unnumbered pair when the MDT count becomes zero. Never retire inputs
+  // following a failed write, close, rename, or metadata update.
+  if (RenameFile(output.index, IndexFileName) != 0) {
+    message_log(LOG_ERRNO, "Could not install '%s' as '%s'",
+                output.index.c_str(), IndexFileName.c_str());
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  if (RenameFile(output.sis, SisFileName) != 0) {
+    message_log(LOG_ERRNO, "Could not install '%s' as '%s'",
+                output.sis.c_str(), SisFileName.c_str());
+    UnlinkFile(output.sis);
+    return false;
+  }
+  if (!SetIndexNum(0)) return false;
+  IndexNum = 0;
+  if (CommonWords) CommonWords->Clear();
+  for (const auto& word : common) {
+    if (!CommonWords) CommonWords = new STRLIST();
+    CommonWords->AddEntry(word);
+  }
+  for (const auto& input : inputs) {
+    if (UnlinkFile(input.index) == -1) AddtoGarbageFileList(input.index);
+    if (UnlinkFile(input.sis) == -1) AddtoGarbageFileList(input.sis);
+  }
+  message_log(LOG_INFO, "Zipped %llu postings (%lu SIS keys) from %d shards in %lu pass(es).",
+              (unsigned long long)stats.postings, (unsigned long)stats.terms,
+              count, (unsigned long)stats.passes);
+  return true;
+}
+
 bool INDEX::MergeIndexFiles()
 {
   if ((IndexNum=GetIndexNum()) < 1)
@@ -3377,7 +3444,7 @@ bool INDEX::MergeIndexFiles()
       long uid = 0;
       // Get PID
       tmp[0] = '\0';
-      if (fscanf(fj, "%ld %ld %s\n", &pid, &uid, tmp) != 3)
+      if (fscanf(fj, "%ld %ld %255s\n", &pid, &uid, tmp) != 3)
         message_log (LOG_WARN, "Optimizer lockfile '%s' is corrupt!", lockName.c_str());
       fclose(fj);
       if (tmp[0] && strcasecmp(hostname, tmp) != 0 && strcmp(hostname, tmp) != 0)
@@ -3413,6 +3480,8 @@ bool INDEX::MergeIndexFiles()
                 Index might be corrupt.", ProcessOwner(uid).c_str(), pid );
 #endif
 
+          const STRING oldSuffix = STRING().form(".1.%ld", pid);
+          MERGE::RemoveTemporaries({IndexFileName+oldSuffix, SisFileName+oldSuffix});
           const INT y = GetIndexNum();
           for (INT i = 1; i <= y; i++)
             {
@@ -3432,26 +3501,25 @@ bool INDEX::MergeIndexFiles()
 #ifdef _WIN32
 # define getuid(_x) 0
 #endif
-      fprintf(fj, "%ld %ld %s\n", (long)getpid(), (long)getuid (), hostname);
-      fclose(fj);
+      const bool written = fprintf(fj, "%ld %ld %s\n", (long)getpid(), (long)getuid (), hostname) >= 0;
+      const bool closed = fclose(fj) == 0;
+      if (!written || !closed) {
+        message_log(LOG_ERRNO, "Can't write optimizer lock '%s'!", lockName.c_str());
+        UnlinkFile(lockName);
+        return false;
+      }
     }
   else
     {
       message_log(LOG_WARN|LOG_ERRNO, "Can't set optimizer lock '%s'!", lockName.c_str());
+      return false;
     }
 
-// message_log (LOG_INFO, "%d Sub-Indexes to Merge", IndexNum);
-  // Collapse down to 1...
-  do
-    {
-      if (CollapseIndexFiles() == false)
-        break;
-    }
-  while ((IndexNum=GetIndexNum()) > 1);
+  const bool merged = ZipIndexFiles();
 
   if (UnlinkFile(lockName) == -1) // Zap the lock!
     message_log (LOG_ERRNO, "Could not remove optimizer lock '%s'!", lockName.c_str());
-  return true;
+  return merged;
 }				// end function
 
 #if 0

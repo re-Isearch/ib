@@ -1,28 +1,30 @@
 /*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
+Copyright (c) 2020-26 Project re-Isearch and its contributors: See CONTRIBUTORS.
 It is made available and licensed under the Apache 2.0 license: see LICENSE
 */
-#include "strstack.hxx"
+#ifndef MERGE_HXX
+#define MERGE_HXX
 
+#include "defs.hxx"
+#include "string.hxx"
+#include <vector>
+
+// Buffered multiway zipper. All state belongs to this job; publication and
+// shard scheduling belong to INDEX. Intermediate runs are never published.
 class MERGE {
 public:
-	void AddChunk(PCHR MemoryData, INT MemoryDataLength,
-		GPTYPE *MemoryIndex, INT MemoryIndexLength,
-		GPTYPE GlobalStart);
-/*	void AppendChunk(MERGEFP mfp, INT MemoryDataLength,
-		GPTYPE *MemoryIndex, INT MemoryIndexLength,
-		GPTYPE GlobalStart);
-	void FinishRun(MERGEFP mfp);
-*/
+  struct INPUT { STRING index, sis; };
+  struct STATS {
+    GPTYPE postings = 0;
+    size_t terms = 0, passes = 0, comparisons = 0;
+  };
+  static constexpr size_t MaxFanIn = 64;
 
-private:
-	STRSTACK MergeFiles;
-	void hsort(void *data, size_t nel, size_t width,
-		int (*compar) (const void *, const void *));
-	void buildHeap(void *data, size_t nel, size_t width,
-		int (*compar) (const void *, const void * ), int position, int reverse=0);
-	void buildGpHeap(GPTYPE *data, size_t heapsize, 
-		int (*compar)(const void *, const void *), int position, int reverse);
-	void GpHsort(GPTYPE *data, size_t nel, int (*compar) (const void *, const void *));
-	void printint(int *data, int nel);
+  bool Zip(const std::vector<INPUT>& inputs, const INPUT& output, UINT2 magic,
+           unsigned long long capacity, long commonThreshold,
+           std::vector<STRING> *commonWords = nullptr, STATS *stats = nullptr);
+  // Called only after INDEX has established that an optimizer owner is dead.
+  static void RemoveTemporaries(const INPUT& output);
 };
+
+#endif
