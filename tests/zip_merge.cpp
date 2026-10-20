@@ -4,6 +4,7 @@
 #include "merge.hxx"
 #include "magic.hxx"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <csignal>
 #include <filesystem>
@@ -275,6 +276,80 @@ static void integration(bool invalid = false, bool renameFailure = false, bool l
             "input retirement follows successful publication");
   }
 }
+
+struct IngestDatabase : Database {
+  DFDT dfdt;
+  Rows expected;
+  std::vector<int> shardsAtFlush;
+  explicit IngestDatabase(const char *name) : Database(name) { }
+  size_t GetIndexingMemory() const override { return 32768; }
+  PDFDT GetMainDfdt() override { return &dfdt; }
+  STRING GetDbFileStem() const override { return stem; }
+  void SelectRegions(const RECORD& record, FCT *regions) const override {
+    regions->AddEntry(FC(0, record.GetRecordEnd()-record.GetRecordStart()));
+  }
+  GPTYPE ParseWords(const DOCTYPE_ID&, UCHR *text, GPTYPE length, GPTYPE start,
+                   GPTYPE *postings, GPTYPE capacity) override {
+    GPTYPE count = 0;
+    for (GPTYPE i = 0; i < length;) {
+      if (std::isspace(text[i])) { text[i++] = 0; continue; }
+      const GPTYPE first = i;
+      while (i < length && !std::isspace(text[i])) ++i;
+      require(count < capacity, "ingestion fixture posting capacity");
+      postings[count++] = start+first;
+      expected[std::string(reinterpret_cast<char *>(text+first), size_t(i-first))]
+        .push_back(mdt.GetNextGlobal()+first);
+    }
+    return count;
+  }
+  void IndexingStatus(t_IndexingStatus status, const STRING&, long = 0) override {
+    if (status == IndexingStatusFlushing) shardsAtFlush.push_back(mdt.GetIndexNum());
+  }
+};
+
+static void deferredIngestion(t_merge_status mode, bool lockFailure = false)
+{
+  IngestDatabase db(mode == iNothing ? "fast-ingest" :
+                    lockFailure ? "failed-zip-ingest" : "zip-ingest");
+  INDEX index(&db, db.stem+".inx");
+  index.SetMergeStatus(mode);
+  index.SetSisLimit(width);
+  require(SetGlobalCharset("UTF-8"), "set ingestion charset");
+  constexpr int records = 6;
+  const STRING queueName = db.stem+".queue";
+  FILE *queue = fopen(queueName, "w+b");
+  require(queue != nullptr, "create ingestion queue");
+  for (int i = 0; i < records; ++i) {
+    const STRING name = db.stem+STRING().form("-source-%d.txt",i);
+    std::string content = "common tail"+std::to_string(i)+" ";
+    content.resize(8192, ' '); // One record fits each small ingestion buffer.
+    std::ofstream source(name.c_str(), std::ios::binary);
+    source << content; source.close();
+    require(bool(source), "write ingestion source");
+    RECORD record(name);
+    record.SetDocumentType("TEXT");
+    record.SetRecordEnd(content.size()-1);
+    record.SetKey(STRING().form("record-%d",i));
+    putc('#', queue); record.Write(queue);
+  }
+  rewind(queue);
+  if (lockFailure) std::filesystem::create_directory((db.stem+".inx.lock").c_str());
+  const bool result = index.AddRecordList(queue);
+  fclose(queue);
+  require(result == !lockFailure, "final zipper failure reaches the indexing caller");
+  require(db.shardsAtFlush.size() == records, "force multiple ingestion flushes");
+  for (int i = 0; i < records; ++i)
+    require(db.shardsAtFlush[i] == i, "fast and zip modes retain earlier shards until completion");
+  require(db.mdt.GetIndexNum() == (mode == iZip && !lockFailure ? 0 : records),
+          "zip consolidates at completion; fast or failed zip retains shards");
+  if (lockFailure) return;
+  if (mode == iNothing) require(index.MergeIndexFiles(), "separately consolidate fast ingestion");
+  const UINT2 magic = UINT2(((sizeof(GPTYPE) == 4 ? 0 : 1) << 14) |
+                           ((IsBigEndian() ? objINDEXl : objINDEXm) << 5) |
+                           (index.Version()%100));
+  verify({db.stem+".inx",db.ComposeDbFn(DbExtDict)},db.expected,width,128,magic);
+}
+
 int main()
 {
   const auto previous = std::filesystem::current_path();
@@ -287,12 +362,13 @@ int main()
     zipper(10, 3); // SIS prefixes ending within UTF-8 sequences.
     failures(); largeAndLatin1(); bufferedWriteFailure();
     integration(); integration(true); integration(false,true); integration(false,false,true);
+    deferredIngestion(iNothing); deferredIngestion(iZip); deferredIngestion(iZip,true);
     for (const auto& item : std::filesystem::directory_iterator("."))
       require(item.path().filename().string().find(".zip.") == std::string::npos,
               "intermediate runs are cleaned");
     std::filesystem::current_path(previous);
     std::filesystem::remove_all(directory);
-    std::cout << "Buffered zipper: stable postings, UTF-8 prefixes, 130 shards, failure handling and INDEX publication passed\n";
+    std::cout << "Buffered zipper: stable postings, UTF-8 prefixes, 130 shards, publication, deferred ingestion and failure handling passed\n";
     return 0;
   } catch (const std::exception& error) {
     std::filesystem::current_path(previous);

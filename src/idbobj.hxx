@@ -31,7 +31,15 @@ class  QUERY;
 class  NUMERICOBJ;
 
 
-typedef enum MergeStatus { iNothing = 0, iOptimize, iMerge, iCollapse, iIncremental } t_merge_status;
+typedef enum MergeStatus {
+  iNothing = 0, iOptimize, iMerge, iCollapse, iIncremental,
+  iZip // Fast ingestion, then zip all shards at completion.
+} t_merge_status;
+
+inline bool IsFastIndexingMode(t_merge_status status)
+{
+  return status == iNothing || status == iZip;
+}
 
 class atomicIRSET;
 class METADATA;

@@ -900,6 +900,11 @@ limitations under the License.  " << endl;
 	      Merge = iNothing;
 	      LastUsed = x;
 	    }
+	  else if (Flag.Equals ("-zip"))
+	    {
+	      Merge = iZip;
+	      LastUsed = x;
+	    }
 	  else if (Flag.Equals ("-O"))
 	    {
 	      Merge = iOptimize;
@@ -1554,10 +1559,13 @@ Using '%s' as default.", browser);
   time_t start_seconds    = time(NULL);
   clock_t start_time      = clock();
 
-  if (!pdb->Index ())
+  const bool indexingSucceeded = pdb->Index ();
+  if (!indexingSucceeded)
     {
       if (pdb->GetErrorCode())
-      message_log (LOG_NOTICE, "Indexing error encountered: %s", pdb->ErrorMessage());
+        message_log (LOG_NOTICE, "Indexing error encountered: %s", pdb->ErrorMessage());
+      else
+        message_log (LOG_ERROR, "Indexing did not complete successfully.");
     }
   clock_t final_time      = clock();
   time_t  final_seconds   = time(NULL);
@@ -1625,7 +1633,7 @@ Using '%s' as default.", browser);
 
 #if SHOW_RUSAGE
 
-  if (quiet) return 0;
+  if (quiet) return indexingSucceeded ? 0 : 1;
 
   struct rusage rusage;
   int    ru = RUSAGE_SELF;
@@ -1699,7 +1707,7 @@ rusage:
 //  WSACleanup();
 #endif
 
-  return 0;
+  return indexingSucceeded ? 0 : 1;
 }
 
 
@@ -1873,6 +1881,7 @@ static void Usage()
   << " -O                 // Optimize in max. RAM. (-optimize -mem -1)" << endl
   << " -Z                 // Optimize in max. RAM but minimize disk (-merge -mem -1)" << endl
   << " -fast              // Fast Index (No Merging)." << endl
+  << " -zip               // Fast Index, then zip all sub-indexes once at the end." << endl
   << " -optimize          // Merge sub-indexes (Optimize)" << endl
   << " -merge             // Merge sub-indexes during indexing" << endl
   << " -collapse          // Collapse last two database indexes." << endl

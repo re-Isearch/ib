@@ -43,10 +43,24 @@ This reuses the current optimizer locking and numbered-to-unnumbered handoff.
 It does not add a background scheduler or a new concurrent-writer protocol.
 
 * `-fast` continues to publish separate runs.
+* `-zip` uses fast ingestion, publishing separate runs while indexing and
+  consolidating them with the zipper once at completion. It selects `iZip`,
+  including the same fast metadata/hash setup as `-fast`.
 * `-optimize` and `-append` use the zipper for full consolidation.
 * `-merge` still invokes full consolidation after each indexing flush. Batching
   similar-sized runs is a separate scheduling improvement.
 * `-collapse` and the current `-incr` policy continue to use two-shard collapse.
+
+For example:
+
+```sh
+Iindex -d WIKI_ALL -dt CIRRUSNDJSON -zip *.json
+Iindex -d WIKI_ALL -dt CIRRUSNDJSON -a -zip more.json
+```
+
+As with the other merge options, the last mode option wins; put `-zip` after
+`-a` when appending. A failed final zipper makes the indexing operation fail
+with a nonzero indexer exit status and retains its input shards for retry.
 
 ## Verification
 
@@ -60,4 +74,6 @@ ctest --test-dir build -R '(zip_merge|utf8_sis)' --output-on-failure
 lengths exceeding prefix windows, UTF-8 prefixes, single-byte charsets, empty
 runs, 130 shards, bounded fan-in, malformed inputs, capacity limits, temporary
 cleanup, optimizer error propagation, publication and an already-open reader.
+It also checks real multi-flush ingestion in fast and zip modes, final
+consolidation, and propagation of a final optimizer failure to the caller.
 `utf8_sis` retains coverage of the existing two-shard collapse path.

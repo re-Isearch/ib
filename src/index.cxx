@@ -2887,7 +2887,7 @@ memory_allocation: // This is where we try to get memory
   if (DebugMode) message_log (LOG_INFO, "Sort numeric field data...");
   SortNumericFieldData();
 
-  // now, do our *experimental* merge
+  // Consolidate according to the selected end-of-ingestion policy.
   if ((IndexNum = GetIndexNum()) == 1)
     {
       STRING s;
@@ -2911,8 +2911,11 @@ memory_allocation: // This is where we try to get memory
           message_log (LOG_ERRNO, "Could not move %s to %s", s.c_str(), IndexFileName.c_str());
         }
     }
-  else if (MergeStatus==iOptimize)
-    MergeIndexFiles();
+  else if (MergeStatus==iOptimize || MergeStatus==iZip)
+    {
+      if (!MergeIndexFiles())
+        ++Error;
+    }
   else if (MergeStatus==iCollapse || (MergeStatus==iIncremental && IndexNum > 2))
     CollapseIndexFiles();
   else if (IndexNum > 0 && Exists(IndexFileName))
@@ -3615,7 +3618,7 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
         tries++;
       }
     while (Exists(TmpIndexFileName));
-    message_log ((tries > 2 && MergeStatus) ? LOG_WARN : LOG_DEBUG,
+    message_log ((tries > 2 && !IsFastIndexingMode(MergeStatus)) ? LOG_WARN : LOG_DEBUG,
           "%d indexer slots were occupied on '%s'.%s", IndexNum, IndexFileName.c_str(),
           IndexNum > 2 ? " Unmerged or other indexer running?" : "");
   }
@@ -9186,7 +9189,7 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
   message_log (LOG_DEBUG, "Set %d sub-indexes", count);
   if (errors)
     message_log (LOG_FATAL, "ImportIndex: %d errors encounted.", errors);
-  else if (count == 2 || MergeStatus==iMerge || MergeStatus==iOptimize)
+  else if (count == 2 || MergeStatus==iMerge || MergeStatus==iOptimize || MergeStatus==iZip)
     MergeIndexFiles();
 #endif
 

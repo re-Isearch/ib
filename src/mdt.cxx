@@ -460,7 +460,7 @@ MDT::MDT (INDEX *Index)
       // Do we use an Index Map??
       useIndexMap    = Index-> ProfileGetString(MdtInfo, "UseIndexMap", def).GetBool();
 #if USE_MDTHASHTABLE
-      fastAdd        = Index->GetMergeStatus() == iNothing;
+      fastAdd        = IsFastIndexingMode(Index->GetMergeStatus());
 #endif
       useMdtMap      = Index-> ProfileGetString(MdtInfo, "UseMdtMap", def).GetBool();
       MdtWrongEndian = Index->IsWrongEndian();
