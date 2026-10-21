@@ -22,10 +22,24 @@ at the prefix limit. SIS writing pads short strings rather than reading
 beyond their allocation. Single-byte charset comparisons retain their
 existing tables.
 
+`INDEX::Dump()` reconstructs a folded comparison key separately from its
+original-case display text. It uses each SIS header's charset and byte prefix
+width, folds complete source characters before comparing that prefix, and
+checks both term order and posting order within an equal key. Display text
+ends on a complete UTF-8 character; the caller's charset is restored afterward.
+
+Source buffer cleaning and `GetIndirectTerm()` walk whole UTF-8 sequences,
+including silent normalization bytes and contextual dot-in-word characters.
+Disabling lowercasing still requires Unicode-aware classification. Invalid or
+incomplete sequences at a byte limit end the recovered term. Indirect reads
+include the final byte of the record's inclusive range.
+
 The `utf8_sis` CTest regression (`IB_BUILD_SCORING_TESTS=ON`) covers charset
 dispatch, ASCII/Unicode ordering, exact and prefix lookups, byte limits,
 merge-key preparation and real three-partition SIS/posting collapse. It also
-checks windows splitting two-, three- and four-byte sequences.
+checks windows splitting two-, three- and four-byte sequences, real source
+recovery through prefix scans, original-case dump output, record-end boundaries,
+case variants, Unicode separators, malformed ordering and single-byte charsets.
 
 Reindex from source if an older collapse has already reordered or combined
 UTF-8 term buckets incorrectly. Updating the comparator cannot reconstruct

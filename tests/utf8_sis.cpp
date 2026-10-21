@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -126,14 +128,15 @@ struct Database : IDBOBJ {
 
 using Rows = std::map<std::string, std::vector<GPTYPE>>;
 
-static void partition(INDEX& index, Database& db, int number, size_t width, const Rows& rows)
+static void partition(INDEX& index, Database& db, int number, size_t width, const Rows& rows,
+                      BYTE charset = 128)
 {
   const STRING suffix = STRING().form(".%d", number);
   FILE *sis = fopen(db.ComposeDbFn(DbExtDict)+suffix, "wb");
   FILE *inx = fopen(db.stem+".inx"+suffix, "wb");
   require(sis && inx, "create partition files");
   putINT2(0, inx);
-  putc(int(width), sis); putc(Charset2Id("UTF-8"), sis);
+  putc(int(width), sis); putc(charset, sis);
   GPTYPE total = 0;
   for (const auto& row : rows) {
     require(row.first.size() <= width, "fixture keys fit their SIS window");
@@ -230,6 +233,115 @@ static void differing_widths()
           !std::filesystem::exists("widths.inx"), "rejected collapse retains its source partitions");
 }
 
+struct SourceIndex {
+  Database db;
+  INDEX index;
+  Rows rows;
+  std::map<std::string, size_t> terms;
+  size_t width, records = 0;
+  SourceIndex(const char *name, size_t prefix) : db(name), index(&db,db.stem+".inx"), width(prefix) { }
+  void add(const std::string& source, const std::string& term, const std::string& afterRecord = {}) {
+    const STRING name = db.stem+STRING().form("-%u.txt",unsigned(++records));
+    std::ofstream file(name.c_str(),std::ios::binary);
+    file << source << afterRecord; file.close();
+    require(bool(file), "write indirect source fixture");
+    const GPTYPE gp = db.mdt.GetNextGlobal();
+    MDTREC record(&db.mdt);
+    record.SetKey(STRING().form("source-%u",unsigned(records)));
+    record.SetFullFileName(name);
+    record.SetGlobalFileStart(gp);
+    require(record.SetLocalRecordRange(0,source.size()-1), "bound indirect source fixture");
+    require(db.mdt.AddEntry(record) != 0, "add source metadata");
+    rows[term.substr(0,width)].push_back(gp);
+    ++terms[term];
+  }
+  void publish(BYTE charset = 128) {
+    partition(index,db,1,width,rows,charset);
+    require(db.mdt.SetIndexNum(1), "publish source dictionary and postings");
+  }
+};
+
+static void indirect_and_dump()
+{
+  SetGlobalCharset("UTF-8");
+  SourceIndex fixture("source-utf8",3);
+  fixture.add("abCAR","abcar"); // Same SIS prefix, descending full term order is valid.
+  fixture.add(u8"abCAFÉ\u00a0ignored",u8"abcafé");
+  fixture.add(u8"abcafé",u8"abcafé","outside-the-record");
+  fixture.add(u8"abE\u0301COLE",std::string("abe\1\1cole"));
+  fixture.add(u8"abfoo.école",u8"abfoo.école");
+  fixture.add(u8"abTAIL\u00d7ignored","abtail");
+  fixture.add(u8"abЖИЗНЬ",u8"abжизнь");
+  fixture.add(u8"ab中文",u8"ab中文");
+  fixture.add(u8"ab\U0001E900",u8"ab\U0001E922"); // Four-byte case mapping at record end.
+  fixture.add(std::string("abcut\xc3"),"abcut");
+  fixture.add(std::string("abcut\xe4\xb8"),"abcut");
+  fixture.add(std::string("abcut\xf0\x90\x90"),"abcut");
+  fixture.publish();
+  fixture.index.SetSisLimit(12); // Dump must use the dictionary's actual width (3).
+  require(SetGlobalCharset("ISO-8859-1"), "start dump with a different global charset");
+  std::ostringstream dump;
+  require(fixture.index.Dump(0,dump,false) == 0, "valid UTF-8 source postings pass Dump");
+  require(GetGlobalCharset() == Charset2Id("ISO-8859-1"), "Dump restores its caller's charset");
+  for (const auto& text : {u8"abCAFÉ",u8"abЖИЗНЬ",u8"ab中文",u8"ab\U0001E900",u8"abE\u0301COLE"})
+    require(dump.str().find(text) != std::string::npos, "Dump preserves complete original UTF-8 display text");
+  require(dump.str().find("ignored") == std::string::npos, "Unicode separators terminate displayed terms");
+  require(dump.str().find("outside-the-record") == std::string::npos, "indirect reads stop at inclusive record end");
+
+  SetGlobalCharset("UTF-8");
+  SCANLIST list;
+  require(fixture.index.Scan(&list,NulString,STRING("ab"),-1) == fixture.terms.size(),
+          "prefix scan expands every truncated UTF-8 SIS key");
+  std::map<std::string,size_t> actual;
+  for (const auto *p = list.GetPtratomicSCANLIST()->Next(); p != list.GetPtratomicSCANLIST(); p = p->Next())
+    actual[p->Term().toStdString()] += p->Frequency();
+  require(actual == fixture.terms, "indirect terms retain whole folded UTF-8, separators and frequencies");
+
+  SourceIndex boundary("source-boundary",StringCompLength);
+  const std::string prefix(StringCompLength-1,'a');
+  boundary.add(prefix+u8"Ёfirst",prefix+u8"ёfirst");
+  boundary.add(prefix+u8"ёsecond",prefix+u8"ёsecond");
+  boundary.publish();
+  std::ostringstream bounded;
+  require(boundary.index.Dump(0,bounded,false) == 0,
+          "Dump folds complete characters before comparing a prefix split inside UTF-8");
+  const std::string shown = bounded.str();
+  for (size_t offset = 0; offset < shown.size();) {
+    uint32_t cp;
+    const int length = _to_ucs4(bytes(shown)+offset,bytes(shown)+shown.size(),&cp);
+    require(length > 0, "Dump never emits a partial UTF-8 display character");
+    offset += size_t(length);
+  }
+
+  SourceIndex lexical("source-order",20);
+  lexical.add(u8"êcole","a"); lexical.add(u8"école","b"); // Deliberately misordered posting buckets.
+  lexical.publish();
+  std::ostringstream errors;
+  require(lexical.index.Dump(0,errors,true) == 1 && errors.str().find("term order") != std::string::npos,
+          "Dump detects Unicode ordering errors beyond the first byte");
+
+  SourceIndex postings("source-postings",20);
+  postings.add(u8"ÉCOLE",u8"école"); postings.add(u8"école",u8"école");
+  auto& bucket = postings.rows.begin()->second;
+  std::reverse(bucket.begin(),bucket.end());
+  postings.publish();
+  std::ostringstream gpErrors;
+  require(postings.index.Dump(0,gpErrors,true) == 1 && gpErrors.str().find("posting order") != std::string::npos,
+          "Dump detects reversed postings across Unicode case variants");
+
+  require(SetGlobalCharset("ISO-8859-1"), "select single-byte source charset");
+  SourceIndex latin("source-latin1",3);
+  latin.add(std::string("abCAF\xc9"),std::string("abcaf\xe9"));
+  latin.publish(Charset2Id("ISO-8859-1"));
+  std::ostringstream singleByte;
+  require(latin.index.Dump(0,singleByte,false) == 0 && singleByte.str().find("abCAF\xc9") != std::string::npos,
+          "Dump retains single-byte case and classification rules");
+  SCANLIST latinList;
+  require(latin.index.Scan(&latinList,NulString,STRING("ab"),-1) == 1 &&
+          latinList.GetEntry(1).Term() == STRING("abcaf\xe9"), "single-byte indirect term folding is unchanged");
+  SetGlobalCharset("UTF-8");
+}
+
 int main()
 {
   try {
@@ -237,9 +349,10 @@ int main()
     Scratch scratch;
     writer();
     differing_widths();
+    indirect_and_dump();
     collapse(32, "whole");
     collapse(3, "prefix"); // splits 2/3/4-byte sequences without reading GP bytes
-    std::cout << "UTF-8 SIS ordering, byte limits, callbacks, term preparation and real three-partition collapse passed\n";
+    std::cout << "UTF-8 SIS ordering, byte limits, callbacks, source recovery, Dump checks and real three-partition collapse passed\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

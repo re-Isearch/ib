@@ -109,6 +109,7 @@ extern bool _is_globalUTF8;
 #include "doctype.hxx"
 #include <assert.h>
 #include <algorithm>
+#include <vector>
 #include "lock.hxx"
 //#include "dfdt.hxx"
 #include <iomanip>
@@ -259,25 +260,45 @@ static char * __priv_bsearch(const void *key,  const void *base0, size_t nmemb, 
 
 
 
-static inline size_t TermExtract(UCHR *Buffer, size_t Length=StringCompLength)
-{
-  size_t len = Length;
-  for (size_t z = 0; z< len; z++)
-    {
-      if (!IsTermChr(Buffer+z))
-        len = z;
-      else if (_ib_isupper(Buffer[z]))
-        Buffer[z] = _ib_tolower(Buffer[z]);
-    }
-  Buffer[len] = '\0';
-  return len;
-}
-
-
 // Zap all non acceptable characters
 static inline size_t BufferClean(UCHR *Buffer, size_t Length=StringCompLength,
                                  bool ToLower = false)
 {
+  if (!Length) return 0;
+  if (_is_globalUTF8)
+    {
+      // Classify the same folded/cleaned bytes as the tokenizer. Keep a copy
+      // when the caller wants the original display case.
+      std::vector<UCHR> folded;
+      if (!ToLower) folded.assign(Buffer, Buffer+Length);
+      UCHR *clean = ToLower ? Buffer : folded.data();
+      const UCHR *end = clean+Length;
+      for (size_t z = 0; z < Length;)
+        {
+          uint32_t cp;
+          const int bytes = _to_ucs4(clean+z, end, &cp);
+          if (bytes > 0) z += size_t(bytes);
+          else clean[z++] = ' '; // Invalid or incomplete sequence at the limit.
+        }
+      _utf_StrToLowerBuf(clean, unsigned(Length), true, ' ');
+      _ib_ZapNonTermASCII(clean, unsigned(Length), ' ');
+
+      size_t len = Length;
+      for (size_t z = 0; z < Length;)
+        {
+          // Walk whole terms/codepoints, including silent normalization bytes
+          // and dot-in-word lookahead. Never classify a continuation byte.
+          const size_t termBytes = _ib_UTF8TermLength(clean+z, Length-z);
+          if (termBytes) { z += termBytes; continue; }
+          uint32_t cp;
+          const int bytes = _to_ucs4(clean+z, end, &cp);
+          const size_t span = bytes > 0 ? size_t(bytes) : 1;
+          if (len == Length) len = z;
+          memset(Buffer+z, ' ', span);
+          z += span;
+        }
+      return len;
+    }
   size_t len = Length;
   for (size_t z = 0; z<Length; z++)
     {
@@ -293,8 +314,12 @@ static inline size_t BufferClean(UCHR *Buffer, size_t Length=StringCompLength,
   return len;
 }
 
-
-#if 1
+static inline size_t TermExtract(UCHR *Buffer, size_t Length=StringCompLength)
+{
+  const size_t len = BufferClean(Buffer, Length, true);
+  Buffer[len] = '\0';
+  return len;
+}
 
 static inline STRING TermClean(const STRING String, bool ToLower = false)
 {
@@ -302,40 +327,13 @@ static inline STRING TermClean(const STRING String, bool ToLower = false)
     UCHR *Buffer = String.NewUCString();
     const size_t len = String.GetLength();
 
-    if (_is_globalUTF8 && ToLower)
-      {
-        _utf_StrToLowerBuf(Buffer,
-                           (unsigned)len,
-                           true,
-                           (UCHR)' ');
-
-        _ib_ZapNonTermASCII(Buffer,
-                            (unsigned)len,
-                            (UCHR)' ');
-      }
-    else
-      {
-        BufferClean(Buffer, len, ToLower);
-      }
+    BufferClean(Buffer, len, ToLower);
 
     Result = Buffer;
     delete[] Buffer;
 
     return Result;
 }
-
-#else
-static inline STRING TermClean(const STRING String, bool ToLower = false)
-{
-  STRING Result;
-  UCHR *Buffer = String.NewUCString();
-  BufferClean(Buffer, String.GetLength(), ToLower);
-  Result = Buffer;
-  delete[] Buffer;
-  return Result;
-}
-#endif
-
 
 INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSize)
 {
@@ -4854,6 +4852,9 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
 //
 INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) const
 {
+    if (!Dest) return -1;
+    Dest[0] = '\0';
+    if (Length <= 0) return 0;
     MDTREC Mdtrec;
     UCHR  *Buffer = Dest;
 
@@ -4884,14 +4885,12 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
             Offset -= diff;
             diff = 0;
           }
-        if (diff >= 0)
+        if (diff >= 0 && Offset >= 0 && GPTYPE(Offset) <= Mdtrec.GetLocalRecordEnd())
           {
-            // Get Length Right
-            if ((GPTYPE)(Length + Offset) > Mdtrec.GetLocalRecordEnd())
-              {
-                // Don't cross End-of-Record boundary
-                Length =  Mdtrec.GetLocalRecordEnd() - Offset;
-              }
+            // Record endpoints are inclusive. Keep the final byte, including
+            // the last continuation byte of a UTF-8 character at record end.
+            const GPTYPE available = Mdtrec.GetLocalRecordEnd() - GPTYPE(Offset) + 1;
+            if (GPTYPE(Length) > available) Length = INT(available);
 
             DOCTYPE     *DoctypePtr = Parent->GetDocTypePtr ( Mdtrec.GetDocumentType() );
             const STRING filename (  Parent->ResolvePathname(Mdtrec.GetFullFileName()) );
@@ -4915,6 +4914,7 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
           }
 //        if (DebugMode)
           message_log(LOG_DEBUG, "*::GetTerm() returned %d of max. %d characters", x, Length);
+        if (x < 0) { Buffer[0] = '\0'; return x; }
         Buffer[x] = '\000';
         return (INT)x;
       }
@@ -4929,11 +4929,18 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
 
 INT INDEX::GetIndirectTerm(const GPTYPE Gp, PUCHR Buffer, INT MaxLength) const
   {
+    if (MaxLength <= 0)
+      {
+        if (Buffer) Buffer[0] = '\0';
+        return 0;
+      }
+    std::vector<UCHR> storage;
     if (Buffer == NULL)
       {
         try
           {
-            Buffer = new UCHR[MaxLength+1];
+            storage.resize(size_t(MaxLength)+1);
+            Buffer = storage.data();
           }
         catch (...)
           {
@@ -7685,6 +7692,10 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
   long errors = 0;
   bool haveDeleted = (Parent->GetTotalDocumentsDeleted() > 0);
   long notFound = 0;
+  struct CharsetScope {
+    BYTE previous = GetGlobalCharset();
+    ~CharsetScope() { SetGlobalCharset(previous); }
+  } charsetScope;
 
   for (INT jj = 1; (jj <= NumberOfIndexes) || (NumberOfIndexes == 0); jj++)
     {
@@ -7706,6 +7717,22 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
               os << "( \"" << S << "\" no index)" << endl;
               continue;
             }
+        }
+
+      // Compare the stored prefix, whose byte limit may split a character.
+      // Fold complete source characters before applying that limit.
+      size_t compareLength = SisLimit;
+      S = SisFileName;
+      if (NumberOfIndexes > 0) S += STRING().form(".%d", jj);
+      if (FILE *sis = fopen(S, "rb"))
+        {
+          const int width = getc(sis), charset = getc(sis);
+          if (width > 0 && width <= int(StringCompLength) && charset != EOF)
+            {
+              compareLength = size_t(width);
+              SetGlobalCharset(BYTE(charset));
+            }
+          fclose(sis);
         }
 
 //  const int Cutoff = GetFileSize(fpi) /20;
@@ -7735,39 +7762,53 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
       Term[0] = '\0';
       OldWord[0] = '\0';
       Buffer[StringCompLength] = '\0';
+      bool havePrevious = false;
 
-      gp = GpFread(Skip, fpi);
-      do
+      for (gp = GpFread(Skip, fpi); gp != GPTYPE(-1); gp = GpFread(fpi))
         {
           int poff = 0;
+          bool orderError = false;
+          const char *reason = "term order";
 	  if (!OnlyErrors)
 	    os << "0x" << setw( sizeof(GPTYPE) /* was 6  */) << setfill('0') << hex << gp << ' ' << dec<< setfill(' ');
-          if ((x = GetIndirectBuffer (gp, Buffer)) > 0)
+          if ((x = GetIndirectBuffer (gp, Buffer, 0, StringCompLength+4)) > 0)
             {
-              if (x > (int)StringCompLength)
-                x = StringCompLength;
-              INT j = BufferClean(Buffer, x, false);
-              if (x < (int)StringCompLength)
-                memset(&Buffer[x], ' ', StringCompLength-x);
-              memcpy (Term, Buffer, StringCompLength);
-              Buffer[j] = '\0';
-              x = j;
-
-              if (StrCaseCmp(Buffer, OldWord) == 0)
+              memcpy(Term, Buffer, x);
+              const size_t termLength = BufferClean(Term, x, true);
+              Term[termLength] = '\0';
+              const size_t displayLength = BufferClean(Buffer, x, false);
+              size_t shown = std::min(displayLength, StringCompLength);
+              if (_is_globalUTF8)
                 {
-                  if (gp < old_gp) // Bad GP sort!
+                  size_t complete = 0;
+                  while (complete < shown)
                     {
-		      if (OnlyErrors)
-			os << "0x" << setw( sizeof(GPTYPE) /* was     6  */  ) << setfill('0') << hex << gp << ' ' << dec<< setfill(' ');
-                      os << "(*)";
-                      poff = 3;
+                      uint32_t cp;
+                      const int bytes = _to_ucs4(Buffer+complete, Buffer+displayLength, &cp);
+                      if (bytes <= 0 || size_t(bytes) > shown-complete) break;
+                      complete += size_t(bytes);
                     }
-                  old_gp = gp;
+                  shown = complete;
                 }
-              else
+              Buffer[shown] = '\0';
+
+              const int order = havePrevious ? _ib_SisCompare(OldWord, Term, compareLength) : 0;
+              orderError = !termLength || order > 0 || (havePrevious && order == 0 && gp < old_gp);
+              if (!termLength) reason = "empty term";
+              else if (order == 0) reason = "posting order";
+              if (orderError)
                 {
-                  strcpy((char *)OldWord, (const char *)Buffer);
-                  old_gp = 0;
+                  ++errors;
+                  if (OnlyErrors)
+                    os << "0x" << setw(sizeof(GPTYPE)) << setfill('0') << hex << gp << ' ' << dec << setfill(' ');
+                  os << "(*)";
+                  poff = 3;
+                }
+              if (termLength)
+                {
+                  memcpy(OldWord, Term, termLength+1);
+                  old_gp = gp;
+                  havePrevious = true;
                 }
             }
           else if (x < 0)
@@ -7797,22 +7838,13 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 		{
 		  if (!OnlyErrors) os << " <deleted>";
 		}
-	      else if (_ib_tolower(Term[0]) - _ib_tolower(Buffer[0]) > 0)
+	      else if (orderError)
 		{
 		  const off_t pos = gp - mdtrec.GetGlobalFileStart () - (off_t)mdtrec.GetLocalRecordStart();
-		  os << " <ERROR Type=\"broken entry\"";
-#if 1
-		  Buffer[x] = ' ';
-		  Buffer[StringCompLength] = '\0';
-#else
-		  GetIndirectBuffer (gp, Buffer);
-#endif
+		  os << " <ERROR Type=\"broken entry\" Reason=\"" << reason << "\"";
 		  os << " File=\"" << mdtrec.GetFileName() << "\" Pos=\"" << pos << "\"  Content=\"" << (char *)Buffer << "\"/>";
-//cerr << "ERR: x=" << x << " " << mdtrec.GetFileName() << "(" << pos << "): \"" << (char *)Buffer << "\"" << endl;
-		  errors++;
-
 		}
-	       if (!OnlyErrors) os << endl;
+	       if (!OnlyErrors || orderError) os << endl;
 	     }
 	  else
 	    {
@@ -7821,7 +7853,6 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 	      notFound++;
 	    }
 	}
-      while (!feof(fpi) && (gp = GpFread(fpi)) != (GPTYPE)-1);
       ffclose (fpi);
     }
   if (notFound)
