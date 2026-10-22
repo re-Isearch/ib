@@ -38,6 +38,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include <algorithm>
+#include <limits>
 #include "common.hxx"
 #include "doctype.hxx"
 #include "sgmlnorm.hxx"
@@ -191,83 +193,93 @@ INT SGMLNORM::GetRecordData(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) 
 }
 
 
-// Used by GetIndirect Buffer.. Need to read more!!
+// Recover the same entity-normalized bytes used to assign posting GPs.
 INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length)
 {
-  int segment = 10;
-  if (Offset > segment)
-    Offset -= segment;
-  else
-    segment = 0;
-  size_t        want = Length*5 + 12 + segment; // Should be enough
-  char         *tmp = (char *)tmpBuffer2.Want(want+1);
-
-// message_log (LOG_INFO, "DEBUG SGMLNORM::GetTerm called %s offset=%d len=%d", Filename.c_str(), Offset, Length);
-
-  if (tmp == NULL)
+  if (!Buffer) return 0;
+  Buffer[0] = '\0';
+  if (Offset < 0 || !Length) return 0;
+  FILE *fp = ffopen(Filename, "rb");
+  if (!fp)
     {
-      message_log (LOG_PANIC|LOG_ERRNO, "%s GetTerm buffer exhausted, wanted %d bytes", Doctype.c_str(), want);
-      Buffer[0] = '\0';
+      message_log (LOG_ERROR, "Failed to open \"%s\"", Filename.c_str());
       return 0;
     }
-  size_t        count = 0;
-  FILE         *fp = ffopen(Filename, "rb");
-  if (fp)
+
+  // Entity contraction defers padding until the next word boundary. A GP
+  // can therefore land inside the original entity spelling: &amp;c. is
+  // indexed as c at the source byte 'a'. Normalize from a preceding safe
+  // boundary, then apply the GP offset. A fixed lookbehind is insufficient
+  // for a run of entities such as &amp;&amp;...word.
+  off_t begin = Offset;
+  char context[65];
+  bool boundary = false;
+  while (begin > 0 && !boundary)
     {
-// message_log (LOG_INFO, "DEBUG SGMLNORM::call DOCTYPE::ReadFile with %s FILE * =%ld", Filename.c_str(), (long)fp);
+      const size_t span = size_t(std::min<off_t>(begin, sizeof(context)-1));
+      const off_t from = begin - span;
+      if (DOCTYPE::ReadFile(fp, context, from, span) != INT(span))
+        {
+          ffclose(fp);
+          return 0;
+        }
+      for (size_t i = span; i > 0;)
+        {
+          const unsigned char ch = context[--i];
+          if ((ch < 0x80 && isspace(ch)) || ch == '<' || ch == '>' || ch == '"' || ch == '\'')
+            {
+              begin = from + i + 1;
+              boundary = true;
+              break;
+            }
+        }
+      if (!boundary) begin = from;
+    }
 
-      count = DOCTYPE::ReadFile(fp, tmp, Offset, want);
-
-// message_log (LOG_INFO, "DEBUG SGMLNORM::GetTerm ReadFile returned %d", count); 
-
+  // An entity contains at most ten name bytes plus '&' and ';'. Include
+  // enough raw text for the normalized prefix, Length decoded bytes and
+  // an entity at the limit, including contractions before the posting GP.
+  const size_t maxRead = std::numeric_limits<INT>::max();
+  const size_t maxDecoded = (maxRead-12)/12;
+  if (Offset-begin > off_t(maxDecoded))
+    {
       ffclose(fp);
+      return 0;
     }
-  else message_log (LOG_ERROR, "Failed to open \"%s\"", Filename.c_str());
-  if (count)
+  const size_t segment = size_t(Offset-begin);
+  if (Length > maxDecoded-segment)
     {
-      if (segment)
-	{
-	  if (tmp[segment] == ';')
-	    {
-	      while (--segment > 0)
-		{
-		  if (tmp[segment] == '&')
-		    {
-		      if (segment) segment--;
-		      break;
-		    }
-		}
-	    }
-	  count -= segment;
-	  tmp += segment;
-	}
-
-      Entities.normalize2(tmp, count);
-
-      size_t i = 0;
-      size_t j = 0;
-      for (;j < count && tmp[j] == ' '; j++)
-	/* loop */;
-      while (i < Length && j < count)
-	{
-	  if ((Buffer[i++] = tmp[j]) == ' ')
-	    while (tmp[++j] == ' ');
-	  else
-	    j++;
-	}
-      Buffer[count = i] = '\0';
+      ffclose(fp);
+      return 0;
     }
-  else
-    Buffer[0] = '\0';
+  const size_t want = (segment+Length)*12 + 12;
+  char *tmp = (char *)tmpBuffer2.Want(want+1);
+  if (!tmp)
+    {
+      ffclose(fp);
+      message_log (LOG_PANIC|LOG_ERRNO, "%s GetTerm buffer exhausted, wanted %lu bytes",
+                   Doctype.c_str(), (unsigned long)want);
+      return 0;
+    }
+  const INT read = DOCTYPE::ReadFile(fp, tmp, begin, want);
+  ffclose(fp);
+  if (read <= 0 || size_t(read) <= segment) return 0;
 
-  if (count > Length)
-    message_log (LOG_PANIC, "%s::GetTerm: read too much", Doctype.c_str());
-
-//cerr << "Got " << Buffer << endl;
-//cerr << "Length = " << Length << endl;
-//cerr << "count = " << count << endl;
-
-  return count;
+  // Match ingestion's padding policy. Presentation normalization can move
+  // the decoded characters to different byte offsets.
+  Entities.normalize(tmp, size_t(read));
+  tmp += segment;
+  const size_t count = size_t(read)-segment;
+  size_t i = 0, j = 0;
+  while (j < count && tmp[j] == ' ') ++j;
+  while (i < Length && j < count)
+    {
+      Buffer[i++] = tmp[j++];
+      if (Buffer[i-1] == ' ')
+        while (j < count && tmp[j] == ' ') ++j;
+    }
+  Buffer[i] = '\0';
+  return INT(i);
 }
 
 GPTYPE SGMLNORM::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
