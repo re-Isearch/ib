@@ -22,13 +22,22 @@ at the prefix limit. SIS writing pads short strings rather than reading
 beyond their allocation. Single-byte charset comparisons retain their
 existing tables.
 
-`INDEX::Dump()` reconstructs a folded comparison key separately from its
-original-case display text. It uses each SIS header's charset and byte prefix
-width, folds complete source characters before comparing that prefix, and
-checks both term order and posting order within an equal full sort key.
-Different words sharing a truncated SIS prefix can restart their posting GPs.
-Display text ends on a complete UTF-8 character; the caller's charset is
-restored afterward.
+`INDEX::Dump()` validates the stored SIS keys, their ordering, and their
+inclusive posting endpoints alongside the INX stream. Each posting's folded
+source prefix must match its recorded key bytes. Stored lengths preserve
+boundaries imposed by ingestion and selected regions: a complete stored key
+`0` remains `0` even if broader source cleanup recovers `0—x` or `0more`.
+Comparing reconstructed full source tokens had falsely blamed later valid
+numeric postings for ordering errors, independently of the document format.
+
+Posting GP order is checked within complete stored keys. Truncated buckets
+can contain several full words with separate GP ranges. Original-case display
+text uses the stored length for complete keys and ends on a complete UTF-8
+character. The caller's charset is restored afterward. Errors include the
+stored and preceding SIS keys, preceding recovered term/GP, source context,
+charset and width. `SourceOffset` is an absolute byte offset within the source
+file; `Pos` remains relative to the record. Diagnostic attributes escape XML
+metacharacters, controls and incomplete UTF-8 key prefixes.
 
 Source buffer cleaning and `GetIndirectTerm()` walk whole UTF-8 sequences,
 including silent normalization bytes and contextual dot-in-word characters.
@@ -61,6 +70,10 @@ dump validation and prefix scans, including named/numeric entities, nested
 spellings and repeated entity runs in both Latin-1 and UTF-8.
 Numeric punctuation is checked through real XML ingestion, before and after
 zipping shards, with singleton-zero posting counts and compound prefix scans.
+The complete shared ingestion/sort/flush path also indexes raw UTF-8 input
+with JSON syntax, then validates it before and after merging. Selected-region
+boundaries, real dictionary disorder, wrong posting associations, invalid SIS
+lengths/ranges/coverage, missing dictionaries and posting skips are covered.
 
 Reindex from source if an older collapse has already reordered or combined
 UTF-8 term buckets incorrectly. Updating the comparator cannot reconstruct

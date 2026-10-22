@@ -7672,6 +7672,110 @@ for (size_t i = 0; i < x; )
   return pirset;
 }
 
+namespace {
+
+// Follow the dictionary's posting ranges while Dump walks the INX stream.
+// Stored keys retain boundaries imposed by tokenization and selected regions.
+class DumpSis {
+public:
+  DumpSis() = default;
+  DumpSis(const DumpSis&) = delete;
+  DumpSis& operator=(const DumpSis&) = delete;
+  ~DumpSis() { if (fp) fclose(fp); }
+  bool Open(const STRING& name, GPTYPE postings) {
+    count = postings;
+    fp = fopen(name,"rb");
+    if (!fp) return Fail("missing SIS");
+    const int w = getc(fp), c = getc(fp);
+    if (w <= 0 || w > int(StringCompLength) || c == EOF) return Fail("SIS header");
+    width = size_t(w); charset = BYTE(c);
+    if (!charset.Ok()) return Fail("SIS charset");
+    const off_t size = GetFileSize(fp);
+    const size_t rowSize = width+1+sizeof(GPTYPE);
+    if (size < 2 || (size-2)%rowSize) return Fail("SIS row size");
+    rows = size_t((size-2)/rowSize);
+    if (rows) return Next();
+    return !count || Fail("SIS posting coverage");
+  }
+  bool Select(GPTYPE posting) {
+    descending = false;
+    if (posting >= count) return Fail("INX posting count");
+    while (posting >= covered)
+      if (!Next()) return false;
+    return true;
+  }
+  bool Finish() {
+    while (rows) {
+      if (!Next()) return false;
+      if (descending) return Fail("term order");
+    }
+    return covered == count || Fail("SIS posting coverage");
+  }
+  bool Matches(const UCHR *term, size_t length) const {
+    return length >= Length() && charset.CompareSIS(term,Length(),Key(),Length()) == 0;
+  }
+  const UCHR *Key() const { return row+1; }
+  size_t Length() const { return row[0]; }
+  const UCHR *PreviousKey() const { return previous; }
+  size_t PreviousLength() const { return previousLength; }
+  size_t Width() const { return width; }
+  BYTE Charset() const { return BYTE(charset); }
+  GPTYPE Start() const { return start; }
+  bool Descending() const { return descending; }
+  const char *Error() const { return error; }
+private:
+  bool Fail(const char *message) { error = message; return false; }
+  bool Next() {
+    if (!rows) return Fail("SIS posting coverage");
+    previousLength = covered ? Length() : 0;
+    memcpy(previous,Key(),previousLength);
+    start = covered;
+    if (fread(row,1,width+1+sizeof(GPTYPE),fp) != width+1+sizeof(GPTYPE))
+      return Fail("SIS read failure");
+    --rows;
+    if (!Length() || Length() > width) return Fail("SIS key length");
+    const GPTYPE end = getGPTYPE(row,width+1);
+    if (end < start || end >= count) return Fail("SIS posting range");
+    covered = end+1;
+    descending = descending || (previousLength &&
+      charset.CompareSIS(previous,previousLength,Key(),Length()) > 0);
+    return true;
+  }
+  FILE *fp = nullptr;
+  CHARSET charset;
+  UCHR row[StringCompLength+1+sizeof(GPTYPE)] = {};
+  UCHR previous[StringCompLength] = {};
+  size_t width = 0, rows = 0, previousLength = 0;
+  GPTYPE count = 0, start = 0, covered = 0;
+  bool descending = false;
+  const char *error = "SIS structure";
+};
+
+static std::string DumpAttribute(const UCHR *text, size_t length)
+{
+  std::string result;
+  const char hex[] = "0123456789abcdef";
+  for (size_t i = 0; i < length;) {
+    const UCHR ch = text[i];
+    if (ch == '&') result += "&amp;";
+    else if (ch == '<') result += "&lt;";
+    else if (ch == '>') result += "&gt;";
+    else if (ch == '"') result += "&quot;";
+    else if (ch < 0x20 || ch == 0x7f) {
+      result += "\\x"; result += hex[ch>>4]; result += hex[ch&15];
+    } else if (ch >= 0x80) {
+      uint32_t cp;
+      const int bytes = _to_ucs4(text+i,text+length,&cp);
+      if (bytes > 0) { result.append((const char *)text+i,size_t(bytes)); i += size_t(bytes); continue; }
+      result += "\\x"; result += hex[ch>>4]; result += hex[ch&15];
+    } else result += char(ch);
+    ++i;
+  }
+  return result;
+}
+
+} // namespace
+
 void INDEX::Dump(ostream& os)
 {
   Dump(0, os, false);
@@ -7719,24 +7823,33 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
             }
         }
 
-      // Compare the stored prefix, whose byte limit may split a character.
-      // Fold complete source characters before applying that limit.
-      size_t compareLength = SisLimit;
+      const off_t indexSize = GetFileSize(fpi);
+      const int off = indexSize >= 0 ? indexSize%sizeof(GPTYPE) : -1;
+      if (off != 0 && off != 2)
+        {
+          ++errors;
+          os << "<ERROR Type=\"broken index\" Reason=\"INX posting width\"/>" << endl;
+          ffclose(fpi);
+          continue;
+        }
+      const GPTYPE postingCount = GPTYPE((indexSize-off)/sizeof(GPTYPE));
       S = SisFileName;
       if (NumberOfIndexes > 0) S += STRING().form(".%d", jj);
-      if (FILE *sis = fopen(S, "rb"))
+      DumpSis dictionary;
+      const auto dictionaryError = [&] {
+        ++errors;
+        os << "<ERROR Type=\"broken SIS\" Reason=\"" << dictionary.Error()
+           << "\" File=\"" << DumpAttribute(S.c_ustr(),S.GetLength()) << "\"/>" << endl;
+      };
+      if (!dictionary.Open(S,postingCount))
         {
-          const int width = getc(sis), charset = getc(sis);
-          if (width > 0 && width <= int(StringCompLength) && charset != EOF)
-            {
-              compareLength = size_t(width);
-              SetGlobalCharset(BYTE(charset));
-            }
-          fclose(sis);
+          dictionaryError();
+          ffclose(fpi);
+          continue;
         }
+      SetGlobalCharset(dictionary.Charset());
 
 //  const int Cutoff = GetFileSize(fpi) /20;
-      const int off = GetFileSize(fpi) % sizeof(GPTYPE);
       if (off)
         {
           UINT2 magic = (UINT2)getINT2(fpi);
@@ -7763,12 +7876,22 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
       OldWord[0] = '\0';
       Buffer[StringCompLength] = '\0';
       bool havePrevious = false;
+      bool dictionaryFailed = false;
+      GPTYPE posting = Skip > 0 ? GPTYPE(Skip) : 0;
 
-      for (gp = GpFread(Skip, fpi); gp != GPTYPE(-1); gp = GpFread(fpi))
+      for (gp = GpFread(posting, fpi); gp != GPTYPE(-1); gp = GpFread(fpi), ++posting)
         {
+          if (!dictionary.Select(posting))
+            {
+              dictionaryError();
+              dictionaryFailed = true;
+              break;
+            }
           int poff = 0;
-          bool orderError = false;
+          Term[0] = '\0';
+          bool orderError = dictionary.Descending();
           const char *reason = "term order";
+	  std::string previousTerm, context;
 	  if (!OnlyErrors)
 	    os << "0x" << setw( sizeof(GPTYPE) /* was 6  */) << setfill('0') << hex << gp << ' ' << dec<< setfill(' ');
           if ((x = GetIndirectBuffer (gp, Buffer, 0, StringCompLength+4)) > 0)
@@ -7776,8 +7899,27 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
               memcpy(Term, Buffer, x);
               const size_t termLength = BufferClean(Term, x, true);
               Term[termLength] = '\0';
+              // A recovered source token may extend beyond the stored token:
+              // regions and ingestion's character classification set its end.
+              // Validate the bytes actually stored, including short full keys.
+              const bool sourceMismatch = !dictionary.Matches(Term,termLength);
+              const bool postingError = havePrevious && posting > dictionary.Start() &&
+                  dictionary.Length() < dictionary.Width() && gp < old_gp;
+              if (!orderError)
+                {
+                  if (!termLength) reason = "empty term";
+                  else if (sourceMismatch) reason = "source term mismatch";
+                  else if (postingError) reason = "posting order";
+                }
+              orderError = orderError || !termLength || sourceMismatch || postingError;
+              if (orderError)
+                {
+                  previousTerm = DumpAttribute(OldWord,strlen((const char *)OldWord));
+                  context = DumpAttribute(Buffer,size_t(x));
+                }
               const size_t displayLength = BufferClean(Buffer, x, false);
               size_t shown = std::min(displayLength, StringCompLength);
+              if (dictionary.Length() < dictionary.Width()) shown = std::min(shown,dictionary.Length());
               if (_is_globalUTF8)
                 {
                   size_t complete = 0;
@@ -7792,28 +7934,6 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
                 }
               Buffer[shown] = '\0';
 
-              const int order = havePrevious ? _ib_SisCompare(OldWord, Term, compareLength) : 0;
-              // A truncated SIS bucket can contain several full sort keys.
-              // Their posting groups may restart at a smaller GP.
-              const bool postingError = havePrevious && gp < old_gp &&
-                  _ib_SisCompare(OldWord, Term, StringCompLength) == 0;
-              orderError = !termLength || order > 0 || postingError;
-              if (!termLength) reason = "empty term";
-              else if (postingError) reason = "posting order";
-              if (orderError)
-                {
-                  ++errors;
-                  if (OnlyErrors)
-                    os << "0x" << setw(sizeof(GPTYPE)) << setfill('0') << hex << gp << ' ' << dec << setfill(' ');
-                  os << "(*)";
-                  poff = 3;
-                }
-              if (termLength)
-                {
-                  memcpy(OldWord, Term, termLength+1);
-                  old_gp = gp;
-                  havePrevious = true;
-                }
             }
           else if (x < 0)
             {
@@ -7833,6 +7953,14 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 	      cerr << endl;
 	    }
 	    
+          if (orderError)
+            {
+              ++errors;
+              if (OnlyErrors)
+                os << "0x" << setw(sizeof(GPTYPE)) << setfill('0') << hex << gp << ' ' << dec << setfill(' ');
+              os << "(*)";
+              poff = 3;
+            }
 
           if (Parent->GetMainMdt ()->GetMdtRecord (gp, &mdtrec) != 0)
 	    {
@@ -7846,7 +7974,15 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 		{
 		  const off_t pos = gp - mdtrec.GetGlobalFileStart () - (off_t)mdtrec.GetLocalRecordStart();
 		  os << " <ERROR Type=\"broken entry\" Reason=\"" << reason << "\"";
-		  os << " File=\"" << mdtrec.GetFileName() << "\" Pos=\"" << pos << "\"  Content=\"" << (char *)Buffer << "\"/>";
+		  const STRING filename = mdtrec.GetFileName();
+		  os << " File=\"" << DumpAttribute(filename.c_ustr(),filename.GetLength()) << "\" Pos=\"" << pos
+                     << "\" SourceOffset=\"" << gp-mdtrec.GetGlobalFileStart()
+                     << "\" StoredKey=\"" << DumpAttribute(dictionary.Key(),dictionary.Length())
+                     << "\" PreviousKey=\"" << DumpAttribute(dictionary.PreviousKey(),dictionary.PreviousLength())
+                     << "\" PreviousTerm=\"" << previousTerm << "\" PreviousGP=\"" << old_gp
+                     << "\" SISCharset=\"" << unsigned(dictionary.Charset()) << "\" SISWidth=\"" << dictionary.Width()
+                     << "\" Context=\"" << context << "\" Content=\""
+                     << DumpAttribute(Buffer,strlen((const char *)Buffer)) << "\"/>";
 		}
 	       if (!OnlyErrors || orderError) os << endl;
 	     }
@@ -7856,7 +7992,17 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 		os << "Gp=" << gp << " not found" << endl;
 	      notFound++;
 	    }
+	  if (x > 0) memcpy(OldWord,Term,strlen((const char *)Term)+1);
+	  else OldWord[0] = '\0';
+	  old_gp = gp;
+	  havePrevious = true;
 	}
+      if (!dictionaryFailed && posting < postingCount)
+        {
+          ++errors;
+          os << "<ERROR Type=\"broken index\" Reason=\"INX read failure\"/>" << endl;
+        }
+      else if (!dictionaryFailed && !dictionary.Finish()) dictionaryError();
       ffclose (fpi);
     }
   if (notFound)
