@@ -14,6 +14,8 @@ Description:	Class MDTREC - Multiple Document Table Record
 #ifndef MDTREC_HXX
 #define MDTREC_HXX
 
+#include <limits>
+
 #include "date.hxx"
 #include "pathname.hxx"
 #include "lang-codes.hxx"
@@ -102,14 +104,30 @@ public:
   GPTYPE GetGlobalFileEnd() const { return GlobalFileEnd; };
 #endif
 
-  // This gives us the record (document length)
-  off_t GetLength() const { return LocalRecordEnd - LocalRecordStart; }
+  // Absolute source-file start, with a bounded end-start span. Keep the
+  // existing inclusive-end API; moving the start preserves the span.
+  off_t GetLength() const { return HasValidRecordRange() ? off_t(LocalRecordSpan) : -1; }
+  bool HasValidRecordRange() const {
+    return RangeValid == 1 && LocalRecordSpan <= MAX_GPTYPE - LocalRecordStart;
+  }
+  UINT4 GetRecordSpan() const { return LocalRecordSpan; }
+  static constexpr UINT4 MaxRecordSpan() { return std::numeric_limits<UINT4>::max(); }
+  void SetLocalRecordStart(const GPTYPE NewStart) {
+    LocalRecordStart = NewStart;
+    if (LocalRecordSpan > MAX_GPTYPE - NewStart) RangeValid = 0;
+  }
+  GPTYPE GetLocalRecordStart() const { return LocalRecordStart; }
 
-  void   SetLocalRecordStart(const UINT4 NewStart) { LocalRecordStart = NewStart; }
-  UINT4  GetLocalRecordStart() const { return LocalRecordStart; }
-
-  void   SetLocalRecordEnd(const UINT4 NewEnd) { LocalRecordEnd = NewEnd; }
-  UINT4  GetLocalRecordEnd() const { return LocalRecordEnd; }
+  bool SetLocalRecordEnd(const GPTYPE NewEnd) {
+    RangeValid = NewEnd >= LocalRecordStart && NewEnd - LocalRecordStart <= MaxRecordSpan();
+    if (RangeValid) LocalRecordSpan = UINT4(NewEnd - LocalRecordStart);
+    return RangeValid == 1;
+  }
+  bool SetLocalRecordRange(GPTYPE start, GPTYPE end) {
+    LocalRecordStart = start;
+    return SetLocalRecordEnd(end);
+  }
+  GPTYPE GetLocalRecordEnd() const { return LocalRecordStart + LocalRecordSpan; }
 
   void    SetLocale(const LOCALE& NewLocale)   { Locale = NewLocale; }
   LOCALE  GetLocale() const                    { return Locale;      }
@@ -181,17 +199,18 @@ private:
 
   MDTHASHTABLE  *HashTable;
   GPTYPE         GlobalFileStart;
-  UINT4          LocalRecordStart;
-  UINT4          LocalRecordEnd;
+  GPTYPE         LocalRecordStart;
+  UINT4          LocalRecordSpan;
   LOCALE         Locale;
   _ib_category_t Category;
   _ib_priority_t Priority;
+  BYTE           Property;
+  BYTE           RangeValid;
 
   SRCH_DATE      DateModified;
   SRCH_DATE      DateCreated;
   SRCH_DATE      DateExpires;
 
-  BYTE           Property; // This MUST be the last element!
 };
 
 

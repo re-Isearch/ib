@@ -493,7 +493,7 @@ MDTHASHTABLE::MDTHASHTABLE(const IDBOBJ *Idb)
 {
   if (Idb)
     {
-      if (Idb->GetMergeStatus() == iNothing)
+      if (IsFastIndexingMode(Idb->GetMergeStatus()))
 	Init(Idb->GetDbFileStem(), 0);
       else
 	Init(Idb->GetDbFileStem());
@@ -507,7 +507,7 @@ MDTHASHTABLE::MDTHASHTABLE(const INDEX *index)
 {
   if (index)
     {
-      if (index->GetMergeStatus() == iNothing)
+      if (IsFastIndexingMode(index->GetMergeStatus()))
 	Init(index->GetDbFileStem(), 0);
       else
 	Init(index->GetDbFileStem());

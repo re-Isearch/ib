@@ -1,66 +1,40 @@
-/*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
-It is made available and licensed under the Apache 2.0 license: see LICENSE
-*/
-/*@@@
-File:		nfield.cxx
-Version:	1.00
-$Revision: 1.1 $
-Description:	Class NUMERICFLD - Data structures for numeric data
-Author:		Jim Fullton, Jim.Fullton@cnidr.org
-@@@*/
-
 #include "nfield.hxx"
+#include "fixed128.hxx"
 #include "common.hxx"
-#include "magic.hxx"
+#include <array>
 
-void NUMERICFLD::Dump(ostream& os) const
-{
-  os << *this << endl;
+void NUMERICFLD::Dump(ostream& os) const { os << *this << endl; }
+ostream& operator<<(ostream& os, const NUMERICFLD& field) {
+  return os << "start: " << field.GlobalStart << " value: " << field.NumericValue;
 }
-
-
-ostream& operator<<(ostream& os, const NUMERICFLD& Fld)
+INT16 NUMERICFLD::DecodeValue(const BYTE *p)
 {
-  return os << "start: " << Fld.GlobalStart << " value: " << Fld.NumericValue;
+  const UINT16 bits = cons_UINT16(getINT8(p, 1+sizeof(GPTYPE)), getINT8(p, 9+sizeof(GPTYPE)));
+  const UINT16 sign = UINT16(1) << 127;
+  INT16 value = 0;
+  fixed128::Signed((bits & sign) ? (~bits)+1 : bits, (bits & sign) != 0, &value);
+  return value;
 }
-
-
-void NUMERICFLD::Write(FILE *fp) const
+bool NUMERICFLD::Write(FILE *fp) const
 {
+  if (!fp || !NumericValue.Ok()) return false;
+  const UINT16 bits = UINT16(NumericValue.GetTicks());
   putObjID(objNUMFLD, fp);
-  ::Write(GlobalStart, fp);
-  ::Write(NumericValue, fp);
+  return ::Write(GlobalStart, fp) == int(sizeof(GPTYPE)) &&
+         ::Write(UINT16_high_part(bits), fp) == 8 && ::Write(UINT16_low_part(bits), fp) == 8;
 }
-
-void NUMERICFLD::Write(FILE *fp, GPTYPE Offset) const
+bool NUMERICFLD::Write(FILE *fp, GPTYPE offset) const
 {
-  putObjID(objNUMFLD, fp);
-  ::Write(GlobalStart+Offset, fp);
-  ::Write(NumericValue, fp);
+  NUMERICFLD copy(*this); copy.IncrementStart(offset); return copy.Write(fp);
 }
-
-
-void Write(const NUMERICFLD& d, FILE *fp)
+bool NUMERICFLD::Read(FILE *fp)
 {
-  d.Write(fp);
+  std::array<BYTE, DISK_SIZE> bytes;
+  NumericValue = NUMERICOBJ();
+  if (!fp || fread(bytes.data(), 1, bytes.size(), fp) != bytes.size() || bytes[0] != objNUMFLD) return false;
+  GlobalStart = DecodeGlobalStart(bytes.data());
+  NumericValue.SetTicks(DecodeValue(bytes.data()));
+  return true;
 }
-
-void NUMERICFLD::Read(FILE *fp)
-{
-  if (getObjID(fp) != objNUMFLD)
-    {
-      PushBackObjID( objNUMFLD, fp);
-    }
-//  GlobalStart = 0;
-//  NumericValue = 0;
-  ::Read(&GlobalStart, fp);
-  ::Read(&NumericValue, fp);
-}
-
-void Read(NUMERICFLD *ptr, FILE *fp)
-{
-  ptr->Read(fp);
-}
-
-
+void Write(const NUMERICFLD& field, FILE *fp) { field.Write(fp); }
+void Read(NUMERICFLD *field, FILE *fp) { field->Read(fp); }

@@ -46,20 +46,20 @@ private:
   bool  Truncate;
     
   //  These are called internally by Find
-  //  SearchState  MemFind(DOUBLE Key, INT4 Relation, 
+  //  SearchState  MemFind(NUMERICOBJ Key, INT4 Relation,
   //		       bool ByStart, INT4 *Index);
-  //  SearchState  DiskFind(STRING Fn, DOUBLE Key, INT4 Relation, 
+  //  SearchState  DiskFind(STRING Fn, NUMERICOBJ Key, INT4 Relation,
   //			bool ByStart, INT4 *Index);
-  SearchState  MemFind(DOUBLE Key, INT4 Relation, 
+  SearchState  MemFind(NUMERICOBJ Key, INT4 Relation,
 		       IntBlock FindBlock, INT4 *Index);
-  SearchState  DiskFind(STRING Fn, DOUBLE Key, INT4 Relation, 
+  SearchState  DiskFind(STRING Fn, NUMERICOBJ Key, INT4 Relation,
 			IntBlock FindBlock, INT4 *Index);
   SearchState  MemFind(GPTYPE Key, INT4 Relation, 
 		       IntBlock FindBlock, INT4 *Index);
   SearchState  DiskFind(STRING Fn, GPTYPE Key, INT4 Relation, 
 			IntBlock FindBlock, INT4 *Index);
-  SearchState  IntervalMatcher(DOUBLE Key, DOUBLE LowerBound, 
-			       DOUBLE Mid, DOUBLE UpperBound,
+  SearchState  IntervalMatcher(NUMERICOBJ Key, NUMERICOBJ LowerBound,
+			       NUMERICOBJ Mid, NUMERICOBJ UpperBound,
 			       INT4 Relation, IntType Type);
   SearchState  IntervalMatcher(GPTYPE Key, GPTYPE LowerBound, 
 			       GPTYPE Mid, GPTYPE UpperBound,
@@ -84,8 +84,8 @@ public:
   void   WriteTable();
   void   WriteTable(INT Offset);
   GPTYPE GetGlobalStart(INT4 i) { return(table[i].GetGlobalStart()); }
-  DOUBLE GetStartValue(INT i)   { return(table[i].GetStartValue()); }
-  DOUBLE GetEndValue(INT i)     { return(table[i].GetEndValue()); }
+  NUMERICOBJ GetStartValue(INT i)   { return(table[i].GetStartValue()); }
+  NUMERICOBJ GetEndValue(INT i)     { return(table[i].GetEndValue()); }
   void   SetCoords(INT n)       { Ncoords = n; }
   INT    GetCoords()            { return Ncoords; }
   // set file name to load from
@@ -105,16 +105,24 @@ public:
   FILE        *OpenForAppend(const STRING& Fn);
 
   // This calls the old DiskFind and, now, MemFind
-  SearchState  Find(STRING Fn, DOUBLE Key, INT4 Relation, 
+  SearchState  Find(STRING Fn, NUMERICOBJ Key, INT4 Relation,
 		    IntBlock FindBlock, INT4 *Index);
   SearchState  Find(STRING Fn, GPTYPE Key, INT4 Relation, 
 		    IntBlock FindBlock, INT4 *Index);
 
-  SearchState  Find(DOUBLE Key, INT4 Relation, IntBlock FindBlock, 
+  SearchState  Find(NUMERICOBJ Key, INT4 Relation, IntBlock FindBlock,
 		    INT4 *Index);
   SearchState  Find(GPTYPE Key, INT4 Relation, IntBlock FindBlock, 
 		    INT4 *Index);
 
+  template <class T, typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+  SearchState Find(STRING name, T value, INT4 relation, IntBlock block, INT4 *index) {
+    return Find(name, NUMERICOBJ(value), relation, block, index);
+  }
+  template <class T, typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+  SearchState Find(T value, INT4 relation, IntBlock block, INT4 *index) {
+    return Find(NUMERICOBJ(value), relation, block, index);
+  }
   void         Dump(ostream& os = cout) const;                  // dump numeric field data
   void         Dump(INT4 start, INT4 end, ostream& os = cout) const; // dump numeric field data
   ~INTERVALLIST();

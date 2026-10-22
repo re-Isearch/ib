@@ -1,73 +1,37 @@
-/*
-Copyright (c) 2020-21 Project re-Isearch and its contributors: See CONTRIBUTORS.
-It is made available and licensed under the Apache 2.0 license: see LICENSE
-*/
-/*@@@
-File:		nfield.hxx
-@@@*/
-
 #ifndef NUMERICFLD_HXX
 #define NUMERICFLD_HXX
 
-#include "gdt.h"
 #include "defs.hxx"
+#include "numbers.hxx"
+#include "magic.hxx"
 
 class NUMERICFLD {
 public:
-  NUMERICFLD() { }
-  NUMERICFLD(GPTYPE x, NUMBER v)
-    {
-      GlobalStart = x;
-      NumericValue = v;
-    }
-
-  NUMERICFLD(const NUMERICFLD& Other)
-    {
-      GlobalStart  = Other.GlobalStart;
-      NumericValue = Other.NumericValue;
-    }
-  NUMERICFLD& operator=(const NUMERICFLD& Other)
-    {
-      GlobalStart  = Other.GlobalStart;
-      NumericValue = Other.NumericValue;
-      return *this;
-    }
-
-  operator    STRING () const { return NumericValue; }
-
-  NUMERICFLD& operator+=(const GPTYPE Offset) { IncrementStart(Offset); return *this;}
-  void        IncrementStart(GPTYPE x)  { GlobalStart += x; }
-
-  GPTYPE      GetGlobalStart() const    { return GlobalStart; };
-  void        SetGlobalStart(GPTYPE x)  { GlobalStart = x;    };
-  NUMBER      GetNumericValue() const   { return NumericValue;} ;
-  void        SetNumericValue(NUMBER x) { NumericValue = x;   };
-
-  void        Dump(ostream& os = cout) const;
-
-  void        Write(FILE *fp) const;
-  void        Write(FILE *fp, GPTYPE Offset) const;
-  void        Read(FILE *fp);
-
-  friend void Write(const NUMERICFLD& d, FILE *fp);
-  friend void Read(NUMERICFLD *ptr, FILE *fp);
-
-  friend ostream& operator<<(ostream& os, const NUMERICFLD& Fld);
-
-  ~NUMERICFLD() { }
-
-  size_t Sizeof () const { return sizeof(GPTYPE) + sizeof(NUMBER) + 1; }
-
+  using span_type = UINT2;
+  static constexpr size_t DISK_SIZE = 1 + sizeof(GPTYPE) + 16;
+  NUMERICFLD() : GlobalStart(0) {}
+  NUMERICFLD(GPTYPE gp, const NUMERICOBJ& value) : GlobalStart(gp), NumericValue(value) {}
+  operator STRING() const { return NumericValue.ToString(); }
+  NUMERICFLD& operator+=(GPTYPE offset) { IncrementStart(offset); return *this; }
+  void IncrementStart(GPTYPE offset) { GlobalStart += offset; }
+  GPTYPE GetGlobalStart() const { return GlobalStart; }
+  void SetGlobalStart(GPTYPE gp) { GlobalStart = gp; }
+  NUMERICOBJ GetNumericValue() const { return NumericValue; }
+  void SetNumericValue(const NUMERICOBJ& value) { NumericValue = value; }
+  size_t Sizeof() const { return DISK_SIZE; }
+  void Dump(ostream& os = cout) const;
+  bool Write(FILE *fp) const;
+  bool Write(FILE *fp, GPTYPE offset) const;
+  bool Read(FILE *fp);
+  static GPTYPE DecodeGlobalStart(const BYTE *p) { return getGPTYPE(p, 1); }
+  static INT16 DecodeValue(const BYTE *p);
+  friend ostream& operator<<(ostream& os, const NUMERICFLD& field);
 private:
-  GPTYPE   GlobalStart;
-  NUMBER   NumericValue;
+  GPTYPE GlobalStart;
+  NUMERICOBJ NumericValue;
 };
 
-
-void Write(const NUMERICFLD& d, FILE *fp);
-void Read(NUMERICFLD *ptr, FILE *fp);
-
-
 typedef NUMERICFLD* PNUMERICFLD;
-
+void Write(const NUMERICFLD& field, FILE *fp);
+void Read(NUMERICFLD *field, FILE *fp);
 #endif

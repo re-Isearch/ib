@@ -10,6 +10,7 @@
 
 #include <ctype.h>
 #include "doctype.hxx"
+#include "floatfield.hxx"
 #include "common.hxx"
 #include "process.hxx"
 #include "doc_conf.hxx"
@@ -694,8 +695,13 @@ NUMERICOBJ DOCTYPE::ParseNumeric(const STRING& Buffer) const
   return Buffer;
 }
 
+bool DOCTYPE::ParseFloat64(const STRING& Buffer, DOUBLE *value) const
+{
+  return float64::Parse(Buffer, value);
+}
+
 bool DOCTYPE::ParseRange(const STRING& Buffer, const STRING& FieldName,
-        DOUBLE* fStart, DOUBLE* fEnd) const
+        NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const
 {
   NUMERICALRANGE Range(Buffer);
   if (Range.Ok())

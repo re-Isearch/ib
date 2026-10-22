@@ -2584,7 +2584,7 @@ int getHostname (char *buf, int len)
 
   if (hostname == NULL || *hostname == '\0')
     return -1;
-  strncpy(name, hostname, MAXHOSTNAMELEN);
+  if (hostname != name) strncpy(name, hostname, MAXHOSTNAMELEN);
   name[MAXHOSTNAMELEN] = '\0';
   strncpy(buf, name, len);
   buf[len] = '\0';

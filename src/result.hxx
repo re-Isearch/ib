@@ -167,10 +167,10 @@ public:
   void     SetPathname(const PATHNAME& newPathname)     { Pathname = newPathname; }
   void     SetOrigPathname(const PATHNAME& newPathname) { origPathname = newPathname; }
 
-  void   SetRecordStart(const UINT4 NewRecordStart) { RecordStart = NewRecordStart; }
-  UINT4  GetRecordStart() const                     { return RecordStart;           }
-  void   SetRecordEnd(const UINT4 NewRecordEnd )    { RecordEnd = NewRecordEnd;     }
-  UINT4  GetRecordEnd() const                       { return RecordEnd;             }
+  void   SetRecordStart(const GPTYPE NewRecordStart) { RecordStart = NewRecordStart; }
+  GPTYPE GetRecordStart() const                      { return RecordStart;           }
+  void   SetRecordEnd(const GPTYPE NewRecordEnd )     { RecordEnd = NewRecordEnd;     }
+  GPTYPE GetRecordEnd() const                        { return RecordEnd;             }
   off_t  GetLength () const                         { return RecordEnd-RecordStart; }
   off_t  GetRecordSize() const                      { return GetLength() + 1;       }
 
@@ -328,8 +328,8 @@ private:
   DOCTYPE_ID     DocumentType;
   PATHNAME       Pathname;
   PATHNAME       origPathname;
-  UINT4          RecordStart;
-  UINT4          RecordEnd;
+  GPTYPE         RecordStart;
+  GPTYPE         RecordEnd;
   SRCH_DATE      Date;
   SRCH_DATE      DateModified;
   SRCH_DATE      DateCreated;

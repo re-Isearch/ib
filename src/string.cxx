@@ -1427,6 +1427,16 @@ STRING& STRING::EraseAfter (const STRINGINDEX Index)
 // Special Code
 void STRING::SetTermLower (const UCHR *Ptr, const STRINGINDEX len)
 {
+  extern bool _is_globalUTF8;
+  if (_is_globalUTF8)
+    {
+      size_t length = 0;
+      while (length < len && Ptr[length]) ++length;
+      AssignCopy(length, reinterpret_cast<const char *>(Ptr));
+      _utf_StrToLowerBuf(reinterpret_cast<UCHR *>(m_pchData), unsigned(length), true, ' ');
+      _ib_ZapNonTermASCII(reinterpret_cast<UCHR *>(m_pchData), unsigned(length), ' ');
+      return;
+    }
   size_t i = 0;
 
   if (len)
@@ -2499,47 +2509,10 @@ bool STRING::IsDotNumber() const
   return false;
 }
 
-#if 0
-
 bool STRING::IsCurrency() const
 {
-  if (IsEmpty())
-    return false;
-
-  const unsigned char *p = (const unsigned char *)c_str();
-
-  while (*p && isspace(*p))
-    ++p;
-
-  // Legacy single-byte currency characters used by MONETARYOBJ.
-  const unsigned char money = 164;
-  const unsigned char yen   = 165;
-  const unsigned char pound = 163;
-  const unsigned char cent  = 162;
-
-  // Prefix currency symbol.
-  if (*p == '$' || *p == money || *p == yen || *p == pound)
-    return MONETARYOBJ(*this).Ok();
-
-  // Cent suffix.
-  const unsigned char *e =
-      (const unsigned char *)c_str() + GetLength();
-
-  while (e > p && isspace(e[-1]))
-    --e;
-
-  if (e > p && e[-1] == cent)
-    return MONETARYOBJ(*this).Ok();
-
-  return false;
+  return MONETARYOBJ::IsExplicitCurrency(*this);
 }
-
-#else
-bool STRING::IsCurrency() const
-{
-  return MONETARYOBJ (m_pchData).Ok();  
-}
-#endif
 
 bool STRING::IsFilePath() const
 {

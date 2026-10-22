@@ -15,6 +15,7 @@ Description:	Class RECORD - Database Record
 #include "magic.hxx"
 #include "lang-codes.hxx"
 #include <sys/stat.h>
+#include <limits>
 
 #include "record.hxx"
 
@@ -65,17 +66,17 @@ RECORD::RECORD (const RECORD& OtherRecord)
 
 off_t RECORD::GetLength () const
 {
-  off_t end = RecordEnd;
+  GPTYPE end = RecordEnd;
   if (end == 0)
     {
-      if ((end = GetFileSize(Pathname)) > 0)
-	end--;
-      else if (RecordStart == 0)
-	return 0;
+      const off_t size = GetFileSize(Pathname);
+      if (size <= 0) return RecordStart == 0 ? 0 : -1;
+      if (UINT8(size-1) > MAX_GPTYPE) return -1;
+      end = GPTYPE(size-1);
     }
-  if (end > 0)
-    return end-RecordStart+1;
-  return -1; // ERROR
+  if (end < RecordStart ||
+      end-RecordStart >= UINT8(std::numeric_limits<off_t>::max())) return -1;
+  return off_t(end-RecordStart)+1;
 }
 
 
@@ -193,7 +194,8 @@ static BYTE bMarker[2] =  {'X', 'z'};
 void RECORD::Write (PFILE fp) const
 {
   if (fp == NULL) return;
-  putObjID(objRECORD, fp);
+  putObjID(objRECORDGP, fp);
+  ::Write(BYTE(sizeof(GPTYPE)), fp);
   ::Write (Locale, fp);
   ::Write (Key, fp);
   ::Write (Pathname, fp);
@@ -215,13 +217,16 @@ void RECORD::Write (PFILE fp) const
 bool RECORD::Read (PFILE fp)
 {
   obj_t obj = getObjID (fp);
-  if (obj != objRECORD)
+  if (obj != objRECORDGP)
     {
       message_log (LOG_DEBUG, "Record:Read() failed: Not a record (id=%d!=%d)",
-	(int)obj, (int)objRECORD);
+	(int)obj, (int)objRECORDGP);
       PushBackObjID (obj, fp);
       return false;
     }
+  BYTE width = 0;
+  if (!::Read(&width, fp) || width != sizeof(GPTYPE))
+    return false;
   ::Read (&Locale, fp);
   ::Read (&Key, fp);
   ::Read (&Pathname, fp);
@@ -239,9 +244,8 @@ bool RECORD::Read (PFILE fp)
   ::Read (&Category, fp);
   ::Read (&Priority, fp);
   ::Read (&Segment, fp);
-  BYTE b;
-  ::Read(&b, fp);
-  if ((b != bMarker[IsBadRecord() ? 1 : 0 ])) {
+  BYTE b = 0;
+  if (!::Read(&b, fp) || ferror(fp) || (b != bMarker[IsBadRecord() ? 1 : 0 ])) {
     message_log (LOG_ERROR, "Record fastload corrupt! // check=%c(%d)", (char)b, (int)b);
     return false;
   }

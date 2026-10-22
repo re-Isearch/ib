@@ -6,94 +6,240 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #include "common.hxx"
 #include "numbers.hxx"
 
-#include <charconv>
 #include <array>
+#include <cmath>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <string>
+#include "fixed128.hxx"
 
-static DOUBLE BAD_NUMBER = 1.17549435e-38F;
-
-NUMERICOBJ::NUMERICOBJ ()
+bool NUMERICOBJ::SetWhole(INT16 value)
 {
-  val = BAD_NUMBER;
+  Invalidate();
+  INT16 ticks;
+  if (__builtin_mul_overflow(value, INT16(TICKS_PER_UNIT), &ticks)) return false;
+  return SetTicks(ticks);
 }
 
-NUMERICOBJ::NUMERICOBJ(const STRING& s)
+NUMERICOBJ NUMERICOBJ::FromScaled(INT16 value, UINT8 scale)
 {
-  if (s.IsNumber())
+  NUMERICOBJ result;
+  INT16 ticks;
+  if (fixed128::MulDiv(value, INT16(TICKS_PER_UNIT), scale, &ticks)) result.SetTicks(ticks);
+  return result;
+}
+
+bool NUMERICOBJ::Set(NUMBER value)
+{
+  Invalidate();
+  if (!std::isfinite(value)) return false;
+  // Floating callbacks enter the decimal domain once, at this boundary.
+  std::ostringstream text;
+  text.imbue(std::locale::classic());
+  text.precision(std::numeric_limits<NUMBER>::max_digits10);
+  text << value;
+  return Set(STRING(text.str().c_str()));
+}
+
+bool NUMERICOBJ::Set(const STRING& input)
+{
+  Invalidate();
+  const char *p = input.c_str(), *end = p + input.GetLength();
+  while (p != end && isspace((unsigned char)*p)) ++p;
+  while (end != p && isspace((unsigned char)end[-1])) --end;
+  if (p == end) return false;
+  bool negative = false;
+  if (*p == '+' || *p == '-') { negative = *p == '-'; ++p; }
+  if (p == end) return false;
+
+  if (end-p > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
     {
-      val = (NUMBER)s;
-    }
-  else if (s.IsDotNumber())
-    {
-      UINT8     x = 0;
-      unsigned  i = 0;
-      char      buf[20];
-      for (const char *ptr = s.c_str(); *ptr && i < sizeof(buf)-1 ; ptr++)
-	{
-	  if ((buf[i] = *ptr) == '.' || *ptr == ':')
-	    {
-	      int base = *ptr == ':' ? 16 : 10;
-	      buf[i] = '\0';
-	      if (2*(i/2) != i )
-		i++; // Add i for odd number
-	      x <<= (base == 10 ? 8 : i*4);
-	      x += (int)strtol(buf, (char **)NULL, base);
-	      i = 0;
-	    }
-	  else i++;
-	} 
-      val = x;
-    }
-  else // Handle Floating Point & Scientific Notation
-    {
-      const char* start = s.c_str();
-      char* endPtr = nullptr;
-      
-      // std::strtod natively parses "6.053984e-5" out of the box
-      double parsedVal = std::strtod(start, &endPtr);
-      
-      // If endPtr advanced to the end of the string, it's a valid floating-point match!
-      if (endPtr != start && *endPtr == '\0')
+      const UINT16 limit = ((UINT16(1) << 127) - (negative ? 0 : 1)) / TICKS_PER_UNIT;
+      UINT16 magnitude = 0;
+      for (p += 2; p != end; ++p)
         {
-          val = (NUMBER)parsedVal;
+          const unsigned digit = *p >= '0' && *p <= '9' ? *p-'0' :
+                                 *p >= 'a' && *p <= 'f' ? *p-'a'+10 :
+                                 *p >= 'A' && *p <= 'F' ? *p-'A'+10 : 16;
+          if (digit == 16 || magnitude > (limit-digit)/16) return false;
+          magnitude = magnitude*16+digit;
         }
-      else
+      INT16 whole;
+      return fixed128::Signed(magnitude, negative, &whole) && SetWhole(whole);
+    }
+
+  std::string digits;
+  size_t fractional = 0;
+  bool point = false;
+  while (p != end)
+    {
+      if (*p >= '0' && *p <= '9')
         {
-          val = BAD_NUMBER;
+          digits.push_back(*p++);
+          if (point) ++fractional;
+        }
+      else if (*p == '.' && !point) { point = true; ++p; }
+      else break;
+    }
+  long long exponent = 0;
+  if (p != end && (*p == 'e' || *p == 'E'))
+    {
+      ++p;
+      bool minus = false;
+      if (p != end && (*p == '+' || *p == '-')) { minus = *p == '-'; ++p; }
+      const char *first = p;
+      const long long bound = (long long)input.GetLength() + 64;
+      while (p != end && *p >= '0' && *p <= '9')
+        {
+          exponent = exponent > (bound - (*p-'0')) / 10 ? bound : exponent * 10 + (*p-'0');
+          ++p;
+        }
+      if (p == first) return false;
+      if (minus) exponent = -exponent;
+    }
+  if (p != end || digits.empty())
+    {
+      // Preserve the existing dotnumber domain as an unsigned 64-bit code.
+      if (!input.IsDotNumber()) return false;
+      const bool hex = input.Search(':') != 0;
+      UINT8 code = 0;
+      const char *part = input.c_str();
+      for (const char *q = part; ; ++q)
+        if (!*q || *q == '.' || *q == ':')
+          {
+            if (q == part) return false;
+            const STRING token(part, size_t(q-part));
+            char *tail;
+            const UINT8 value = strtoull(token.c_str(), &tail, hex ? 16 : 10);
+            if (*tail || (!hex && value > 255) || (hex && q-part > 4)) return false;
+            code = (code << (hex ? 16 : 8)) | value;
+            if (!*q) break;
+            part = q+1;
+          }
+      return SetWhole(INT16(code));
+    }
+
+  const size_t first = digits.find_first_not_of('0');
+  if (first == std::string::npos) return SetTicks(0);
+  digits.erase(0, first);
+  const long long shift = (long long)FRACTION_DIGITS + exponent - (long long)fractional;
+  const long long retained = (long long)digits.size() + (shift < 0 ? shift : 0);
+  if (retained + (shift > 0 ? shift : 0) > 39) return false;
+
+  const UINT16 limit = (UINT16(1) << 127) - (negative ? 0 : 1);
+  UINT16 magnitude = 0;
+  for (long long i = 0; i < retained; ++i)
+    {
+      const unsigned digit = digits[size_t(i)] - '0';
+      if (magnitude > (limit - digit) / 10) return false;
+      magnitude = magnitude * 10 + digit;
+    }
+  for (long long i = 0; i < shift; ++i)
+    {
+      if (magnitude > limit / 10) return false;
+      magnitude *= 10;
+    }
+  if (shift < 0 && retained >= 0)
+    {
+      const char next = digits[size_t(retained)];
+      const bool sticky = digits.find_first_not_of('0', size_t(retained)+1) != std::string::npos;
+      if (next > '5' || (next == '5' && (sticky || (magnitude & 1))))
+        {
+          if (magnitude == limit) return false;
+          ++magnitude;
         }
     }
+  INT16 ticks;
+  return fixed128::Signed(magnitude, negative, &ticks) && SetTicks(ticks);
 }
 
-bool NUMERICOBJ::Ok() const
+STRING NUMERICOBJ::ToString() const
 {
-  return val != BAD_NUMBER;
+  if (!Valid) return STRING();
+  const INT16 whole = Ticks / INT16(TICKS_PER_UNIT);
+  const INT16 remainder = Ticks % INT16(TICKS_PER_UNIT);
+  STRING text(whole);
+  if (Ticks < 0 && !whole) text = "-0";
+  if (remainder)
+    {
+      char fraction[17];
+      snprintf(fraction, sizeof(fraction), "%016llu", (unsigned long long)(remainder < 0 ? -remainder : remainder));
+      size_t length = FRACTION_DIGITS;
+      while (length && fraction[length-1] == '0') --length;
+      fraction[length] = 0;
+      text += '.';
+      text += fraction;
+    }
+  return text;
 }
 
-void Write(const NUMERICOBJ& s, FILE *Fp)
+NUMERICOBJ& NUMERICOBJ::operator+=(const NUMERICOBJ& value)
 {
-  ::Write(s.val, Fp); 
+  INT16 result;
+  if (!Valid || !value.Valid || __builtin_add_overflow(Ticks, value.Ticks, &result)) Invalidate();
+  else SetTicks(result);
+  return *this;
 }
 
-bool NUMERICOBJ::Read(FILE *Fp)
+NUMERICOBJ& NUMERICOBJ::operator-=(const NUMERICOBJ& value)
 {
-  if (::Read(&val, Fp))
-    return true;
-  val = BAD_NUMBER;
-  return false;
+  INT16 result;
+  if (!Valid || !value.Valid || __builtin_sub_overflow(Ticks, value.Ticks, &result)) Invalidate();
+  else SetTicks(result);
+  return *this;
 }
 
-bool Read(NUMERICOBJ *p, FILE *Fp) {
-  if (p) return p->Read(Fp);
-  return false;
+NUMERICOBJ& NUMERICOBJ::operator*=(const NUMERICOBJ& value)
+{
+  INT16 result;
+  if (!Valid || !value.Valid || !fixed128::MulDiv(Ticks, value.Ticks, TICKS_PER_UNIT, &result)) Invalidate();
+  else SetTicks(result);
+  return *this;
 }
 
+NUMERICOBJ& NUMERICOBJ::operator/=(const NUMERICOBJ& value)
+{
+  INT16 result;
+  if (!Valid || !value.Valid || !value.Ticks ||
+      !fixed128::MulDiv(Ticks, value.Ticks < 0 ? -INT16(TICKS_PER_UNIT) : INT16(TICKS_PER_UNIT),
+                       fixed128::Magnitude(value.Ticks), &result)) Invalidate();
+  else SetTicks(result);
+  return *this;
+}
 
+void NUMERICOBJ::Write(FILE *fp) const
+{
+  ::Write(UCHR(FRACTION_DIGITS * 2 + (Valid ? 1 : 0)), fp);
+  const UINT16 bits = UINT16(Ticks);
+  ::Write(UINT16_high_part(bits), fp);
+  ::Write(UINT16_low_part(bits), fp);
+}
+
+void Write(const NUMERICOBJ& value, FILE *fp) { value.Write(fp); }
+
+bool NUMERICOBJ::Read(FILE *fp)
+{
+  Invalidate();
+  std::array<BYTE, DISK_SIZE> bytes;
+  if (!fp || fread(bytes.data(), 1, bytes.size(), fp) != bytes.size() ||
+      (bytes[0] >> 1) != FRACTION_DIGITS) return false;
+  const UINT16 bits = cons_UINT16(getINT8(bytes.data(), 1), getINT8(bytes.data(), 9));
+  const UINT16 sign = UINT16(1) << 127;
+  INT16 ticks;
+  if (!fixed128::Signed((bits & sign) ? (~bits)+1 : bits, (bits & sign) != 0, &ticks)) return false;
+  if (bytes[0] & 1) SetTicks(ticks);
+  return true;
+}
+
+bool Read(NUMERICOBJ *value, FILE *fp) { return value && value->Read(fp); }
 
 NUMERICOBJ operator+(const NUMERICOBJ& val1, const NUMERICOBJ& val2)
 {
   NUMERICOBJ val;
 
   val = val1;
-  val += val2; 
+  val += val2;
   return val;
 }
 NUMERICOBJ operator-(const NUMERICOBJ& val1, const NUMERICOBJ& val2)
@@ -122,200 +268,39 @@ NUMERICOBJ operator/(const NUMERICOBJ& val1, const NUMERICOBJ& val2)
 }
 
 
-NUMERICOBJ operator+(const NUMERICOBJ& val1, const DOUBLE val2)
+NUMERICALRANGE::NUMERICALRANGE() = default;
+NUMERICALRANGE::NUMERICALRANGE(const STRING& text) { SetRange(text); }
+NUMERICALRANGE::~NUMERICALRANGE() = default;
+
+bool NUMERICALRANGE::SetRange(const STRING& text)
 {
-  NUMERICOBJ val;
-
-  val = val1;
-  val += val2;
-  return val;
-}
-NUMERICOBJ operator-(const NUMERICOBJ& val1, const DOUBLE val2)
-{
-  NUMERICOBJ val;
-
-  val = val1;
-  val -= val2;
-  return val;
-}
-NUMERICOBJ operator*(const NUMERICOBJ& val1, const DOUBLE val2)
-{
-  NUMERICOBJ val;
-
-  val = val1;
-  val *= val2;
-  return val;
-}
-NUMERICOBJ operator/(const NUMERICOBJ& val1, const DOUBLE val2)
-{
-  NUMERICOBJ val;
-
-  val = val1;
-  val /= val2;
-  return val;
-}
-
-
-NUMERICALRANGE::NUMERICALRANGE()
-{
-  d_start = BAD_NUMBER;
-  d_end   = BAD_NUMBER;
-}
-
-NUMERICALRANGE::NUMERICALRANGE(const STRING& RangeString)
-{
-  d_start = BAD_NUMBER;
-  d_end   = BAD_NUMBER;
-  SetRange(RangeString);
-}
-
-NUMERICALRANGE::~NUMERICALRANGE()
-{
-  ;
-}
-
-// Formats:
-//   (x,y) [x,y] x..y x-y x:y x/y
-// where x,y are floating point numbers
-//
-
-bool NUMERICALRANGE::SetRange(const STRING& RangeString)
-{
-#if 1
-    double start = BAD_NUMBER;
-    double end   = BAD_NUMBER;
-    char tail[2]; 
-    int fields = 0;
-
-    const STRING range ( RangeString.Strip(STRING::both) );
-    const char* tcp = range.c_str();
-
-    if (!tcp  || *tcp == '\0') return false;
-    // 1. PRE-SCREEN: Reject if we see Time/Date indicators like ':' or 'T' or 'Z'
-    // This immediately kills cases like "12.12:0-30" or "2023-10-1T12:00"
-    if (strpbrk(tcp, ":TZtz")) {
-        return false;
+  d_start = NUMERICOBJ();
+  d_end = NUMERICOBJ();
+  STRING range(text.Strip(STRING::both));
+  const size_t length = range.GetLength();
+  if (length < 3) return false;
+  if ((range[0U] == '[' && range[length-1] == ']') ||
+      (range[0U] == '(' && range[length-1] == ')'))
+    range = STRING(range.c_str()+1, length-2);
+  const char *data = range.c_str();
+  for (size_t i = 1; i+1 < range.GetLength(); ++i)
+    {
+      size_t separator = data[i] == ',' || data[i] == '-' ? 1 :
+                         data[i] == '.' && data[i+1] == '.' ? 2 : 0;
+      if (!separator) continue;
+      const NUMERICOBJ start(STRING(data, i)), end(STRING(data+i+separator));
+      if (start.Ok() && end.Ok())
+        {
+          d_start = start;
+          d_end = end;
+          return true;
+        }
     }
-
-    switch(*tcp) {
-        case '[': 
-            fields = sscanf(tcp, "[%lf,%lf]%1s", &start, &end, tail);
-            break;
-
-        case '(': 
-            fields = sscanf(tcp, "(%lf,%lf)%1s", &start, &end, tail);
-            break;
-
-        default:
-            // 2. Try the ".." separator (Preferred)
-            fields = sscanf(tcp, "%lf..%lf%1s", &start, &end, tail);
-            
-            // 3. Try the "-" separator (The tricky one)
-            if (fields != 2) {
-                // To support negative numbers, we use sscanf logic carefully.
-                // This will match "10-20", "-10-20", or "10--20"
-                fields = sscanf(tcp, "%lf-%lf%1s", &start, &end, tail);
-            }
-
-            // 4. Fallback: Try a single float
-            if (fields != 2) {
-                fields = sscanf(tcp, "%lf%1s", &start, tail);
-                if (fields == 1) end = start;
-            }
-            break;
-    }
-
-    // 5. FINAL VALIDATION
-    // fields == 1 means sscanf found one double and nothing else.
-    // fields == 2 means sscanf found two doubles and nothing else.
-    // If fields is 3, tail captured junk (like "123-456ABC"), so we reject.
-    if (fields == 2) {
-        d_start = start;
-        d_end = end;
-        return true;
-    }
-
-    return false;
-#else
-  int         fieldcount = 0;
-  const char *tcp        = RangeString.c_str();
-  DOUBLE      start      = BAD_NUMBER;
-  DOUBLE      end        = BAD_NUMBER;
-  char        tail[2];
-
-  while (isspace(*tcp)) tcp++;  // Skip blanks
-
-  switch(*tcp) {
-    case '\0': /* Empty String */; break;
-    case '[': fieldcount = sscanf(tcp,"[%lf,%lf]", &start, &end); break;
-    case '(': fieldcount = sscanf(tcp,"(%lf,%lf)", &start, &end); break;
-    default:
-    if ((fieldcount = sscanf(tcp,"%lf..%lf%1s", &start, &end, tail)) == 1)
-      {
-	if (start == (double)(int)(start))
-	  {
-	    long istart, iend;
-	    if ((fieldcount = sscanf(tcp,"%ld..%ld%1s", &istart, &iend, tail)) >= 2)
-	      {
-		if (fieldcount == 3) return false;
-		end = iend;
-		break;
-	      }
-	    else if ((fieldcount = sscanf(tcp,"%ld--%ld%1s", &istart, &iend, tail)) >= 2)
-	     {
-		if (fieldcount == 3) return false;
-		end = iend;
-		break;
-	     }
-	  }
-	if (!isdigit(*tcp) && (*tcp != '.'))
-	  break; // Not a number
-	while(isdigit(*tcp)) tcp++;
-
-	if (*tcp == 'T' || *tcp == 'Z') // Its a date!
-	   return false;
-	if (*tcp == '.') tcp++;
-	while (isdigit(*tcp)) tcp++;
-	// Now do we have another number?
-	if (*tcp == '-' && (isdigit(tcp[1]) || (tcp[1] == '.' && isdigit(tcp[3]) )))
-	  {
-	    // Format:  Num-Num2
-	    end = atof(tcp+1);
-	    fieldcount = 2;
-	    break;
-	  }
-	while (isspace(*tcp)) tcp++;
-	if (*tcp == ','  || *tcp == ':' || *tcp == '/')
-	  {
-	    tcp++;
-	    while (isspace(*tcp)) tcp++;
-	    if ((isdigit(*tcp) || (*tcp == '.' && isdigit(tcp[1])))
-			|| (*tcp == '-' && isdigit(tcp[1])))
-	      {
-		// Looking at number
-		end = atof(tcp);
-		fieldcount = 2;
-		break;
-	      }
-	  }
-      }
-  }
-  d_start = start;
-  d_end   = end;
-  return fieldcount == 2;
-#endif
+  return false;
 }
 
-
-bool NUMERICALRANGE::Ok() const
-{
-  return d_start.val != BAD_NUMBER && d_end.val != BAD_NUMBER;
-}
-
-bool NUMERICALRANGE::Defined() const
-{
-  return d_start.val != BAD_NUMBER || d_end.val != BAD_NUMBER;
-}
+bool NUMERICALRANGE::Ok() const { return d_start.Ok() && d_end.Ok(); }
+bool NUMERICALRANGE::Defined() const { return d_start.Ok() || d_end.Ok(); }
 
 static const INT4 CURRENCY_MODULO = MONETARYOBJ::TICKS_PER_UNIT;
 
@@ -441,19 +426,20 @@ static void TrimMoneySpaces(const unsigned char *begin, const unsigned char *&en
       if (end <= begin)
         return;
 
+      // Consume UTF-8 before testing its final byte as a single-byte space.
+      if (end - begin >= 2 &&
+          end[-2] == 0xC2 && end[-1] == 0xA0)
+        {
+          end -= 2;
+          continue;
+        }
+
       // ASCII / legacy single-byte space.
       if (end[-1] == ' ' ||
           (end[-1] >= '\t' && end[-1] <= '\r') ||
           end[-1] == 0xA0)
         {
           --end;
-          continue;
-        }
-
-      if (end - begin >= 2 &&
-          end[-2] == 0xC2 && end[-1] == 0xA0)
-        {
-          end -= 2;
           continue;
         }
 
@@ -598,13 +584,6 @@ static bool ConsumeCurrencySymbol(const unsigned char *&p, const unsigned char *
 
 static bool ConsumeCentSuffix(const unsigned char *&end, const unsigned char *begin)
 {
-  // Legacy ¢.
-  if (end > begin && end[-1] == 162)
-    {
-      --end;
-      return true;
-    }
-
   // UTF-8 U+00A2 ¢
   if (end - begin >= 2 && end[-2] == 0xC2 && end[-1] == 0xA2)
     {
@@ -612,7 +591,27 @@ static bool ConsumeCentSuffix(const unsigned char *&end, const unsigned char *be
       return true;
     }
 
+  // Legacy ¢. Test after UTF-8 so its final byte is not consumed alone.
+  if (end > begin && end[-1] == 162)
+    {
+      --end;
+      return true;
+    }
+
   return false;
+}
+
+bool MONETARYOBJ::IsExplicitCurrency(const STRING& s)
+{
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(s.c_str());
+  const unsigned char *end = p + s.GetLength();
+  SkipMoneySpaces(p, end);
+  TrimMoneySpaces(p, end);
+
+  // Reuse the parser's marker rules before doing any amount conversion.
+  if (!ConsumeCurrencySymbol(p, end, nullptr) && !ConsumeCentSuffix(end, p))
+    return false;
+  return MONETARYOBJ(s).Ok();
 }
 
 
@@ -1177,7 +1176,9 @@ MONETARYOBJ::MONETARYOBJ(const NUMBER x)
 MONETARYOBJ::MONETARYOBJ(const NUMERICOBJ& x)
 {
   Invalidate();
-  Set((NUMBER)x);
+  INT16 ticks;
+  if (x.Ok() && fixed128::MulDiv(x.GetTicks(), INT16(TICKS_PER_UNIT), NUMERICOBJ::TICKS_PER_UNIT, &ticks))
+    SetTicks(ticks);
 }
 
 
@@ -1630,28 +1631,6 @@ bool INTEGEROBJ::Set(const STRING& s)
 
 
   /*
-   * FAST PATH
-   *
-   * This should handle the overwhelming majority of integer metadata:
-   *
-   *     123
-   *     -123
-   *     +123
-   */
-  {
-    INT16 value;
-
-    const auto result = std::from_chars(p, end, value, 10);
-
-    if (result.ec == std::errc() && result.ptr == end) {
-      val   = value;
-      valid = true;
-      return true;
-    }
-  }
-
-
-  /*
    * From here on we interpret the value according to INTEGER semantics.
    */
   bool negative = false;
@@ -1696,6 +1675,20 @@ bool INTEGEROBJ::Set(const STRING& s)
     valid = true;
     return true;
   };
+
+  // std::from_chars for __int128 is unavailable in strict C++17 on
+  // several standard libraries. Keep the ordinary integer path exact.
+  {
+    UINT16 magnitude = 0;
+    const char *q = p;
+    for (; q != end && *q >= '0' && *q <= '9'; ++q)
+      {
+        const unsigned digit = *q-'0';
+        if (magnitude > (limit-digit)/10) break;
+        magnitude = magnitude*10+digit;
+      }
+    if (q == end) return commit(magnitude);
+  }
 
 
   /*

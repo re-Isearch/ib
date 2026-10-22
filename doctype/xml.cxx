@@ -55,6 +55,10 @@ void XML::ParseRecords(const RECORD& FileRecord)
 
 //cerr << "XML::ParseRecords" << endl;
 
+
+//cerr << "Mapping " << GlobalRecordStart << " - " << (GlobalRecordEnd ? GlobalRecordEnd+1 : 0) << endl;
+
+
   MMAP mapping (fn,
 	GlobalRecordStart,
 	GlobalRecordEnd ? GlobalRecordEnd+1 : 0,
@@ -68,6 +72,8 @@ void XML::ParseRecords(const RECORD& FileRecord)
   PCHR RecBuffer = (PCHR)mapping.Ptr();
   off_t ActualLength = mapping.Size();
 
+// cerr << "ActualLength = " << ActualLength << endl;
+
   // Min. XML is: <x>xx</x>
   if (ActualLength < 10) {
     if (ActualLength == 0)
@@ -79,7 +85,7 @@ void XML::ParseRecords(const RECORD& FileRecord)
 
   off_t Start = 0, End = 0, tagStart=0;
   STRING tag, eTag;
-  int     recordCount = 0;
+  unsigned recordCount = 0;
 
 #if 1
   //
@@ -128,7 +134,7 @@ void XML::ParseRecords(const RECORD& FileRecord)
   State = ScanToStart;
   tag.Clear();
 
-//cerr << "ActualLength = " << ActualLength << endl;
+// cerr << "ActualLength = " << ActualLength << endl;
   for (i = Start; i < ActualLength; i++)
     {
       CHR Ch = RecBuffer[i];
@@ -232,6 +238,8 @@ void XML::ParseRecords(const RECORD& FileRecord)
  } while (Start < ActualLength);
 
 
+// cerr << "Start now at " << Start << endl;
+
 #if 0
   // 2nd level parse
   if (recordCount == 1) {
@@ -243,7 +251,7 @@ cerr << Record.GetRecordStart() << " -- " << Record.GetRecordEnd() << endl;
   }
 #endif
 
- if (recordCount > 1) message_log (LOG_INFO, "%s: Added %d records.", Doctype.c_str(), recordCount);
+ if (recordCount > 1) message_log (LOG_INFO, "%s: Added %u records.", Doctype.c_str(), recordCount);
 }
 
 /*

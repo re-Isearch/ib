@@ -5,57 +5,62 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE
 #ifndef NUMBERS_HXX
 # define NUMBERS_HXX 1
 
+#include "defs.hxx"
+#include <type_traits>
+
 class NUMERICOBJ {
  friend class NUMERICALRANGE;
 public:
-  NUMERICOBJ ();
-  NUMERICOBJ (const STRING& s);
-  NUMERICOBJ (NUMBER x) { val = x; }
+  static constexpr unsigned FRACTION_DIGITS = 16;
+  static constexpr UINT8 TICKS_PER_UNIT = UINT8(10000000000000000ULL);
+  static constexpr size_t DISK_SIZE = 17;
 
-  bool Ok() const;
+  NUMERICOBJ() : Ticks(0), Valid(false) {}
+  NUMERICOBJ(const STRING& s) : NUMERICOBJ() { Set(s); }
+  NUMERICOBJ(NUMBER x) : NUMERICOBJ() { Set(x); }
+  NUMERICOBJ(INT16 x) : NUMERICOBJ() { SetWhole(x); }
+  NUMERICOBJ(UINT16 x) : NUMERICOBJ() {
+    if (x <= UINT16(MAX_INT16) / TICKS_PER_UNIT) SetTicks(INT16(x * TICKS_PER_UNIT));
+  }
+  template <class T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+  NUMERICOBJ(T x) : NUMERICOBJ() { SetWhole(INT16(x)); }
+  template <class T, typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+  NUMERICOBJ(T x) : NUMERICOBJ() { Set(NUMBER(x)); }
 
-  NUMERICOBJ& operator=(const NUMERICOBJ& newVal) { val = newVal.val; return *this; }
+  bool Ok() const { return Valid; }
+  bool Set(const STRING& s);
+  bool Set(NUMBER x);
+  bool SetWhole(INT16 x);
+  bool SetTicks(INT16 ticks) { Ticks = ticks; Valid = true; return true; }
+  INT16 GetTicks() const { return Ticks; }
+  bool IsIntegral() const { return Valid && Ticks % TICKS_PER_UNIT == 0; }
+  STRING ToString() const;
+  static NUMERICOBJ FromTicks(INT16 ticks) { NUMERICOBJ x; x.SetTicks(ticks); return x; }
+  static NUMERICOBJ FromScaled(INT16 ticks, UINT8 scale);
 
-  NUMERICOBJ& operator +=(const NUMERICOBJ& x) {
-   val += x.val;
-   return *this;
-  }
-  NUMERICOBJ& operator -=(const NUMERICOBJ& x) {
-   val -= x.val;
-   return *this;
-  }
-  NUMERICOBJ& operator *=(const NUMERICOBJ& x) {
-   val *= x.val;
-   return *this;
-  }
-  NUMERICOBJ& operator /=(const NUMERICOBJ& x) {
-   val /= x.val;
-   return *this;
-  }
+  NUMERICOBJ& operator=(const NUMERICOBJ&) = default;
+  NUMERICOBJ& operator+=(const NUMERICOBJ& x);
+  NUMERICOBJ& operator-=(const NUMERICOBJ& x);
+  NUMERICOBJ& operator*=(const NUMERICOBJ& x);
+  NUMERICOBJ& operator/=(const NUMERICOBJ& x);
 
   friend NUMERICOBJ operator+(const NUMERICOBJ& val1,  const NUMERICOBJ& val2);
   friend NUMERICOBJ operator-(const NUMERICOBJ& val1,  const NUMERICOBJ& val2);
   friend NUMERICOBJ operator*(const NUMERICOBJ& val1,  const NUMERICOBJ& val2);
   friend NUMERICOBJ operator/(const NUMERICOBJ& val1,  const NUMERICOBJ& val2);
 
-  friend NUMERICOBJ operator+(const NUMERICOBJ& val1,  const DOUBLE val2);
-  friend NUMERICOBJ operator-(const NUMERICOBJ& val1,  const DOUBLE val2);
-  friend NUMERICOBJ operator*(const NUMERICOBJ& val1,  const DOUBLE val2);
-  friend NUMERICOBJ operator/(const NUMERICOBJ& val1,  const DOUBLE val2);
+  explicit operator long double() const { return Valid ? (long double)Ticks / TICKS_PER_UNIT : 0; }
+  explicit operator double() const { return (double)(long double)*this; }
+  explicit operator int() const { return Valid ? int(Ticks / TICKS_PER_UNIT) : 0; }
+  explicit operator long() const { return Valid ? long(Ticks / TICKS_PER_UNIT) : 0; }
+  explicit operator INT16() const { return Valid ? Ticks / TICKS_PER_UNIT : 0; }
 
-
-
-  operator long double() const { return (long double)val; }
-  operator double() const { return (double)val; }
-  operator int()    const { return (int)val;  }
-  operator long()   const { return (long)val; }
-
-  bool operator== (const NUMERICOBJ& Other) const { return val == Other.val; }
-  bool operator!= (const NUMERICOBJ& Other) const { return val != Other.val; }
-  bool operator>= (const NUMERICOBJ& Other) const { return val >= Other.val; }
-  bool operator<= (const NUMERICOBJ& Other) const { return val <= Other.val; }
-  bool operator>  (const NUMERICOBJ& Other) const { return val >  Other.val; }
-  bool operator<  (const NUMERICOBJ& Other) const { return val <  Other.val; }
+  bool operator==(const NUMERICOBJ& x) const { return Valid == x.Valid && Ticks == x.Ticks; }
+  bool operator!=(const NUMERICOBJ& x) const { return !(*this == x); }
+  bool operator>=(const NUMERICOBJ& x) const { return Valid && x.Valid && Ticks >= x.Ticks; }
+  bool operator<=(const NUMERICOBJ& x) const { return Valid && x.Valid && Ticks <= x.Ticks; }
+  bool operator>(const NUMERICOBJ& x) const { return Valid && x.Valid && Ticks > x.Ticks; }
+  bool operator<(const NUMERICOBJ& x) const { return Valid && x.Valid && Ticks < x.Ticks; }
 
   void        Write(FILE *Fp) const;
   bool Read(FILE *Fp);
@@ -64,13 +69,18 @@ public:
   friend bool Read(NUMERICOBJ *p, PFILE Fp);
 
   // STD IO Streams
-  friend ostream& operator <<(ostream& os, const NUMERICOBJ& val) { return os << (long double) val.val; }
+  friend ostream& operator <<(ostream& os, const NUMERICOBJ& val) { return os << val.ToString(); }
   friend istream& operator >>(istream& os, NUMERICOBJ& val) {
-	long double value; istream& res =  os >> value; val.val = value; return res; }
+	STRING value; istream& res = os >> value; val.Set(value); return res; }
 
 private:
-  NUMBER val;
+  void Invalidate() { Ticks = 0; Valid = false; }
+  INT16 Ticks;
+  bool Valid;
 };
+
+void Write(const NUMERICOBJ& value, FILE *fp);
+bool Read(NUMERICOBJ *value, FILE *fp);
 
 #if 0
 
@@ -219,7 +229,7 @@ public:
   bool Contains(const NUMERICOBJ& Test) const;
   bool Contains(const NUMERICALRANGE& OtherRange) const;
 
-  void        Clear()  { d_start = 0; d_end = 0; }
+  void        Clear()  { d_start = NUMERICOBJ(); d_end = NUMERICOBJ(); }
 
   // Comparison operators
   bool operator ==(const NUMERICALRANGE& OtherRange) const;
@@ -271,6 +281,9 @@ public:
 
   bool Ok() const { return Valid; }
 
+  // Autodetection needs a symbol or cent suffix; Set also accepts plain amounts.
+  static bool IsExplicitCurrency(const STRING& s);
+
   bool Set(const NUMBER x);
   bool Set(const STRING& s);
   bool SetTicks(INT16 ticks, bool fractionSpecified = true) {
@@ -302,7 +315,9 @@ public:
   operator long double() const {
     return Valid ? (long double)Ticks / (long double)TICKS_PER_UNIT : 0.0L;
   }
-  operator NUMERICOBJ() const { return NUMERICOBJ((long double)*this); }
+  operator NUMERICOBJ() const {
+    return Valid ? NUMERICOBJ::FromScaled(Ticks, TICKS_PER_UNIT) : NUMERICOBJ();
+  }
   operator double() const { return (double)((long double)*this); }
   operator int() const { return (int)GetWholePart(); }
   operator long() const { return (long)GetWholePart(); }

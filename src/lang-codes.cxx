@@ -51,46 +51,73 @@ static inline int compareFunc(const void *s1, const void *s2, const OCTET *tab,
 }
 
 
-// UTF-8 lexicographic comparison — codepoint order.
-//
-// Cannot use compareFunc/tab[] here: that model maps single bytes through a
-// 256-entry table, which is correct for 8-bit charsets but wrong for UTF-8
-// where meaning is carried by multi-byte sequences.  For UTF-8:
-//   - ASCII bytes (0x00-0x7f) compare identically to the 8859 ASCII table
-//   - Multi-byte lead bytes (0xc0-0xff) sort after all ASCII by value,
-//     which is exactly codepoint order since UTF-8 byte order == codepoint order
-//   - No table needed: the encoding itself guarantees correct ordering
-//
-// The ISO8859[] tables map each charset's byte values to their Unicode
-// codepoints for ordering.  For UTF-8 the bytes already ARE the Unicode
-// codepoint encoding, so decoding to UCS-32 and comparing gives the
-// equivalent result without a table.
-//
-// len is a byte count (matches the convention of the 8859 comparators).
+// Folded/cleaned UTF-8 has unsigned byte order. Do not map its individual
+// bytes through a single-byte case/class table. Compare prefixes bytewise so
+// a limit splitting a sequence is safe and has the same order as TermSort.
 static int CompareUTF8(const void *s1, const void *s2, size_t len)
 {
-    const UCHR *p1 = (const UCHR *)s1;
-    const UCHR *p2 = (const UCHR *)s2;
-    size_t       x  = 0;
+  const UCHR *p1 = static_cast<const UCHR *>(s1);
+  const UCHR *p2 = static_cast<const UCHR *>(s2);
+  for (size_t i = 0; i < len; ++i) {
+    unsigned a = p1[i], b = p2[i];
+    // Cleaning has resolved Unicode separators. ASCII separators terminate a
+    // term; 0x01 is the tokenizer's silent combining-mark/format sentinel.
+    if ((a <= 0x20 && a != 1) || a == 0x7f) a = 0;
+    if ((b <= 0x20 && b != 1) || b == 0x7f) b = 0;
+    if (a != b) return a < b ? -1 : 1;
+    if (!a) return 0;
+  }
+  return 0;
+}
 
-    while (x < len)
-    {
-        // Decode one codepoint from each side
-        uint32_t cp1 = _utf8_to_ucs32(p1);
-        uint32_t cp2 = _utf8_to_ucs32(p2);
+int _ib_SisCompare(const UCHR *left, const UCHR *right, size_t limit)
+{
+  if (_is_globalUTF8) return CompareUTF8(left, right, limit);
+  for (size_t i = 0; i < limit; ++i) {
+    const int a = __IB_cclass[left[i]], b = __IB_cclass[right[i]];
+    if (a != b) return a-b;
+    if (!a) return 0;
+  }
+  return 0;
+}
 
-        if (cp1 != cp2)
-            return (cp1 > cp2) ? 1 : -1;
-
-        if (cp1 == 0)
-            return 0;   // both NUL — equal
-
-        int step = _utf8_codepoint_len(p1);
-        p1 += step;
-        p2 += step;     // same step: equal codepoints have equal encoding length
-        x  += step;
+size_t _ib_UTF8TermLength(const UCHR *text, size_t length)
+{
+  size_t offset = 0;
+  while (offset < length) {
+    if (text[offset] == 1) { ++offset; continue; } // silent normalization byte
+    uint32_t cp;
+    const int bytes = _to_ucs4(text+offset, text+length, &cp);
+    if (bytes <= 0 || !cp) break;
+    UCHR lookahead[8] = {};
+    const size_t remaining = length-offset;
+    memcpy(lookahead, text+offset, remaining < 7 ? remaining : 7);
+    bool term = _ib_IsUTF8TermChr(lookahead) != 0;
+    if (!term && offset && bytes == 1 && IsDotInWord(text[offset]) && remaining > 1) {
+      const UCHR next = text[offset+1];
+      term = !(next >= '0' && next <= '9') && _ib_IsUTF8TermChr(lookahead+1);
     }
-    return 0;
+    if (!term) break;
+    offset += size_t(bytes);
+  }
+  return offset;
+}
+
+int CHARSET::CompareSIS(const UCHR *left, size_t leftLength,
+                        const UCHR *right, size_t rightLength) const
+{
+  const size_t length = leftLength < rightLength ? leftLength : rightLength;
+  if (isUTF8()) {
+    const int diff = length ? memcmp(left, right, length) : 0;
+    if (diff) return diff;
+  } else {
+    for (size_t i = 0; i < length; ++i) {
+      const int a = cclass[left[i]], b = cclass[right[i]];
+      if (a != b) return a-b;
+      if (!a) break;
+    }
+  }
+  return (leftLength > rightLength) - (leftLength < rightLength);
 }
 
 /// TODO: 
@@ -134,9 +161,8 @@ static int SIScompareFunc(const void *node1, const void *node2, const OCTET *tab
 // layout as the corresponding lowercased bytes in node2 would have, so a
 // byte-for-byte equality test is valid without decoding codepoints.
 //
-// The mismatch and boundary paths do need UTF-8 awareness:
-//   - diff returns the UCS-32 codepoint difference, not a raw byte value
-//   - the term boundary check must not land mid-sequence
+// Stored byte lengths bound the comparison and determine exact/prefix matches;
+// neither padding nor the GP following the key participates in the comparison.
 
 // NOTE:   SIS_UTF8 = SIScompareFuncUTF8 since we don't have a tab!
 static int SIScompareFuncUTF8(const void *node1, const void *node2)
@@ -145,29 +171,14 @@ static int SIScompareFuncUTF8(const void *node1, const void *node2)
     const unsigned char *p1        = ((const unsigned char *)node1) + 2;
     const unsigned char *p2        = ((const unsigned char *)node2) + 1;
 
-    int diff = memcmp(p1, p2, stringLen); // byte-equal iff already case-folded
-    if (diff == 0)
-    {
-        const size_t matchLen = *((const unsigned char *)node1);
-        if (matchLen)
-        {
-            const unsigned char *boundary = p2 + matchLen;
-
-            // Guard: matchLen must not point into the middle of a multi-byte
-            // sequence.  A continuation byte (10xxxxxx) means the index was
-            // built with a misaligned length — treat as a non-boundary so the
-            // match is rejected, same as IsTermChr would reject it.
-            const bool midSequence = ((*boundary & 0xc0) == 0x80);
-
-            if (!midSequence && IsTermChr(boundary))
-            {
-                // Boundary lands on the start of a term character that was not
-                // part of the match — reject by returning the full UCS-32 value
-                // of that codepoint (positive, non-zero, meaningful magnitude).
-                diff = -(int)_utf8_to_ucs32(boundary);
-            }
-        }
-    }
+    const size_t termLen = *static_cast<const UCHR *>(node2);
+    const size_t length = stringLen < termLen ? stringLen : termLen;
+    int diff = memcmp(p1, p2, length);
+    if (!diff && stringLen > termLen) return 1;
+    // The stored length already describes a token. An exact query ending
+    // before it (including mid-sequence) is a prefix, not a complete match.
+    const size_t matchLen = *static_cast<const UCHR *>(node1);
+    if (!diff && matchLen && matchLen < termLen) return -1;
     return diff;
 }
 
@@ -3860,7 +3871,12 @@ static int SISASCII(const void *s1, const void *s2)
 
 static int SISUTF8(const void *s1, const void *s2)
 {
-  return SIScompareFunc(s1, s2);
+  return SIScompareFuncUTF8(s1, s2);
+}
+
+static int funcUTF8(const void *s1, const void *s2)
+{
+  return CompareUTF8(s1, s2, StringCompLength);
 }
 
 /****************/
@@ -3886,6 +3902,9 @@ BYTE CHARSET::SetSet (BYTE Id)
      {
        _is_globalUTF8 = true; // UTF8 is special. It has global application!
        SetSet(charsets[0].Id); // The 7-bit ASCII is OK
+       cclassComp = funcUTF8;
+       sisComp = SISUTF8;
+       nComp = CompareUTF8;
        return Which = UTF8;
      }
    else if (Id <= MAX_CHARSET_ID)
@@ -4111,9 +4130,11 @@ static bool _setcharset(BYTE Charset,
 
 bool SetGlobalCharset (BYTE Charset)
 {
+  if (Charset == 0xff) Charset = Charset2Id(static_cast<const char *>(nullptr));
   if (!_setcharset(Charset, &__IB_ctype, &__IB_trans_upper, &__IB_trans_lower, &__IB_cclass))
     return false;
   CharsetId  = Charset;
+  _is_globalUTF8 = Charset == UTF8;
   return true;
 }
 

@@ -58,7 +58,8 @@ MDTREC::MDTREC(MDT *Mdt)
   Key[0]               = '\0';
   GlobalFileStart      = 0;
   LocalRecordStart     = 0;
-  LocalRecordEnd       = 0;
+  LocalRecordSpan      = 0;
+  RangeValid           = 1;
   Locale               = 0;
   Priority             = 0;
   Category             = 0;
@@ -98,7 +99,8 @@ MDTREC& MDTREC::operator=(const MDTREC& OtherMdtRec)
   GlobalFileEnd = OtherMdtRec.GlobalFileEnd;
 #endif
   LocalRecordStart = OtherMdtRec.LocalRecordStart;
-  LocalRecordEnd = OtherMdtRec.LocalRecordEnd;
+  LocalRecordSpan = OtherMdtRec.LocalRecordSpan;
+  RangeValid = OtherMdtRec.RangeValid;
   Date = OtherMdtRec.Date;
   DateCreated = OtherMdtRec.DateCreated;
   DateModified = OtherMdtRec.DateModified;
@@ -117,7 +119,7 @@ void MDTREC::FlipBytes()
   Swab(&GlobalFileEnd);
 #endif
   Swab(&LocalRecordStart);
-  Swab(&LocalRecordEnd);
+  Swab(&LocalRecordSpan);
   Swab(&Date.d_date);
   Swab(&Date.d_rest);
   Swab(&DateCreated.d_date);
@@ -329,6 +331,11 @@ SRCH_DATE MDTREC::GetDate(FILE *fp, size_t Index) const
 
 bool MDTREC::Write(FILE *fp, size_t Index) const
 {
+  if (RangeValid != 1)
+    {
+      message_log(LOG_ERROR, "Cannot write MDT record with an invalid or oversized local span");
+      return false;
+    }
   if (fp == NULL)
     {
       message_log(LOG_PANIC, "Can't write MDT element: MDTREC::Write(NULL, %llu)",
@@ -362,13 +369,15 @@ bool MDTREC::Read(FILE *fp, size_t Index)
     return false;
 
   HashTable = ht;
-  return true;
+  return RangeValid == 1;
 }
 
 bool MDTREC::IsDeleted(FILE *fp, size_t Index)
 {
   BYTE deleted = 0xFF;
-  if (!SeekMdtRecord(fp, Index, sizeof(MDTREC) - sizeof(BYTE)))
+  const size_t propertyOffset = reinterpret_cast<const BYTE *>(&Property) -
+                                reinterpret_cast<const BYTE *>(this);
+  if (!SeekMdtRecord(fp, Index, propertyOffset))
     return true;
   if (fread(&deleted, sizeof(BYTE), 1, fp) != 1)
     return true;

@@ -93,7 +93,7 @@ static void dumpXMLHitTable(FCLIST *HitTable, VIDB *vidb, const RESULT& Result)
       cerr << "Can't resolve record!" << endl;
       return;
     } 
-  int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+  const GPTYPE offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
 
   if (z)
     {
@@ -187,7 +187,7 @@ static void dumpJsonHitTable(FCLIST *HitTable, VIDB *vidb, const RESULT& Result)
       cerr << "Can't resolve record!" << endl;
       return;
     } 
-  int offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+  const GPTYPE offset = mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
 
   if (z)
     {

@@ -63,11 +63,11 @@ public:
   PATHNAME  RelativizePathname(const STRING& RootDir);
   PATHNAME  RelativizeOrigPathname(const STRING& RootDir);
 
-  void    SetRecordStart(const UINT4 NewStart) { RecordStart = NewStart; }
-  UINT4   GetRecordStart() const               { return RecordStart;     }
+  void    SetRecordStart(const GPTYPE NewStart) { RecordStart = NewStart; }
+  GPTYPE  GetRecordStart() const                { return RecordStart;     }
 
-  void    SetRecordEnd(const UINT4 NewEnd) { RecordEnd = NewEnd; }
-  UINT4   GetRecordEnd() const             { return RecordEnd;   }
+  void    SetRecordEnd(const GPTYPE NewEnd) { RecordEnd = NewEnd; }
+  GPTYPE  GetRecordEnd() const              { return RecordEnd;   }
 
   bool IsEmpty() const { return GetLength() <= 0; }
   off_t       GetLength () const;
@@ -142,8 +142,8 @@ private:
   STRING         baseDir;
   PATHNAME       Pathname;
   PATHNAME       origPathname;
-  UINT4          RecordStart;
-  UINT4          RecordEnd;
+  GPTYPE         RecordStart; // Absolute byte position in the source file.
+  GPTYPE         RecordEnd;   // Inclusive; zero retains the to-EOF convention.
   DOCTYPE_ID     DocumentType;
   DFT            Dft;
   LOCALE         Locale;

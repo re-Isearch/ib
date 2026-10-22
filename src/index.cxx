@@ -108,6 +108,8 @@ extern bool _is_globalUTF8;
 #include "metaphone.hxx"
 #include "doctype.hxx"
 #include <assert.h>
+#include <algorithm>
+#include <vector>
 #include "lock.hxx"
 //#include "dfdt.hxx"
 #include <iomanip>
@@ -116,7 +118,7 @@ extern bool _is_globalUTF8;
 #include "dictionary.hxx"
 
 #include "filemap.hxx" /* NEW INDEX STRATEGY */
-#include "mergeunit.hxx" /* NEW INDEX STRATEGY */
+#include "merge.hxx"
 #include "stoplist.hxx"
 
 #include "error.hxx"
@@ -258,25 +260,45 @@ static char * __priv_bsearch(const void *key,  const void *base0, size_t nmemb, 
 
 
 
-static inline size_t TermExtract(UCHR *Buffer, size_t Length=StringCompLength)
-{
-  size_t len = Length;
-  for (size_t z = 0; z< len; z++)
-    {
-      if (!IsTermChr(Buffer+z))
-        len = z;
-      else if (_ib_isupper(Buffer[z]))
-        Buffer[z] = _ib_tolower(Buffer[z]);
-    }
-  Buffer[len] = '\0';
-  return len;
-}
-
-
 // Zap all non acceptable characters
 static inline size_t BufferClean(UCHR *Buffer, size_t Length=StringCompLength,
                                  bool ToLower = false)
 {
+  if (!Length) return 0;
+  if (_is_globalUTF8)
+    {
+      // Classify the same folded/cleaned bytes as the tokenizer. Keep a copy
+      // when the caller wants the original display case.
+      std::vector<UCHR> folded;
+      if (!ToLower) folded.assign(Buffer, Buffer+Length);
+      UCHR *clean = ToLower ? Buffer : folded.data();
+      const UCHR *end = clean+Length;
+      for (size_t z = 0; z < Length;)
+        {
+          uint32_t cp;
+          const int bytes = _to_ucs4(clean+z, end, &cp);
+          if (bytes > 0) z += size_t(bytes);
+          else clean[z++] = ' '; // Invalid or incomplete sequence at the limit.
+        }
+      _utf_StrToLowerBuf(clean, unsigned(Length), true, ' ');
+      _ib_ZapNonTermASCII(clean, unsigned(Length), ' ');
+
+      size_t len = Length;
+      for (size_t z = 0; z < Length;)
+        {
+          // Walk whole terms/codepoints, including silent normalization bytes
+          // and dot-in-word lookahead. Never classify a continuation byte.
+          const size_t termBytes = _ib_UTF8TermLength(clean+z, Length-z);
+          if (termBytes) { z += termBytes; continue; }
+          uint32_t cp;
+          const int bytes = _to_ucs4(clean+z, end, &cp);
+          const size_t span = bytes > 0 ? size_t(bytes) : 1;
+          if (len == Length) len = z;
+          memset(Buffer+z, ' ', span);
+          z += span;
+        }
+      return len;
+    }
   size_t len = Length;
   for (size_t z = 0; z<Length; z++)
     {
@@ -292,8 +314,12 @@ static inline size_t BufferClean(UCHR *Buffer, size_t Length=StringCompLength,
   return len;
 }
 
-
-#if 1
+static inline size_t TermExtract(UCHR *Buffer, size_t Length=StringCompLength)
+{
+  const size_t len = BufferClean(Buffer, Length, true);
+  Buffer[len] = '\0';
+  return len;
+}
 
 static inline STRING TermClean(const STRING String, bool ToLower = false)
 {
@@ -301,40 +327,13 @@ static inline STRING TermClean(const STRING String, bool ToLower = false)
     UCHR *Buffer = String.NewUCString();
     const size_t len = String.GetLength();
 
-    if (_is_globalUTF8 && ToLower)
-      {
-        _utf_StrToLowerBuf(Buffer,
-                           (unsigned)len,
-                           true,
-                           (UCHR)' ');
-
-        _ib_ZapNonTermASCII(Buffer,
-                            (unsigned)len,
-                            (UCHR)' ');
-      }
-    else
-      {
-        BufferClean(Buffer, len, ToLower);
-      }
+    BufferClean(Buffer, len, ToLower);
 
     Result = Buffer;
     delete[] Buffer;
 
     return Result;
 }
-
-#else
-static inline STRING TermClean(const STRING String, bool ToLower = false)
-{
-  STRING Result;
-  UCHR *Buffer = String.NewUCString();
-  BufferClean(Buffer, String.GetLength(), ToLower);
-  Result = Buffer;
-  delete[] Buffer;
-  return Result;
-}
-#endif
-
 
 INDEX::INDEX (const PIDBOBJ DbParent, const STRING& NewFileName, size_t CacheSize)
 {
@@ -1208,38 +1207,6 @@ GPTYPE INDEX::GpOf(GPTYPE *Ptr, size_t Index) const
   return Ptr[Index];
 }
 
-static inline int SisCompare(const UCHR *p1, const UCHR *p2, int MaxLen = StringCompLength)
-{
-  int x = 0, diff;
-  while ((diff = _ib_diff(*p1, *p2)) == 0 &&  __IB_cclass[*p1])
-    {
-      if (++x >= MaxLen) break;
-      p1++, p2++;
-    }
-  return diff;
-}
-
-#if 1
-#define SisCompare2 SisCompare
-#else
-static int SisCompare2(const UCHR *p1, const UCHR *p2, int MaxLen = StringCompLength)
-{
-  int x = 0, diff;
-
-  while ((diff = _ib_diff(*p1, *p2)) == 0 &&  __IB_cclass[*p1] && __IB_cclass[*p2])
-    {
-      if (++x >= MaxLen) break;
-      p1++, p2++;
-    }
-  if (diff == 0 && x < MaxLen)
-    {
-      return __IB_cclass[*p1] - __IB_cclass[*p2];
-    }
-  return diff;
-}
-#endif
-
-
 #if 0
 bool INDEX::ExtractFieldTable(INT Number)
 {
@@ -1251,7 +1218,8 @@ NUMERICOBJ INDEX::encodeHash(const STRING& String) const
 {
   STRING     buffer ( String.DeQuote().Pack().Trim(STRING::both) );
   NUMERICOBJ val = buffer.CRC64();
-  NUMERICOBJ off = 1.0/(double)(buffer.GetLength() % 10000);
+  const size_t length = buffer.GetLength() % 10000;
+  const NUMERICOBJ off = NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
   return val + off;
 }
 
@@ -1261,7 +1229,8 @@ NUMERICOBJ INDEX::encodeCaseHash(const STRING& String) const
 
   buffer.MakeLower();
   NUMERICOBJ val = buffer.CRC64();
-  NUMERICOBJ off = 1.0/(double)(buffer.GetLength() % 10000);
+  const size_t length = buffer.GetLength() % 10000;
+  const NUMERICOBJ off = NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
   return val + off;
 }
 
@@ -1285,7 +1254,8 @@ NUMERICOBJ INDEX::encodeLexiHash(const STRING& String) const
   for (size_t i = 0; i < sizeof(x); i++)
     x = (x << 8) + tmp[i];
 
-  return (long double)x +  1.0/((double)(buffer.GetLength() % 10000));
+  const size_t length = buffer.GetLength() % 10000;
+  return NUMERICOBJ(x) + NUMERICOBJ(1) / NUMERICOBJ(length ? length : 10000);
 }
 
 
@@ -1331,7 +1301,12 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
   if (!FileName.IsEmpty()) // We want the right method to open for append
     switch ( (INT)FieldType )
       {
+        case FIELDTYPE::float64:
+          Float64ColumnMaps.Invalidate(FileName);
+          fp = FLOATLIST().OpenForAppend(FileName);
+          break;
         case FIELDTYPE::ttl:
+        case FIELDTYPE::computed:
         case FIELDTYPE::numerical:
 	case FIELDTYPE::phonhash:
 	case FIELDTYPE::phonhash2:
@@ -1343,6 +1318,7 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	case FIELDTYPE::smiles:
 	case FIELDTYPE::dotnumber:
 	case FIELDTYPE::boolean:
+	  NumericColumnMaps.Invalidate(FileName);
 	  fp = NUMERICLIST().OpenForAppend(FileName);
 	  break;
 #if HAVE_INTEGER
@@ -1383,7 +1359,10 @@ FILE *INDEX::OpenForAppend(const STRING& FieldName, FIELDTYPE FieldType)
 	  break;
 	case FIELDTYPE::privhash:
 	  if (_IB_private_hash)
-	    fp = NUMERICLIST().OpenForAppend(FileName);
+	    {
+	      NumericColumnMaps.Invalidate(FileName);
+	      fp = NUMERICLIST().OpenForAppend(FileName);
+	    }
 	  else
 	    FileName.Clear(); // Can't add to an undefined ...
           break;
@@ -1602,7 +1581,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
           case FIELDTYPE::ttl_expires:
           {
             NUMERICOBJ val (DocTypePtr->ParseTTL(FieldName, Buffer));
-              int        ttl = val;
+              int        ttl = (int)val;
               if (ttl > 0)
                 {
                   // Becomes a FIELDTYPE::date type(!)
@@ -1617,7 +1596,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
             case FIELDTYPE::time:
             {
               NUMERICOBJ val (DocTypePtr->ParseComputed(FieldName, Buffer));
-              time_t     time = val;
+              time_t     time = (long)val;
 
               // Numeric computed value for time_t struct (seconds since 1970)
               // this becomes a FIELDTYPE::date type(!)
@@ -1827,7 +1806,7 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	    }
 	    case FIELDTYPE::boolean:
 	    {
-              const NUMERICOBJ val ( (NUMBER)DocTypePtr->ParseBoolean(Buffer) );
+              const NUMERICOBJ val(DocTypePtr->ParseBoolean(Buffer));
               if (val.Ok())
                 {
                   NUMERICFLD(gp, val).Write(fp);
@@ -1876,6 +1855,23 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
 	      break;
 	    }
 #endif
+            case FIELDTYPE::float64:
+            {
+              DOUBLE value;
+              if (!DocTypePtr->ParseFloat64(STRING(Buffer.c_ustr()), &value))
+                {
+                  message_log(LOG_WARN, "Invalid or out-of-range float64 value in field '%s' at GP %lld",
+                              FieldName.c_str(), (long long)gp);
+                }
+              else if (FLOATFLD(gp, value).Write(fp)) ++items;
+              else
+                {
+                  ++errors;
+                  message_log(LOG_ERROR | LOG_ERRNO, "Failed writing float64 field '%s' at GP %lld",
+                              FieldName.c_str(), (long long)gp);
+                }
+              break;
+            }
 	    case FIELDTYPE::dotnumber:
             case FIELDTYPE::numerical:
             {
@@ -1910,11 +1906,11 @@ bool INDEX::WriteFieldData (const RECORD& Record, const GPTYPE GpOffset)
             }
             case FIELDTYPE::numericalrange:
             {
-              DOUBLE fStart = 0, fEnd = 0;
+              NUMERICOBJ fStart, fEnd;
               if (DocTypePtr->ParseRange(Buffer, FieldName, &fStart, &fEnd))
                 {
                   INTERVALFLD intervalfield;
-                  // Double pair
+                  // Exact decimal endpoints
                   intervalfield.SetGlobalStart(gp);
                   intervalfield.SetStartValue(fStart);
                   intervalfield.SetEndValue(fEnd);
@@ -2281,6 +2277,7 @@ src=\"%s\" version=\"0.1\">\n",
                   case FIELDTYPE::integer:
                   case FIELDTYPE::currency:
                   case FIELDTYPE::numerical:
+                  case FIELDTYPE::float64:
                     count = NumericalScan(&sList, fieldName);
                     break;
                   case FIELDTYPE::gpoly:
@@ -2636,6 +2633,16 @@ memory_allocation: // This is where we try to get memory
                 }
               else
                 {
+                  if (RecordStart >= MyMemoryMap.Size() ||
+                      (RecordEnd != 0 && (RecordEnd < RecordStart || RecordEnd > MyMemoryMap.Size())))
+                    {
+                      message_log(LOG_ERROR, "Invalid source range [%llu-%llu] in '%s'; skipping record",
+                        (unsigned long long)RecordStart, (unsigned long long)RecordEnd,
+                        DataFileName.c_str());
+                      ++Error;
+                      ++CurrentRecord;
+                      continue;
+                    }
                   const GPTYPE DataFileSize = ((RecordEnd == 0) ?
                                                MyMemoryMap.Size() - 1 /* added EDZ Sun Nov 16 --> */ - RecordStart:
                                                RecordEnd - RecordStart ) + 1;
@@ -2878,7 +2885,7 @@ memory_allocation: // This is where we try to get memory
   if (DebugMode) message_log (LOG_INFO, "Sort numeric field data...");
   SortNumericFieldData();
 
-  // now, do our *experimental* merge
+  // Consolidate according to the selected end-of-ingestion policy.
   if ((IndexNum = GetIndexNum()) == 1)
     {
       STRING s;
@@ -2902,8 +2909,11 @@ memory_allocation: // This is where we try to get memory
           message_log (LOG_ERRNO, "Could not move %s to %s", s.c_str(), IndexFileName.c_str());
         }
     }
-  else if (MergeStatus==iOptimize)
-    MergeIndexFiles();
+  else if (MergeStatus==iOptimize || MergeStatus==iZip)
+    {
+      if (!MergeIndexFiles())
+        ++Error;
+    }
   else if (MergeStatus==iCollapse || (MergeStatus==iIncremental && IndexNum > 2))
     CollapseIndexFiles();
   else if (IndexNum > 0 && Exists(IndexFileName))
@@ -2936,18 +2946,21 @@ INT INDEX::SisWrite(const STRING Str, FILE *dp)
     }
 
   if (Str.GetLength() == 0 ||
-      SisCompare((const UCHR *)lastSIString, (const UCHR *)Str, SisLimit) < 0)
+      _ib_SisCompare((const UCHR *)lastSIString, (const UCHR *)Str, SisLimit) < 0)
     {
       size_t len;
       const unsigned char *ptr = (const unsigned char *)lastSIString;
-      for (len = 0; len < SisLimit; len++)
+      if (_is_globalUTF8)
+        len = std::min(SisLimit, _ib_UTF8TermLength(ptr, lastSIString.GetLength()));
+      else for (len = 0; len < SisLimit && len < lastSIString.GetLength(); len++)
         {
           if (!IsTermChr(ptr+len))
             break;
         } // for
       putc(len & 0xFF, dp);
-      // Write SisLimit so that we can bsearch on it..
-      fwrite(ptr, sizeof(UCHR), SisLimit, dp);
+      // Pad short keys rather than reading beyond a STRING allocation.
+      fwrite(ptr, sizeof(UCHR), len, dp);
+      for (size_t i = len; i < SisLimit; ++i) putc(0, dp);
       ::putGPTYPE (SIScount-1, dp); // Write which SIS word..
       lastSIString = Str;
       return 1;
@@ -3027,11 +3040,21 @@ bool INDEX::CollapseIndexFiles()
             message_log (LOG_ERRNO, "Collapse: Could not Map '%s'", s.c_str());
             return false;
           }
+        if (SisFiles[j].Size() < 2)
+          {
+            message_log(LOG_ERROR, "Collapse: truncated SIS header in '%s'", s.c_str());
+            return false;
+          }
         if (DebugMode) message_log (LOG_DEBUG, "Mapped %s", s.c_str());
 
         const size_t compLength = (unsigned char)Map[0];
         //size of a sistring record
         const size_t dsiz = compLength + sizeof(GPTYPE)+1;
+        if (!compLength || (SisFiles[j].Size()-2) % dsiz)
+          {
+            message_log(LOG_ERROR, "Collapse: invalid SIS row size in '%s'", s.c_str());
+            return false;
+          }
         SisInfo[j].charsetId = (BYTE)Map[1];
         SisInfo[j].buf       = Map + 2;
         SisInfo[j].compLength= compLength;
@@ -3067,6 +3090,13 @@ bool INDEX::CollapseIndexFiles()
             SisInfo[0].charsetId, SisInfo[1].charsetId);
       return false;
     }
+  if (SisInfo[0].compLength != SisInfo[1].compLength)
+    {
+      message_log(LOG_ERROR, "Can't collapse different SIS prefix widths (%lu != %lu). Rebuild with one SIS limit.",
+                  (unsigned long)SisInfo[0].compLength, (unsigned long)SisInfo[1].compLength);
+      return false;
+    }
+  const CHARSET mergeCharset(SisInfo[0].charsetId);
 
   // Name of the Temp Index (for output)
   TmpIndexFile.form("%s.%d.%d", IndexFileName.c_str(), First, mypid);
@@ -3127,8 +3157,9 @@ bool INDEX::CollapseIndexFiles()
         {
           term1 = SisInfo[0].buf + pos1*SisInfo[0].dsiz;
           term2 = SisInfo[1].buf + pos2*SisInfo[1].dsiz;
-          size_t len = *term1 > *term2 ? *term1 : *term2;
-          dif =  SisCompare2(&term2[1], &term1[1], len);
+          const size_t len1 = std::min(size_t(*term1), SisInfo[0].compLength);
+          const size_t len2 = std::min(size_t(*term2), SisInfo[1].compLength);
+          dif = mergeCharset.CompareSIS(term2+1, len2, term1+1, len1);
         }
       if (dif >= 0)
         {
@@ -3324,6 +3355,73 @@ bool INDEX::CollapseIndexFiles()
   return true;
 }
 
+// Merge a fixed snapshot of completed numbered shards. New output is private
+// until both streams have closed successfully; numbered inputs remain available
+// to the existing live-search path throughout the merge.
+bool INDEX::ZipIndexFiles()
+{
+  const INT count = GetIndexNum();
+  if (count < 1) return true;
+  std::vector<MERGE::INPUT> inputs;
+  inputs.reserve(count);
+  for (INT i = 1; i <= count; ++i) {
+    const STRING suffix = STRING().form(".%d", i);
+    inputs.push_back({IndexFileName+suffix, SisFileName+suffix});
+  }
+  const STRING suffix = STRING().form(".1.%d", (int)getpid());
+  const MERGE::INPUT output = {IndexFileName+suffix, SisFileName+suffix};
+  MERGE zipper;
+  MERGE::STATS stats;
+  std::vector<STRING> common;
+  if (!zipper.Zip(inputs, output, IndexMagic, maxWordsCapacity,
+                  CommonWordsThreshold, &common, &stats)) {
+    Parent->SetErrorCode(2);
+    return false;
+  }
+  if (GetIndexNum() != count) {
+    message_log(LOG_ERROR, "Merge: shard count changed while merging; retaining original shards");
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  // RenameFile also accepts directory destinations. Index publication must
+  // replace these exact filenames, never move a temporary inside a directory.
+  if (DirectoryExists(IndexFileName) || DirectoryExists(SisFileName)) {
+    message_log(LOG_ERROR, "Merge: an output filename names a directory");
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  // Keep the existing numbered-shard publication protocol: readers switch to
+  // the unnumbered pair when the MDT count becomes zero. Never retire inputs
+  // following a failed write, close, rename, or metadata update.
+  if (RenameFile(output.index, IndexFileName) != 0) {
+    message_log(LOG_ERRNO, "Could not install '%s' as '%s'",
+                output.index.c_str(), IndexFileName.c_str());
+    UnlinkFile(output.index); UnlinkFile(output.sis);
+    return false;
+  }
+  if (RenameFile(output.sis, SisFileName) != 0) {
+    message_log(LOG_ERRNO, "Could not install '%s' as '%s'",
+                output.sis.c_str(), SisFileName.c_str());
+    UnlinkFile(output.sis);
+    return false;
+  }
+  if (!SetIndexNum(0)) return false;
+  IndexNum = 0;
+  if (CommonWords) CommonWords->Clear();
+  for (const auto& word : common) {
+    if (!CommonWords) CommonWords = new STRLIST();
+    CommonWords->AddEntry(word);
+  }
+  for (const auto& input : inputs) {
+    if (UnlinkFile(input.index) == -1) AddtoGarbageFileList(input.index);
+    if (UnlinkFile(input.sis) == -1) AddtoGarbageFileList(input.sis);
+  }
+  message_log(LOG_INFO, "Zipped %llu postings (%lu SIS keys) from %d shards in %lu pass(es).",
+              (unsigned long long)stats.postings, (unsigned long)stats.terms,
+              count, (unsigned long)stats.passes);
+  return true;
+}
+
 bool INDEX::MergeIndexFiles()
 {
   if ((IndexNum=GetIndexNum()) < 1)
@@ -3347,7 +3445,7 @@ bool INDEX::MergeIndexFiles()
       long uid = 0;
       // Get PID
       tmp[0] = '\0';
-      if (fscanf(fj, "%ld %ld %s\n", &pid, &uid, tmp) != 3)
+      if (fscanf(fj, "%ld %ld %255s\n", &pid, &uid, tmp) != 3)
         message_log (LOG_WARN, "Optimizer lockfile '%s' is corrupt!", lockName.c_str());
       fclose(fj);
       if (tmp[0] && strcasecmp(hostname, tmp) != 0 && strcmp(hostname, tmp) != 0)
@@ -3383,6 +3481,8 @@ bool INDEX::MergeIndexFiles()
                 Index might be corrupt.", ProcessOwner(uid).c_str(), pid );
 #endif
 
+          const STRING oldSuffix = STRING().form(".1.%ld", pid);
+          MERGE::RemoveTemporaries({IndexFileName+oldSuffix, SisFileName+oldSuffix});
           const INT y = GetIndexNum();
           for (INT i = 1; i <= y; i++)
             {
@@ -3402,26 +3502,25 @@ bool INDEX::MergeIndexFiles()
 #ifdef _WIN32
 # define getuid(_x) 0
 #endif
-      fprintf(fj, "%ld %ld %s\n", (long)getpid(), (long)getuid (), hostname);
-      fclose(fj);
+      const bool written = fprintf(fj, "%ld %ld %s\n", (long)getpid(), (long)getuid (), hostname) >= 0;
+      const bool closed = fclose(fj) == 0;
+      if (!written || !closed) {
+        message_log(LOG_ERRNO, "Can't write optimizer lock '%s'!", lockName.c_str());
+        UnlinkFile(lockName);
+        return false;
+      }
     }
   else
     {
       message_log(LOG_WARN|LOG_ERRNO, "Can't set optimizer lock '%s'!", lockName.c_str());
+      return false;
     }
 
-// message_log (LOG_INFO, "%d Sub-Indexes to Merge", IndexNum);
-  // Collapse down to 1...
-  do
-    {
-      if (CollapseIndexFiles() == false)
-        break;
-    }
-  while ((IndexNum=GetIndexNum()) > 1);
+  const bool merged = ZipIndexFiles();
 
   if (UnlinkFile(lockName) == -1) // Zap the lock!
     message_log (LOG_ERRNO, "Could not remove optimizer lock '%s'!", lockName.c_str());
-  return true;
+  return merged;
 }				// end function
 
 #if 0
@@ -3517,7 +3616,7 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
         tries++;
       }
     while (Exists(TmpIndexFileName));
-    message_log ((tries > 2 && MergeStatus) ? LOG_WARN : LOG_DEBUG,
+    message_log ((tries > 2 && !IsFastIndexingMode(MergeStatus)) ? LOG_WARN : LOG_DEBUG,
           "%d indexer slots were occupied on '%s'.%s", IndexNum, IndexFileName.c_str(),
           IndexNum > 2 ? " Unmerged or other indexer running?" : "");
   }
@@ -3602,7 +3701,7 @@ bool INDEX::FlushIndexFiles(PUCHR MemoryData,
               repeat = strncmp((const char *)&MemoryData[ NewMemoryIndex[i-1] ],
                                (const char *)&MemoryData[ NewMemoryIndex[i] ], SisLimit);
 #else
-              repeat = SisCompare(&MemoryData[ NewMemoryIndex[i-1] ], &MemoryData[ NewMemoryIndex[i] ], SisLimit);
+              repeat = _ib_SisCompare(&MemoryData[ NewMemoryIndex[i-1] ], &MemoryData[ NewMemoryIndex[i] ], SisLimit);
 #endif
             }
         }
@@ -4365,6 +4464,11 @@ PIRSET INDEX::Search (const QUERY& Query)
                     Structure=ZStructDateRange;
                   NewIrset=DoDateSearch(Term,FieldName,Relation,Structure);
                 }
+              else if (FieldType.IsFloat64() || aFieldType.IsFloat64())
+                {
+                  if (gotRelation == false) Relation = ZRelEQ;
+                  NewIrset = Float64Search(Term, FieldName, Relation);
+                }
 #if HAVE_INTEGER
               else if (FieldType.IsInteger() || aFieldType.IsInteger())
                 {
@@ -4408,7 +4512,7 @@ PIRSET INDEX::Search (const QUERY& Query)
                 {
                   if (gotRelation==false) Relation=ZRelEQ;
 //cerr << "Numeric Search for: " << Term << " rel=" << Relation << endl;
-                  NewIrset=NumericSearch(Term.GetDouble(), FieldName, Relation);
+                  NewIrset=NumericSearchTerm(Term, FieldName, Relation);
                 }
               else if (aFieldType.IsCurrency() || FieldType.IsCurrency()) // FIELDTYPE::currency
                 {
@@ -4748,6 +4852,9 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
 //
 INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) const
 {
+    if (!Dest) return -1;
+    Dest[0] = '\0';
+    if (Length <= 0) return 0;
     MDTREC Mdtrec;
     UCHR  *Buffer = Dest;
 
@@ -4778,14 +4885,12 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
             Offset -= diff;
             diff = 0;
           }
-        if (diff >= 0)
+        if (diff >= 0 && Offset >= 0 && GPTYPE(Offset) <= Mdtrec.GetLocalRecordEnd())
           {
-            // Get Length Right
-            if ((GPTYPE)(Length + Offset) > Mdtrec.GetLocalRecordEnd())
-              {
-                // Don't cross End-of-Record boundary
-                Length =  Mdtrec.GetLocalRecordEnd() - Offset;
-              }
+            // Record endpoints are inclusive. Keep the final byte, including
+            // the last continuation byte of a UTF-8 character at record end.
+            const GPTYPE available = Mdtrec.GetLocalRecordEnd() - GPTYPE(Offset) + 1;
+            if (GPTYPE(Length) > available) Length = INT(available);
 
             DOCTYPE     *DoctypePtr = Parent->GetDocTypePtr ( Mdtrec.GetDocumentType() );
             const STRING filename (  Parent->ResolvePathname(Mdtrec.GetFullFileName()) );
@@ -4809,6 +4914,7 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
           }
 //        if (DebugMode)
           message_log(LOG_DEBUG, "*::GetTerm() returned %d of max. %d characters", x, Length);
+        if (x < 0) { Buffer[0] = '\0'; return x; }
         Buffer[x] = '\000';
         return (INT)x;
       }
@@ -4823,11 +4929,18 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
 
 INT INDEX::GetIndirectTerm(const GPTYPE Gp, PUCHR Buffer, INT MaxLength) const
   {
+    if (MaxLength <= 0)
+      {
+        if (Buffer) Buffer[0] = '\0';
+        return 0;
+      }
+    std::vector<UCHR> storage;
     if (Buffer == NULL)
       {
         try
           {
-            Buffer = new UCHR[MaxLength+1];
+            storage.resize(size_t(MaxLength)+1);
+            Buffer = storage.data();
           }
         catch (...)
           {
@@ -7579,6 +7692,10 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
   long errors = 0;
   bool haveDeleted = (Parent->GetTotalDocumentsDeleted() > 0);
   long notFound = 0;
+  struct CharsetScope {
+    BYTE previous = GetGlobalCharset();
+    ~CharsetScope() { SetGlobalCharset(previous); }
+  } charsetScope;
 
   for (INT jj = 1; (jj <= NumberOfIndexes) || (NumberOfIndexes == 0); jj++)
     {
@@ -7600,6 +7717,22 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
               os << "( \"" << S << "\" no index)" << endl;
               continue;
             }
+        }
+
+      // Compare the stored prefix, whose byte limit may split a character.
+      // Fold complete source characters before applying that limit.
+      size_t compareLength = SisLimit;
+      S = SisFileName;
+      if (NumberOfIndexes > 0) S += STRING().form(".%d", jj);
+      if (FILE *sis = fopen(S, "rb"))
+        {
+          const int width = getc(sis), charset = getc(sis);
+          if (width > 0 && width <= int(StringCompLength) && charset != EOF)
+            {
+              compareLength = size_t(width);
+              SetGlobalCharset(BYTE(charset));
+            }
+          fclose(sis);
         }
 
 //  const int Cutoff = GetFileSize(fpi) /20;
@@ -7629,39 +7762,53 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
       Term[0] = '\0';
       OldWord[0] = '\0';
       Buffer[StringCompLength] = '\0';
+      bool havePrevious = false;
 
-      gp = GpFread(Skip, fpi);
-      do
+      for (gp = GpFread(Skip, fpi); gp != GPTYPE(-1); gp = GpFread(fpi))
         {
           int poff = 0;
+          bool orderError = false;
+          const char *reason = "term order";
 	  if (!OnlyErrors)
 	    os << "0x" << setw( sizeof(GPTYPE) /* was 6  */) << setfill('0') << hex << gp << ' ' << dec<< setfill(' ');
-          if ((x = GetIndirectBuffer (gp, Buffer)) > 0)
+          if ((x = GetIndirectBuffer (gp, Buffer, 0, StringCompLength+4)) > 0)
             {
-              if (x > (int)StringCompLength)
-                x = StringCompLength;
-              INT j = BufferClean(Buffer, x, false);
-              if (x < (int)StringCompLength)
-                memset(&Buffer[x], ' ', StringCompLength-x);
-              memcpy (Term, Buffer, StringCompLength);
-              Buffer[j] = '\0';
-              x = j;
-
-              if (StrCaseCmp(Buffer, OldWord) == 0)
+              memcpy(Term, Buffer, x);
+              const size_t termLength = BufferClean(Term, x, true);
+              Term[termLength] = '\0';
+              const size_t displayLength = BufferClean(Buffer, x, false);
+              size_t shown = std::min(displayLength, StringCompLength);
+              if (_is_globalUTF8)
                 {
-                  if (gp < old_gp) // Bad GP sort!
+                  size_t complete = 0;
+                  while (complete < shown)
                     {
-		      if (OnlyErrors)
-			os << "0x" << setw( sizeof(GPTYPE) /* was     6  */  ) << setfill('0') << hex << gp << ' ' << dec<< setfill(' ');
-                      os << "(*)";
-                      poff = 3;
+                      uint32_t cp;
+                      const int bytes = _to_ucs4(Buffer+complete, Buffer+displayLength, &cp);
+                      if (bytes <= 0 || size_t(bytes) > shown-complete) break;
+                      complete += size_t(bytes);
                     }
-                  old_gp = gp;
+                  shown = complete;
                 }
-              else
+              Buffer[shown] = '\0';
+
+              const int order = havePrevious ? _ib_SisCompare(OldWord, Term, compareLength) : 0;
+              orderError = !termLength || order > 0 || (havePrevious && order == 0 && gp < old_gp);
+              if (!termLength) reason = "empty term";
+              else if (order == 0) reason = "posting order";
+              if (orderError)
                 {
-                  strcpy((char *)OldWord, (const char *)Buffer);
-                  old_gp = 0;
+                  ++errors;
+                  if (OnlyErrors)
+                    os << "0x" << setw(sizeof(GPTYPE)) << setfill('0') << hex << gp << ' ' << dec << setfill(' ');
+                  os << "(*)";
+                  poff = 3;
+                }
+              if (termLength)
+                {
+                  memcpy(OldWord, Term, termLength+1);
+                  old_gp = gp;
+                  havePrevious = true;
                 }
             }
           else if (x < 0)
@@ -7691,22 +7838,13 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 		{
 		  if (!OnlyErrors) os << " <deleted>";
 		}
-	      else if (_ib_tolower(Term[0]) - _ib_tolower(Buffer[0]) > 0)
+	      else if (orderError)
 		{
 		  const off_t pos = gp - mdtrec.GetGlobalFileStart () - (off_t)mdtrec.GetLocalRecordStart();
-		  os << " <ERROR Type=\"broken entry\"";
-#if 1
-		  Buffer[x] = ' ';
-		  Buffer[StringCompLength] = '\0';
-#else
-		  GetIndirectBuffer (gp, Buffer);
-#endif
+		  os << " <ERROR Type=\"broken entry\" Reason=\"" << reason << "\"";
 		  os << " File=\"" << mdtrec.GetFileName() << "\" Pos=\"" << pos << "\"  Content=\"" << (char *)Buffer << "\"/>";
-//cerr << "ERR: x=" << x << " " << mdtrec.GetFileName() << "(" << pos << "): \"" << (char *)Buffer << "\"" << endl;
-		  errors++;
-
 		}
-	       if (!OnlyErrors) os << endl;
+	       if (!OnlyErrors || orderError) os << endl;
 	     }
 	  else
 	    {
@@ -7715,7 +7853,6 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
 	      notFound++;
 	    }
 	}
-      while (!feof(fpi) && (gp = GpFread(fpi)) != (GPTYPE)-1);
       ffclose (fpi);
     }
   if (notFound)
@@ -8761,6 +8898,19 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		}
 	       else
 		newField = false;
+              if (fieldType.IsInteger() && !newField)
+                {
+                  DFD existing;
+                  if (Dfdtptr->GetDfdRecord(fieldName, &existing) &&
+                      !existing.GetFieldType().IsInteger())
+                    {
+                      message_log(LOG_ERROR,
+                        "Cannot import integer field '%s' into type '%s'",
+                        fieldName.c_str(), existing.GetFieldType().c_str());
+                      ++errors;
+                      continue;
+                    }
+                }
 	      // Append Text field
 	      IndexPtr->Parent->DfdtGetFileName (fieldName, &in_fn); // TEXT
 	      Parent->DfdtGetFileName(fieldName, &out_fn);
@@ -8802,6 +8952,46 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 	      IndexPtr->Parent->DfdtGetFileName(fieldName, fieldType, &Fn);
 	      switch ((int)fieldType)
 		{
+                  case FIELDTYPE::integer:
+                    {
+                      INTEGERLIST list;
+                      if (!list.LoadGpBlock(Fn))
+                        {
+                          message_log(LOG_ERROR, "Could not read integer field '%s' for import",
+                            fieldName.c_str());
+                          ++errors;
+                          break;
+                        }
+                      if (list.Empty()) break;
+                      if ((out_fp = OpenForAppend(fieldName, fieldType)) == NULL)
+                        {
+                          message_log(LOG_ERROR | LOG_ERRNO,
+                            "Could not append to integer field '%s'", fieldName.c_str());
+                          ++errors;
+                          break;
+                        }
+                      size_t count = 0;
+                      for (const auto& field : list)
+                        {
+                          if (!field.Write(out_fp, offset))
+                            {
+                              message_log(LOG_ERROR | LOG_ERRNO,
+                                "Failed importing integer field '%s'", fieldName.c_str());
+                              ++errors;
+                              break;
+                            }
+                          ++count;
+                        }
+                      if (fclose(out_fp) != 0)
+                        {
+                          message_log(LOG_ERROR | LOG_ERRNO,
+                            "Failed closing integer field '%s' after import", fieldName.c_str());
+                          ++errors;
+                        }
+                      ActiveFieldStreams.erase(std::make_pair(fieldName.toStdString(), fieldType));
+                      objects += count;
+                    }
+                    break;
 		  case FIELDTYPE::currency:
 		    {
 		      MONETARYLIST List;
@@ -8832,7 +9022,35 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
 		    }
 		    break;
 
+                  case FIELDTYPE::float64:
+                    {
+                      FLOATLIST list;
+                      if (!list.LoadGpBlock(Fn)) break;
+                      if ((out_fp = OpenForAppend(fieldName, fieldType)) != NULL)
+                        {
+                          size_t count = 0;
+                          for (const auto& field : list)
+                            {
+                              if (!field.Write(out_fp, offset))
+                                {
+                                  message_log(LOG_ERROR | LOG_ERRNO,
+                                    "Failed importing float64 field '%s'", fieldName.c_str());
+                                  break;
+                                }
+                              ++count;
+                            }
+                          if (fclose(out_fp) != 0)
+                            message_log(LOG_ERROR | LOG_ERRNO,
+                              "Failed closing float64 field '%s' after import", fieldName.c_str());
+                          ActiveFieldStreams.erase(std::make_pair(fieldName.toStdString(), fieldType));
+                          objects += count;
+                        }
+                      else message_log(LOG_ERROR | LOG_ERRNO,
+                        "Could not append to float64 field '%s'", fieldName.c_str());
+                    }
+                    break;
 		  case FIELDTYPE::ttl:
+		  case FIELDTYPE::computed:
 		  case FIELDTYPE::boolean:
 		  case FIELDTYPE::numerical:
 		  case FIELDTYPE::phonhash:
@@ -8850,7 +9068,7 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
                       if (GetFileSize(Fn) <= (off_t)sizeof(GPTYPE))
 			continue;
 		      List.SetFileName(Fn);
-		      List.LoadTable(VAL_BLOCK);
+		      List.LoadTable(GP_BLOCK);
 		      const size_t  count = List.GetCount();
 		      if (count > 0)
 			{
@@ -9002,7 +9220,7 @@ size_t INDEX::ImportIndex(INDEX *IndexPtr)
   message_log (LOG_DEBUG, "Set %d sub-indexes", count);
   if (errors)
     message_log (LOG_FATAL, "ImportIndex: %d errors encounted.", errors);
-  else if (count == 2 || MergeStatus==iMerge || MergeStatus==iOptimize)
+  else if (count == 2 || MergeStatus==iMerge || MergeStatus==iOptimize || MergeStatus==iZip)
     MergeIndexFiles();
 #endif
 

@@ -4,6 +4,7 @@
 #include "attrlist.hxx"
 #include "mappedorderedlist.hxx"
 #include "numbers.hxx"
+#include "floatfield.hxx"
 #include "scan.hxx"
 
 namespace typed_scan {
@@ -46,6 +47,14 @@ size_t ScanField(Db *parent, Output *output, const STRING& field,
     parent->SetErrorCode(123);
   return total;
 }
+
+struct NumericTerm {
+  STRING operator()(INT16 ticks) const { return NUMERICOBJ::FromTicks(ticks).ToString(); }
+};
+
+struct Float64Term {
+  STRING operator()(DOUBLE value) const { return float64::ToString(value); }
+};
 
 struct IntegerTerm {
   STRING operator()(INT16 value) const { return STRING(value); }

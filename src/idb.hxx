@@ -397,6 +397,7 @@ public:
         SRCH_DATE* Buffer); 
 
   bool GetFieldData(GPTYPE, DOUBLE*); 
+  bool GetFieldData(GPTYPE, NUMERICOBJ*) override;
   bool GetFieldData(GPTYPE, SRCH_DATE* ); 
   bool GetFieldData(GPTYPE, STRING*); 
 
@@ -790,6 +791,7 @@ private:
   SRCH_DATE   DateOf(const STRING&) const;
 
   bool GetFieldData(const FC& FieldFC, const STRING& FieldName, DOUBLE* Buffer);
+  bool GetFieldData(const FC& FieldFC, const STRING& FieldName, NUMERICOBJ* Buffer);
   bool GetFieldData(const FC& FieldFC, const STRING& FieldName, SRCH_DATE* Buffer);
 
   QueryOptimizationResult OptimizeSQuery(SQUERY* Query);

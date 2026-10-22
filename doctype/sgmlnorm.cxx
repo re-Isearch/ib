@@ -1905,6 +1905,11 @@ NUMERICOBJ SGMLNORM::ParseNumeric(const STRING& Buffer) const
   return DOCTYPE::ParseNumeric(_cleanBuffer(Buffer));
 }
 
+bool SGMLNORM::ParseFloat64(const STRING& Buffer, DOUBLE *value) const
+{
+  return DOCTYPE::ParseFloat64(_cleanBuffer(Buffer), value);
+}
+
 INTEGEROBJ SGMLNORM::ParseInteger(const STRING& Buffer) const
 {
   return DOCTYPE::ParseInteger(_cleanBuffer(Buffer));
@@ -1916,7 +1921,7 @@ MONETARYOBJ SGMLNORM::ParseCurrency(const STRING& FieldName, const STRING& Buffe
 }
 
 bool SGMLNORM::ParseRange(const STRING& Buffer, const STRING& FieldName,
-        DOUBLE* fStart, DOUBLE* fEnd) const
+        NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const
 {
   return DOCTYPE::ParseRange(_cleanBuffer(Buffer), FieldName, fStart, fEnd);
 }

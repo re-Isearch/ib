@@ -14,6 +14,7 @@ Description:	Class ATTRLIST - Attribute List
 #pragma ident  "@(#)attrlist.cxx"
 
 static const char *n = "n"; // Numeric
+static const char *fp64 = "f64"; // IEEE binary64
 static const char *in = "i"; // Integer
 static const char *B = "0"; // Boolean
 static const char *r = "r"; // Num Range
@@ -53,8 +54,8 @@ static struct DataType {
 } DataTypes[] = {
   {"any",       "", FIELDTYPE::any, "Any"},  // 2022 EXPERIMENTAL  
   {"string",    "", FIELDTYPE::text, "String (full text)"},
-  {"integer",   in, FIELDTYPE::integer, "128-bit signed integer" },
-  {"numerical", n,  FIELDTYPE::numerical, "Numerical IEEE floating"},
+  {"integer",   in, FIELDTYPE::integer, "Signed 128-bit integer domain; adaptive 32/128-bit storage" },
+  {"numerical", n,  FIELDTYPE::numerical, "128-bit decimal fixed point (16 fraction digits)"},
   {"computed",  n,  FIELDTYPE::computed,  "Computed Numerical"},
   {"range",     r,  FIELDTYPE::numericalrange, "Range of Numerbers"},
   {"date",      d,  FIELDTYPE::date, "Date/Time in any of a large number of well defined formats"},
@@ -65,7 +66,7 @@ static struct DataType {
   {"ttl",       n,  FIELDTYPE::ttl, "Numeric computed value for time-to-live in seconds."},
   {"expires",   d,  FIELDTYPE::ttl_expires, "Numeric computed ttl value as date of expiration."},
   {"boolean",   B,  FIELDTYPE::boolean, "Boolean type"},
-  {"currency",  m,  FIELDTYPE::currency, "Non-negative monetary value (fixed precision)"},
+  {"currency",  m,  FIELDTYPE::currency, "Signed fixed-point monetary value (1/50000 unit)"},
   {"dotnumber", n,  FIELDTYPE::dotnumber, "Dot number (Internet v4/v6 Addresses, UIDs etc)"},
   {"phonetic",  h,  FIELDTYPE::phonhash, "Computed phonetic hash applied to each word (for names)"},
   {"phone2",    h,  FIELDTYPE::phonhash2, "Phonetic hash applied to the whole field"},
@@ -105,8 +106,12 @@ static struct DataType {
   {"ivfflat",    f, FIELDTYPE::db_IVFFlat,"IVFFlat Vectors // NOT YET"},
   {"image",     _V, FIELDTYPE::db_image, "Image embeddings (Contrastive Language-Image Pre-training)  // NOT YET"},
   {"special",   _s, FIELDTYPE::special,   "Special text (reserved)"},
-#define MAX_DATATYPE (int)(FIELDTYPE::special) 
+  {"float64", fp64, FIELDTYPE::float64, "IEEE 754 binary64 floating point"},
+#define MAX_DATATYPE (int)(FIELDTYPE::float64)
   // Aliases
+  {"double",   fp64, FIELDTYPE::float64, NULL},
+  {"binary64", fp64, FIELDTYPE::float64, NULL},
+  {"floating", fp64, FIELDTYPE::float64, NULL},
   {"dbm_string",     x,  FIELDTYPE::db_string,     NULL},
   {"bdb_string",     x,  FIELDTYPE::db_string,     NULL},
   {"gdb_string",     x,  FIELDTYPE::db_string,     NULL},
@@ -160,8 +165,8 @@ static struct DataType {
   // integer types
   {"xs:boolean",            B,  FIELDTYPE::boolean,   NULL},
   {"xs:integer",            in,  FIELDTYPE::integer, NULL},
-  {"xs:float",              n,   FIELDTYPE::numerical, NULL},
-  {"xs:double",             n,   FIELDTYPE::numerical, NULL},
+  {"xs:float",           fp64,   FIELDTYPE::float64, NULL},
+  {"xs:double",          fp64,   FIELDTYPE::float64, NULL},
   {"xs:decimal",            m,   FIELDTYPE::currency, NULL}, // Close enough
   // derived integer types
   {"xs:long",               in,  FIELDTYPE::integer, NULL},
@@ -182,7 +187,7 @@ static struct DataType {
 void FIELDTYPE::AvailableTypesList(STRLIST *Strlist) const
 {
   Strlist->Clear();
-  for (size_t i = 0; i < MAX_DATATYPE; i++) {
+  for (size_t i = 0; i <= MAX_DATATYPE; i++) {
     if ((DataTypes[i].Description)[0])
       Strlist->AddEntry (DataTypes[i].Name);
   }
@@ -194,8 +199,8 @@ void FIELDTYPE::AvailableTypesHelp(ostream& os) const
   STRLIST   strlist;
   size_t    i =0;
   
-  os << "The following fundamental data types are currently supported (v." <<  FIELDTYPE::special
-	<< "." <<  ((sizeof(DataTypes)/sizeof(DataType ))-FIELDTYPE::special)/3 << "):" << endl;
+  os << "The following fundamental data types are currently supported (v." << MAX_DATATYPE
+	<< "." << ((sizeof(DataTypes)/sizeof(DataType))-MAX_DATATYPE)/3 << "):" << endl;
   for (; i <= MAX_DATATYPE; i++) {
     if ((DataTypes[i].Description)[0])
       os << "   " << DataTypes[i].Name << "  \t// " << DataTypes[i].Description << endl;
@@ -342,8 +347,8 @@ FIELDTYPE::FIELDTYPE(const char * TypeName)
 
 FIELDTYPE::FIELDTYPE(const BYTE newType)
 {
-  // special is the last one
-  if (newType <=  special)
+  // Keep existing IDs stable; float64 is the last built-in type.
+  if (newType <= MAX_DATATYPE)
     Type = (enum datatypes)newType;
   else
     Type = unknown;
@@ -351,8 +356,7 @@ FIELDTYPE::FIELDTYPE(const BYTE newType)
 
 FIELDTYPE::FIELDTYPE(const INT newType)
 {
-  // special is the last one
-  if (newType <=  special)
+  if (newType >= any && newType <= MAX_DATATYPE)
     Type = (enum datatypes)newType;
   else
     Type = unknown;

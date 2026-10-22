@@ -24,6 +24,19 @@ public:
   static constexpr size_t VALUE_SIZE  = 16;
   static constexpr size_t SPAN_OFFSET = sizeof(GPTYPE) + VALUE_SIZE;
   static constexpr size_t DISK_SIZE   = SPAN_OFFSET + sizeof(span_type);
+  static constexpr size_t COMPACT_SPAN_OFFSET = sizeof(GPTYPE) + 4;
+  static constexpr size_t COMPACT_DISK_SIZE = COMPACT_SPAN_OFFSET + sizeof(span_type);
+
+  static constexpr bool FitsSigned32(INT16 value)
+  {
+    return value >= std::numeric_limits<INT4>::min() &&
+           value <= std::numeric_limits<INT4>::max();
+  }
+
+  static constexpr bool FitsUnsigned32(INT16 value)
+  {
+    return value >= 0 && value <= std::numeric_limits<UINT4>::max();
+  }
 
   INTEGERFLD()
     : Value(0), GlobalStart(0), Span(0), SpanValid(true)
@@ -103,6 +116,44 @@ public:
     return value;
   }
 
+  static INT16 DecodeCompactValue(const BYTE *p, bool unsignedValues)
+  {
+    const UINT4 bits = UINT4of(p, int(sizeof(GPTYPE)));
+    // Sign extend arithmetically, without an out-of-range unsigned-to-signed cast.
+    return unsignedValues || bits <= UINT4(std::numeric_limits<INT4>::max())
+      ? INT16(bits) : INT16(bits) - (INT16(1) << 32);
+  }
+
+  static span_type DecodeCompactSpan(const BYTE *p)
+  {
+    span_type value = 0;
+    for (size_t i = 0; i < sizeof(span_type); ++i)
+      value = static_cast<span_type>((value << 8) | p[COMPACT_SPAN_OFFSET + i]);
+    return value;
+  }
+
+  bool WriteCompact(FILE *fp, bool unsignedValues) const
+  {
+    if (!fp || !SpanValid ||
+        !(unsignedValues ? FitsUnsigned32(Value) : FitsSigned32(Value)))
+      return false;
+    return ::Write(GlobalStart, fp) == (int)sizeof(GPTYPE) &&
+           ::Write(UINT4(Value), fp) == 4 &&
+           ::Write(Span, fp) == (int)sizeof(span_type);
+  }
+
+  bool ReadCompact(FILE *fp, bool unsignedValues)
+  {
+    std::array<BYTE, COMPACT_DISK_SIZE> buf;
+    if (!fp || fread(buf.data(), 1, buf.size(), fp) != buf.size())
+      return false;
+    GlobalStart = DecodeGlobalStart(buf.data());
+    Value = DecodeCompactValue(buf.data(), unsignedValues);
+    Span = DecodeCompactSpan(buf.data());
+    SpanValid = true;
+    return true;
+  }
+
   bool Write(FILE *fp) const
   {
     if (fp == NULL || !SpanValid)
@@ -118,6 +169,9 @@ public:
 
   bool Write(FILE *fp, GPTYPE Offset) const
   {
+    const GPTYPE available = std::numeric_limits<GPTYPE>::max() - GlobalStart;
+    if (Span > available || Offset > available - Span)
+      return false;
     INTEGERFLD tmp(*this);
     tmp.GlobalStart += Offset;
     return tmp.Write(fp);

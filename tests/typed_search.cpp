@@ -1,6 +1,8 @@
 #include "common.hxx"
 #include "fchits.hxx"
 #include "integerlist.hxx"
+#include "monetarylist.hxx"
+#include "numbers.hxx"
 #include <cstdlib>
 #include <iostream>
 #include <utility>
@@ -89,9 +91,122 @@ static void integer_regressions()
   UnlinkFile(file);
 }
 
+
+static void monetary_regressions()
+{
+  const MONETARYOBJ whole("12");
+  const MONETARYOBJ exact("12.00");
+  const MONETARYOBJ negative("-12.37");
+  const MONETARYOBJ grouped("$1,234");
+  const MONETARYOBJ grouped_exact("$1,234.00");
+  const MONETARYOBJ invalid("12.");
+
+  require(whole.Ok() && whole.GetTicks() == INT16(12) * 50000 &&
+          !whole.HasExplicitFraction(), "whole monetary lexical intent");
+  require(exact.Ok() && exact.GetTicks() == whole.GetTicks() &&
+          exact.HasExplicitFraction(), "explicit monetary fraction intent");
+  require(negative.Ok() && negative.GetTicks() == -INT16(618500),
+          "signed monetary ticks");
+  require(grouped.Ok() && grouped.GetTicks() == INT16(1234) * 50000 &&
+          !grouped.HasExplicitFraction(), "currency grouping remains grouping");
+  require(grouped_exact.Ok() &&
+          grouped_exact.GetTicks() == INT16(1234) * 50000 &&
+          grouped_exact.HasExplicitFraction(), "grouped exact monetary value");
+  require(!invalid.Ok(), "trailing monetary decimal remains invalid");
+
+  const MONETARYRANGE range("-12.50--10.25");
+  require(range.Ok() && range.GetStart().GetTicks() == -INT16(625000) &&
+          range.GetEnd().GetTicks() == -INT16(512500),
+          "signed monetary range parsing");
+
+  const STRING file("typed-search-monetary.column");
+  UnlinkFile(file);
+
+  const char *source[] = {
+    "11.99", "12.00", "12.10", "12.99", "13.00",
+    "-12.99", "-12.37", "-12.00", "-11.99",
+    "-0.50", "0.00", "0.75"
+  };
+
+  MONETARYLIST list;
+  FILE *out = list.OpenForAppend(file);
+  require(out != nullptr, "open monetary fixture");
+
+  std::vector<INT16> values;
+  for (size_t i = 0; i < sizeof(source)/sizeof(source[0]); ++i)
+    {
+      const MONETARYOBJ value(source[i]);
+      require(value.Ok(), "parse monetary fixture value");
+      values.push_back(value.GetTicks());
+      require(MONETARYFLD(FC(i * 100 + 1, i * 100 + 2),
+                          value.GetTicks()).Write(out),
+              "write monetary geometry and ticks");
+    }
+
+  require(fclose(out) == 0 && list.WriteIndex(file),
+          "build monetary fixture");
+
+  MultiMMapSession maps;
+
+  const auto check_bucket = [&](INT16 low, INT16 high,
+                                std::vector<size_t> expected_indexes,
+                                const char *message)
+  {
+    using hit = std::pair<GPTYPE, MONETARYFLD::span_type>;
+    std::vector<hit> expected, actual;
+
+    for (size_t i : expected_indexes)
+      expected.emplace_back(i * 100 + 1, 1);
+
+    require(list.VisitMappedRange(
+        file, low, high, ZRelEQ, maps,
+        [&](GPTYPE gp, MONETARYFLD::span_type span)
+        {
+          actual.emplace_back(gp, span);
+        }), message);
+
+    require(actual == expected, message);
+  };
+
+  check_bucket(INT16(12) * 50000,
+               INT16(13) * 50000 - 1,
+               {1, 2, 3},
+               "positive whole-unit monetary bucket");
+
+  check_bucket(-INT16(13) * 50000 + 1,
+               -INT16(12) * 50000,
+               {5, 6, 7},
+               "negative whole-unit monetary bucket");
+
+  check_bucket(-INT16(50000) + 1,
+               INT16(50000) - 1,
+               {9, 10, 11},
+               "zero monetary bucket spans both signs");
+
+  std::vector<std::pair<GPTYPE, MONETARYFLD::span_type>> ranged;
+  require(list.VisitMappedRange(
+      file,
+      MONETARYOBJ("12.10").GetTicks(),
+      MONETARYOBJ("12.99").GetTicks(),
+      ZRelEQ,
+      maps,
+      [&](GPTYPE gp, MONETARYFLD::span_type span)
+      {
+        ranged.emplace_back(gp, span);
+      }),
+      "monetary range visit");
+  require(ranged == std::vector<std::pair<GPTYPE, MONETARYFLD::span_type>>{
+          {201, 1}, {301, 1}},
+          "monetary inclusive range retains GP order");
+
+  maps.Clear();
+  UnlinkFile(file);
+}
+
 int main()
 {
   aggregation_regressions();
   integer_regressions();
+  monetary_regressions();
   std::cout << "Typed search regressions passed\n";
 }

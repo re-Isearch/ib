@@ -761,7 +761,8 @@ add_library(ibSearch
     ${SRC_DIR}/numsearch.cxx    ${SRC_DIR}/datesearch.cxx
     ${SRC_DIR}/dsearch.cxx      ${SRC_DIR}/geosearch.cxx
     ${SRC_DIR}/nlist.cxx        ${SRC_DIR}/dlist.cxx
-    ${SRC_DIR}/integerlist.cxx
+    ${SRC_DIR}/integerlist.cxx ${SRC_DIR}/monetarylist.cxx
+    ${SRC_DIR}/floatfield.cxx  ${SRC_DIR}/floatlist.cxx
     ${SRC_DIR}/nfldmgr.cxx      ${SRC_DIR}/intlist.cxx
     ${SRC_DIR}/intfield.cxx     ${SRC_DIR}/gpolylist.cxx
     ${SRC_DIR}/gpolyfield.cxx   ${SRC_DIR}/bboxfield.cxx
@@ -784,6 +785,38 @@ add_library(ibSearch
     ${SRC_DIR}/support.cxx      ${SRC_DIR}/defs.cxx
 )
 ib_common_includes(ibSearch)
+# Floating charconv support can depend on the standard library and, on macOS,
+# the deployment target. Probe both overloads independently, including linkage.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([=[
+    #include <charconv>
+    int main() {
+        const char text[] = "1.25";
+        double value;
+        const auto result = std::from_chars(text, text + 4, value, std::chars_format::general);
+        return result.ec == std::errc() && value == 1.25 ? 0 : 1;
+    }
+]=] IB_HAVE_FLOAT_FROM_CHARS)
+check_cxx_source_compiles([=[
+    #include <charconv>
+    int main() {
+        char text[64];
+        const auto result = std::to_chars(text, text + sizeof(text), 1.25, std::chars_format::general);
+        return result.ec == std::errc() ? 0 : 1;
+    }
+]=] IB_HAVE_FLOAT_TO_CHARS)
+set_property(SOURCE ${SRC_DIR}/floatfield.cxx APPEND PROPERTY COMPILE_DEFINITIONS
+    IB_HAVE_FLOAT_FROM_CHARS=$<BOOL:${IB_HAVE_FLOAT_FROM_CHARS}>
+    IB_HAVE_FLOAT_TO_CHARS=$<BOOL:${IB_HAVE_FLOAT_TO_CHARS}>
+)
+# IEEE value parsing, signed zero and subnormal comparisons must retain their
+# semantics even when the rest of an optimized build enables fast-math.
+set_property(SOURCE
+    ${SRC_DIR}/floatfield.cxx ${SRC_DIR}/floatlist.cxx ${SRC_DIR}/numsearch.cxx
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/float64.cpp"
+    APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-fno-fast-math>"
+)
 target_include_directories(ibSearch PUBLIC "${GDBM_INCLUDE}")
 target_link_libraries(
     ibSearch
@@ -942,6 +975,38 @@ if(IB_BUILD_SCORING_TESTS)
     ib_common_includes(typed_search_test)
     target_link_libraries(typed_search_test PRIVATE ibSearch ibDoc ibProcess ibIO)
     add_test(NAME typed_search COMMAND typed_search_test)
+    add_executable(integer_storage_test tests/integer_storage.cpp)
+    ib_common_includes(integer_storage_test)
+    target_link_libraries(integer_storage_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME integer_storage COMMAND integer_storage_test)
+    add_executable(record_offsets_test tests/record_offsets.cpp)
+    ib_common_includes(record_offsets_test)
+    target_link_libraries(record_offsets_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME record_offsets COMMAND record_offsets_test)
+    add_executable(field_type_promotion_test tests/field_type_promotion.cpp)
+    ib_common_includes(field_type_promotion_test)
+    target_link_libraries(field_type_promotion_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME field_type_promotion COMMAND field_type_promotion_test)
+    add_executable(utf8_sis_test tests/utf8_sis.cpp)
+    ib_common_includes(utf8_sis_test)
+    target_link_libraries(utf8_sis_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME utf8_sis COMMAND utf8_sis_test)
+    add_executable(zip_merge_test tests/zip_merge.cpp)
+    ib_common_includes(zip_merge_test)
+    target_link_libraries(zip_merge_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME zip_merge COMMAND zip_merge_test)
+    add_executable(typed_scan_test tests/typed_scan.cpp)
+    ib_common_includes(typed_scan_test)
+    target_link_libraries(typed_scan_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME typed_scan COMMAND typed_scan_test)
+    add_executable(fixed_numerical_test tests/fixed_numerical.cpp)
+    ib_common_includes(fixed_numerical_test)
+    target_link_libraries(fixed_numerical_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME fixed_numerical COMMAND fixed_numerical_test)
+    add_executable(float64_test tests/float64.cpp)
+    ib_common_includes(float64_test)
+    target_link_libraries(float64_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME float64 COMMAND float64_test)
 endif()
 
 add_subdirectory(doctype/plugins)

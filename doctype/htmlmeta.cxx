@@ -659,8 +659,8 @@ void HTMLMETA::ParseFields(RECORD *NewRecord)
 
 //cerr << "HTMLMETA::ParseFields" << endl;;
 
-  long            RecordStart = NewRecord->GetRecordStart();
-  long            RecordEnd   = NewRecord->GetRecordEnd();
+  off_t           RecordStart = NewRecord->GetRecordStart();
+  off_t           RecordEnd   = NewRecord->GetRecordEnd();
 
   if  (RecordEnd == 0) RecordEnd = GetFileSize(fp);
 

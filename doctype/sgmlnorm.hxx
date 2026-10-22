@@ -39,10 +39,11 @@ public:
   virtual DATERANGE   ParseDateRange(const STRING& Buffer) const;
   virtual NUMERICOBJ  ParsePhonhash(const STRING& Buffer) const;
   virtual NUMERICOBJ  ParseNumeric(const STRING& Buffer) const;
+  bool ParseFloat64(const STRING& Buffer, DOUBLE *value) const override;
   virtual INTEGEROBJ  ParseInteger(const STRING& Buffer) const;
 
   virtual bool ParseRange(const STRING& Buffer, const STRING& FieldName,
-        DOUBLE* fStart, DOUBLE* fEnd) const;
+        NUMERICOBJ* fStart, NUMERICOBJ* fEnd) const;
   virtual int         ParseGPoly(const STRING& Buffer, GPOLYFLD* gpoly) const;
   virtual NUMERICOBJ  ParseComputed(const STRING& FieldName, const STRING& Buffer) const;
   virtual long        ParseCategory(const STRING& Buffer) const;
