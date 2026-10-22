@@ -7793,9 +7793,13 @@ long INDEX::Dump (INT Skip, ostream& os, bool OnlyErrors)
               Buffer[shown] = '\0';
 
               const int order = havePrevious ? _ib_SisCompare(OldWord, Term, compareLength) : 0;
-              orderError = !termLength || order > 0 || (havePrevious && order == 0 && gp < old_gp);
+              // A truncated SIS bucket can contain several full sort keys.
+              // Their posting groups may restart at a smaller GP.
+              const bool postingError = havePrevious && gp < old_gp &&
+                  _ib_SisCompare(OldWord, Term, StringCompLength) == 0;
+              orderError = !termLength || order > 0 || postingError;
               if (!termLength) reason = "empty term";
-              else if (order == 0) reason = "posting order";
+              else if (postingError) reason = "posting order";
               if (orderError)
                 {
                   ++errors;

@@ -2,6 +2,7 @@
 #include "index.hxx"
 #include "idbobj.hxx"
 #include "lang-codes.hxx"
+#include "xml.hxx"
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
@@ -116,6 +117,7 @@ struct Scratch {
 struct Database : IDBOBJ {
   STRING stem;
   mutable MDT mdt;
+  DOCTYPE *doctype = nullptr;
   explicit Database(const char *name) : stem(name), mdt(stem, false) {
     MDTREC record;
     record.SetKey("fixture");
@@ -124,6 +126,8 @@ struct Database : IDBOBJ {
   }
   PMDT GetMainMdt() const override { return &mdt; }
   STRING ComposeDbFn(const CHR *extension) const override { return stem+extension; }
+  DOCTYPE *GetDocTypePtr(const DOCTYPE_ID&) const override { return doctype; }
+  bool IsStopWord(const UCHR *, STRINGINDEX, INT = 0) const override { return false; }
 };
 
 using Rows = std::map<std::string, std::vector<GPTYPE>>;
@@ -138,7 +142,15 @@ static void partition(INDEX& index, Database& db, int number, size_t width, cons
   putINT2(0, inx);
   putc(int(width), sis); putc(charset, sis);
   GPTYPE total = 0;
-  for (const auto& row : rows) {
+  const CHARSET collation(charset);
+  std::vector<const Rows::value_type *> ordered;
+  for (const auto& row : rows) ordered.push_back(&row);
+  std::sort(ordered.begin(),ordered.end(),[&](const auto *left, const auto *right) {
+    return collation.CompareSIS(bytes(left->first),left->first.size(),
+                                bytes(right->first),right->first.size()) < 0;
+  });
+  for (const auto *entry : ordered) {
+    const auto& row = *entry;
     require(row.first.size() <= width, "fixture keys fit their SIS window");
     putc(int(row.first.size()), sis);
     fwrite(row.first.data(), 1, row.first.size(), sis);
@@ -240,7 +252,7 @@ struct SourceIndex {
   std::map<std::string, size_t> terms;
   size_t width, records = 0;
   SourceIndex(const char *name, size_t prefix) : db(name), index(&db,db.stem+".inx"), width(prefix) { }
-  void add(const std::string& source, const std::string& term, const std::string& afterRecord = {}) {
+  GPTYPE store(const std::string& source, const std::string& afterRecord = {}) {
     const STRING name = db.stem+STRING().form("-%u.txt",unsigned(++records));
     std::ofstream file(name.c_str(),std::ios::binary);
     file << source << afterRecord; file.close();
@@ -249,9 +261,14 @@ struct SourceIndex {
     MDTREC record(&db.mdt);
     record.SetKey(STRING().form("source-%u",unsigned(records)));
     record.SetFullFileName(name);
+    if (db.doctype) record.SetDocumentType(db.doctype->Name());
     record.SetGlobalFileStart(gp);
     require(record.SetLocalRecordRange(0,source.size()-1), "bound indirect source fixture");
     require(db.mdt.AddEntry(record) != 0, "add source metadata");
+    return gp;
+  }
+  void add(const std::string& source, const std::string& term, const std::string& afterRecord = {}) {
+    const GPTYPE gp = store(source,afterRecord);
     rows[term.substr(0,width)].push_back(gp);
     ++terms[term];
   }
@@ -320,6 +337,14 @@ static void indirect_and_dump()
   require(lexical.index.Dump(0,errors,true) == 1 && errors.str().find("term order") != std::string::npos,
           "Dump detects Unicode ordering errors beyond the first byte");
 
+  SourceIndex prefixPostings("source-prefix-postings",3);
+  prefixPostings.add("abcz","abcz"); prefixPostings.add("abca","abca");
+  std::reverse(prefixPostings.rows.begin()->second.begin(),prefixPostings.rows.begin()->second.end());
+  prefixPostings.publish();
+  std::ostringstream prefixErrors;
+  require(prefixPostings.index.Dump(0,prefixErrors,true) == 0,
+          "different full terms sharing a SIS prefix can restart their posting GPs");
+
   SourceIndex postings("source-postings",20);
   postings.add(u8"ÉCOLE",u8"école"); postings.add(u8"école",u8"école");
   auto& bucket = postings.rows.begin()->second;
@@ -342,6 +367,72 @@ static void indirect_and_dump()
   SetGlobalCharset("UTF-8");
 }
 
+static void xml_indirect_and_dump()
+{
+  for (const char *charset : {"ISO-8859-1", "UTF-8"}) {
+    SourceIndex fixture(charset[0] == 'U' ? "xml-utf8" : "xml-latin1",3);
+    XML xml(&fixture.db,"XML");
+    fixture.db.doctype = &xml;
+    require(SetGlobalCharset(charset), "select XML fixture charset");
+    std::string repeated;
+    for (size_t i = 0; i < 1000; ++i) repeated += "&amp;";
+    const std::vector<std::string> sources = {
+      "&amp;c. &amp;foobar foo&amp;bar &amp; amp",
+      "<LINE>ABCDEFGHIJKLMNOPQRSTUVWXYZ &amp;c. &amp;foobar &amp;&amp;word</LINE>",
+      "<LINE>AT&amp;T A&amp;Z A&moon &quot;answer&quot;</LINE>",
+      "<LINE>&#38;foobar foo&#46;bar alpha&#32;beta &#233;COLE &amp;amp;term</LINE>",
+      "<LINE>"+repeated+"word</LINE>"
+    };
+    std::map<GPTYPE,std::string> postingTerms;
+    for (const auto& source : sources) {
+      const GPTYPE base = fixture.store(source);
+      MDTREC record(&fixture.db.mdt);
+      require(fixture.db.mdt.GetMdtRecord(base,&record) != 0, "read XML source metadata");
+      std::vector<UCHR> normalized(source.begin(),source.end());
+      normalized.resize(source.size()+StringCompLength+1,0);
+      std::vector<GPTYPE> positions(source.size()+1);
+      const size_t count = xml.ParseWords(normalized.data(),source.size(),0,positions.data(),positions.size());
+      require(count > 0, "real XML parser produces entity-normalized postings");
+      for (size_t i = 0; i < count; ++i) {
+        const std::string term(reinterpret_cast<const char *>(normalized.data()+positions[i]));
+        UCHR recovered[StringCompLength*2+5] = {};
+        const int length = xml.GetTerm(record.GetFullFileName(),reinterpret_cast<char *>(recovered),
+                                       positions[i],StringCompLength+4);
+        GPTYPE recoveredPositions[StringCompLength+5];
+        const size_t recoveredCount = length > 0 ? xml.DOCTYPE::ParseWords(recovered,length,0,
+            recoveredPositions,StringCompLength+5) : 0;
+        require(recoveredCount > 0 && recoveredPositions[0] == 0 &&
+                std::string(reinterpret_cast<const char *>(recovered)) == term,
+                "XML source recovery agrees with real ingestion at every GP without decoding twice");
+        fixture.rows[term.substr(0,fixture.width)].push_back(base+positions[i]);
+        postingTerms.emplace(base+positions[i],term);
+        ++fixture.terms[term];
+      }
+    }
+    // Model one ingestion shard: full sort keys, then GP tie-breaking.
+    for (auto& row : fixture.rows)
+      std::sort(row.second.begin(),row.second.end(),[&](GPTYPE left, GPTYPE right) {
+        const int order = _ib_SisCompare(bytes(postingTerms.at(left)),bytes(postingTerms.at(right)),StringCompLength);
+        return order ? order < 0 : left < right;
+      });
+    fixture.publish(Charset2Id(charset));
+    std::ostringstream errors;
+    require(fixture.index.Dump(0,errors,true) == 0,
+            "entity-normalized XML postings pass the source order check");
+    SCANLIST list;
+    std::map<std::string,size_t> expected, actual;
+    for (const auto& term : fixture.terms)
+      if (term.first.compare(0,3,"foo") == 0) expected.insert(term);
+    require(fixture.index.Scan(&list,NulString,STRING("foo"),-1) == expected.size(),
+            "XML prefix scan expands the entity-normalized SIS bucket");
+    for (const auto *p = list.GetPtratomicSCANLIST()->Next(); p != list.GetPtratomicSCANLIST(); p = p->Next())
+      actual[p->Term().toStdString()] += p->Frequency();
+    require(actual == expected, "XML source recovery preserves full terms and frequencies");
+    fixture.db.doctype = nullptr;
+  }
+  SetGlobalCharset("UTF-8");
+}
+
 int main()
 {
   try {
@@ -350,6 +441,7 @@ int main()
     writer();
     differing_widths();
     indirect_and_dump();
+    xml_indirect_and_dump();
     collapse(32, "whole");
     collapse(3, "prefix"); // splits 2/3/4-byte sequences without reading GP bytes
     std::cout << "UTF-8 SIS ordering, byte limits, callbacks, source recovery, Dump checks and real three-partition collapse passed\n";
