@@ -2,6 +2,7 @@
 #include "index.hxx"
 #include "idbobj.hxx"
 #include "lang-codes.hxx"
+#include "magic.hxx"
 #include "xml.hxx"
 #include <algorithm>
 #include <cstring>
@@ -93,8 +94,11 @@ static void keys_and_lengths()
   require(compare(query.data(), stored.data()) < 0, "mid-sequence exact query is rejected");
   query = key(u8"école", 6); stored = term(u8"é");
   require(compare(query.data(), stored.data()) > 0, "short stored word bounds a longer query");
-  for (const std::string text : {u8"café", u8"中文", u8"𐐨", u8"café.rue", u8"foo.école"})
+  for (const std::string text : {u8"café", u8"中文", u8"𐐨", u8"café.rue", u8"foo.école", "0.word"})
     require(_ib_UTF8TermLength(bytes(text), text.size()) == text.size(), "term length advances over full UTF-8 characters");
+  for (const std::string text : {"0..word", "0__word", "0.&word", "0._word", "0.@word", "0.0"})
+    require(_ib_UTF8TermLength(bytes(text), text.size()) == 1,
+            "source recovery cannot extend a numeric token through adjacent ASCII punctuation");
   const std::string followed = u8"café. next";
   require(_ib_UTF8TermLength(bytes(followed), followed.size()) == std::string(u8"café").size(),
           "trailing punctuation ends a merge term");
@@ -139,7 +143,10 @@ static void partition(INDEX& index, Database& db, int number, size_t width, cons
   FILE *sis = fopen(db.ComposeDbFn(DbExtDict)+suffix, "wb");
   FILE *inx = fopen(db.stem+".inx"+suffix, "wb");
   require(sis && inx, "create partition files");
-  putINT2(0, inx);
+  const UINT2 magic = UINT2(((sizeof(GPTYPE) == 4 ? 0 : 1) << 14) |
+                           ((IsBigEndian() ? objINDEXl : objINDEXm) << 5) |
+                           (index.Version()%100));
+  putINT2(magic, inx);
   putc(int(width), sis); putc(charset, sis);
   GPTYPE total = 0;
   const CHARSET collation(charset);
@@ -433,6 +440,54 @@ static void xml_indirect_and_dump()
   SetGlobalCharset("UTF-8");
 }
 
+static void numeric_punctuation_after_merge()
+{
+  SourceIndex fixture("xml-zero-merge",3);
+  XML xml(&fixture.db,"XML");
+  fixture.db.doctype = &xml;
+  SetGlobalCharset("UTF-8");
+  const std::vector<std::string> sources = {
+    "<LINE>0..alpha 0._beta 0.&gamma 0.0 0.1 0.omega</LINE>",
+    "<LINE>0 0__delta 0 0.@epsilon 0 0.omega</LINE>"
+  };
+  size_t zeros = 0;
+  for (size_t shard = 0; shard < sources.size(); ++shard) {
+    const auto& source = sources[shard];
+    const GPTYPE base = fixture.store(source);
+    std::vector<UCHR> normalized(source.begin(),source.end());
+    normalized.resize(source.size()+StringCompLength+1,0);
+    std::vector<GPTYPE> positions(source.size()+1);
+    const size_t count = xml.ParseWords(normalized.data(),source.size(),0,positions.data(),positions.size());
+    require(count > 0, "tokenize numeric XML fixture through the real doctype");
+    Rows rows;
+    for (size_t i = 0; i < count; ++i) {
+      const std::string term(reinterpret_cast<const char *>(normalized.data()+positions[i]));
+      rows[term.substr(0,fixture.width)].push_back(base+positions[i]);
+      if (term == "0") ++zeros;
+    }
+    partition(fixture.index,fixture.db,int(shard+1),fixture.width,rows);
+  }
+  require(zeros > 2 && fixture.db.mdt.SetIndexNum(2), "publish numeric XML ingestion shards");
+  std::ostringstream before, after;
+  const long beforeErrors = fixture.index.Dump(0,before,true);
+  require(fixture.index.MergeIndexFiles(), "zip numeric XML shards without retokenizing");
+  const long afterErrors = fixture.index.Dump(0,after,true);
+  if (beforeErrors || afterErrors) std::cerr << before.str() << after.str();
+  require(beforeErrors == 0 && afterErrors == 0,
+          "numeric punctuation has identical token boundaries before and after merging");
+  FILE *sis = fopen(fixture.db.ComposeDbFn(DbExtDict),"rb");
+  require(sis && getc(sis) == int(fixture.width) && getc(sis) == Charset2Id("UTF-8") &&
+          getc(sis) == 1 && getc(sis) == '0', "merged dictionary retains the singleton zero key");
+  require(fseek(sis,long(fixture.width-1),SEEK_CUR) == 0 && endpoint(sis)+1 == zeros,
+          "merge preserves every singleton zero posting");
+  fclose(sis);
+  SCANLIST list;
+  require(fixture.index.Scan(&list,NulString,STRING("0."),-1) == 1 &&
+          list.GetEntry(1).Term() == STRING("0.omega") && list.GetEntry(1).Frequency() == 2,
+          "numeric compound scan retains a single dot followed by a letter");
+  fixture.db.doctype = nullptr;
+}
+
 int main()
 {
   try {
@@ -442,6 +497,7 @@ int main()
     differing_widths();
     indirect_and_dump();
     xml_indirect_and_dump();
+    numeric_punctuation_after_merge();
     collapse(32, "whole");
     collapse(3, "prefix"); // splits 2/3/4-byte sequences without reading GP bytes
     std::cout << "UTF-8 SIS ordering, byte limits, callbacks, source recovery, Dump checks and real three-partition collapse passed\n";

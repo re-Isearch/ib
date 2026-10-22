@@ -36,6 +36,12 @@ Disabling lowercasing still requires Unicode-aware classification. Invalid or
 incomplete sequences at a byte limit end the recovered term. Indirect reads
 include the final byte of the record's inclusive range.
 
+Dot-in-word recovery's Unicode lookahead applies only to a following UTF-8
+character. It must not recurse through another ASCII punctuation byte:
+`0..word`, `0__word` and `0.&word` recover the indexed token `0`, while
+`0.word` remains a compound. Otherwise a later valid `0` can falsely appear
+out of order. This correction leaves stored keys and posting positions intact.
+
 Indirect recovery dispatches through the record's doctype. For SGML/XML,
 `SGMLNORM::GetTerm()` normalizes from a preceding source boundary before
 applying the GP offset, using the same entity policy as ingestion. Entity
@@ -53,6 +59,8 @@ case variants, Unicode separators, malformed ordering and single-byte charsets.
 Real XML ingestion is also checked against doctype-dispatched indirect terms,
 dump validation and prefix scans, including named/numeric entities, nested
 spellings and repeated entity runs in both Latin-1 and UTF-8.
+Numeric punctuation is checked through real XML ingestion, before and after
+zipping shards, with singleton-zero posting counts and compound prefix scans.
 
 Reindex from source if an older collapse has already reordered or combined
 UTF-8 term buckets incorrectly. Updating the comparator cannot reconstruct
