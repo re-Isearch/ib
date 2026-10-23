@@ -119,6 +119,7 @@ extern bool _is_globalUTF8;
 
 #include "filemap.hxx" /* NEW INDEX STRATEGY */
 #include "merge.hxx"
+#include "peer_span.hxx"
 #include "stoplist.hxx"
 
 #include "error.hxx"
@@ -4226,14 +4227,26 @@ PIRSET INDEX::Search (const QUERY& Query)
                       Stack << (Op1->Or (*Op2)->Within(OpPtr->GetOperatorString() ));
                       break;
                     case OperatorPeer:
-		      SwapOp(Op1,Op2);
-		      Stack << (Op1->Peer (*Op2));
-                      break;
                     case OperatorAfterPeer:
-                      Stack << (Op1->AfterPeer (*Op2));
-                      break;
                     case OperatorBeforePeer:
-                      Stack << (Op1->BeforePeer (*Op2));
+                      {
+                        const bool bounded = HasPeerByteSpan(*OpPtr);
+                        GPTYPE span = 0;
+                        if (bounded && !GetPeerByteSpan(*OpPtr, &span))
+                          {
+                            delete Op1; delete Op2; delete OpPtr;
+                            Parent->SetErrorCode(107);
+                            return ERROR_SET;
+                          }
+                        // Preserve the existing ordered operators' RPN order.
+                        if (op_t == OperatorPeer) SwapOp(Op1, Op2);
+                        if (op_t == OperatorPeer)
+                          Stack << (bounded ? Op1->Peer(*Op2, span) : Op1->Peer(*Op2));
+                        else if (op_t == OperatorBeforePeer)
+                          Stack << (bounded ? Op1->BeforePeer(*Op2, span) : Op1->BeforePeer(*Op2));
+                        else
+                          Stack << (bounded ? Op1->AfterPeer(*Op2, span) : Op1->AfterPeer(*Op2));
+                      }
                       break;
                     case OperatorXPeer:
 		      SwapOp(Op1,Op2);

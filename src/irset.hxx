@@ -217,6 +217,9 @@ public:
   virtual OPOBJ *Peer (const OPOBJ& OtherIrset) override;
   virtual OPOBJ *BeforePeer (const OPOBJ& Irset) override;
   virtual OPOBJ *AfterPeer (const OPOBJ& Irset) override;
+  OPOBJ *Peer(const OPOBJ& Irset, GPTYPE MaxGap) override;
+  OPOBJ *BeforePeer(const OPOBJ& Irset, GPTYPE MaxGap) override;
+  OPOBJ *AfterPeer(const OPOBJ& Irset, GPTYPE MaxGap) override;
 
 
   virtual OPOBJ *Within(const OPOBJ& OtherIrset, const STRING& Fieldname) override;
@@ -343,7 +346,8 @@ public:
   ~atomicIRSET();
 private:
   typedef  bool (*peer_t) (const FC&, const FC&);
-  OPOBJ   *Peer (const OPOBJ& OtherIrset, peer_t Func, const STRING& Fieldname = NulString);
+  OPOBJ *PeerMatches(const OPOBJ& OtherIrset, peer_t Func,
+      const STRING& Fieldname = NulString, const GPTYPE *MaxGap = NULL);
   OPOBJ   *Within(const OPOBJ& OtherIrset, const STRING& Fieldname,  peer_t Func);
   OPOBJ   *Promote (const OPOBJ& OtherIrset, int weight);
   bool FieldExists(const STRING& FieldName);
@@ -1054,14 +1058,32 @@ public:
     return node()->Peer(*Other.cnode());
   }
 
+  OPOBJ* Peer(const OPOBJ& Other, GPTYPE MaxGap) override
+  {
+    const _IRSET* wrapped = dynamic_cast<const _IRSET*>(&Other);
+    return node()->Peer(wrapped ? *wrapped->cnode() : Other, MaxGap);
+  }
+
   OPOBJ* BeforePeer(const _IRSET& Other)
   {
     return node()->BeforePeer(*Other.cnode());
   }
 
+  OPOBJ* BeforePeer(const OPOBJ& Other, GPTYPE MaxGap) override
+  {
+    const _IRSET* wrapped = dynamic_cast<const _IRSET*>(&Other);
+    return node()->BeforePeer(wrapped ? *wrapped->cnode() : Other, MaxGap);
+  }
+
   OPOBJ* AfterPeer(const _IRSET& Other)
   {
     return node()->AfterPeer(*Other.cnode());
+  }
+
+  OPOBJ* AfterPeer(const OPOBJ& Other, GPTYPE MaxGap) override
+  {
+    const _IRSET* wrapped = dynamic_cast<const _IRSET*>(&Other);
+    return node()->AfterPeer(wrapped ? *wrapped->cnode() : Other, MaxGap);
   }
 
   OPOBJ* Within(

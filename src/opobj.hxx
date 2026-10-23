@@ -174,6 +174,10 @@ public:
 
   virtual ~OPOBJ();
 
+  virtual OPOBJ *Peer(const OPOBJ&, GPTYPE) { return NULL; }
+  virtual OPOBJ *BeforePeer(const OPOBJ&, GPTYPE) { return NULL; }
+  virtual OPOBJ *AfterPeer(const OPOBJ&, GPTYPE) { return NULL; }
+
 private:
   void SetNext (OPOBJ* const OpPtr) { Next = OpPtr; }
   OPOBJ* GetNext() const            { return Next;  }

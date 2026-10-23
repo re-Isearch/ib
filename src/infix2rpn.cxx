@@ -150,9 +150,27 @@ bool INFIX2RPN::Parse (const STRING& StrInput, STRING *StrOutput)
 	      StrOutput->Cat (" ");
 	    }
 	}
+      else if (token.CaseCompare("peer:", 5) == 0 ||
+               token.CaseCompare("peerb:", 6) == 0 ||
+               token.CaseCompare("peera:", 6) == 0)
+        {
+          // Preserve the ordered suffix and the exact integer argument.
+          // Like plain PEER, an unparenthesized chain binds left to right.
+          LastTokenWasTerm = false;
+          while (TheStack.Examine(&TmpVal) && TmpVal != "(")
+            {
+              TheStack.Pop(&TmpVal);
+              StrOutput->Cat(StandardizeOpName(TmpVal));
+              StrOutput->Cat(' ');
+              TermsWithNoOps--;
+            }
+          const char *name = token.CaseCompare("peerb:", 6) == 0 ? "PEERb:" :
+            token.CaseCompare("peera:", 6) == 0 ? "PEERa:" : "PEER:";
+          TheStack.Push(STRING(name) + token.Right(':'));
+        }
       else if (
 	token.CaseCompare("or:", 3) == 0    || token.CaseCompare("and:", 4) == 0 ||
-	token.CaseCompare("peer:", 5) == 0  || token.CaseCompare("near:", 5)  == 0 ||
+	token.CaseCompare("near:", 5)  == 0 ||
 	token.CaseCompare("xpeer:", 6) == 0 || token.Compare("WITH:", 5) == 0 ||
 	token.CaseCompare("after:", 6) == 0 || token.CaseCompare("before:", 7) == 0)
 	{
