@@ -33,6 +33,7 @@ Description:	Class IRSET - Internal Search Result Set
 #include <type_traits>
 #include <utility>
 #include <limits>
+#include <chrono>
 
 using hit_table_type =
     typename std::decay<
@@ -2664,6 +2665,40 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
       return this;
     }
 
+  // Opt-in diagnostics measure the bounded join, including early returns.
+  // Normal searches make no clock calls or diagnostic counter updates.
+  struct PEER_PROFILE
+  {
+    using Clock = std::chrono::steady_clock;
+    bool Enabled;
+    const char *Name;
+    GPTYPE Span;
+    Clock::time_point Start;
+    Clock::duration ContainerTime = Clock::duration::zero();
+    size_t Records = 0, LeftHits = 0, RightHits = 0, PositionalHits = 0;
+    size_t ContainerLookups = 0, MatchedRecords = 0, Pairs = 0;
+
+    PEER_PROFILE(bool enabled, const char *name, GPTYPE span)
+      : Enabled(enabled), Name(name), Span(span),
+        Start(enabled ? Clock::now() : Clock::time_point()) { }
+
+    ~PEER_PROFILE()
+    {
+      if (!Enabled) return;
+      const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - Start).count();
+      const double containers = std::chrono::duration<double, std::milli>(ContainerTime).count();
+      message_log(LOG_DEBUG,
+          "Bounded PEER profile: %s:%llu records=%zu left_hits=%zu right_hits=%zu "
+          "positional_hits=%zu container_lookups=%zu matched_records=%zu pairs=%zu "
+          "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f",
+          Name, (unsigned long long)Span, Records, LeftHits, RightHits,
+          PositionalHits, ContainerLookups, MatchedRecords, Pairs,
+          elapsed, containers, std::max(0.0, elapsed - containers));
+    }
+  } profile(MaxGap && Parent && Parent->GetDebugMode(),
+      compFunc == _compGTE ? "PEERb" : compFunc == _compLTE ? "PEERa" : "PEER",
+      MaxGap ? *MaxGap : 0);
+
   // When we have no fields we call the GetPeerFc that finds the field 
   // When we have a field we call the GetPeerFc that knows the field..
   const bool allFields = Fieldname.IsEmpty() || Fieldname == "*";
@@ -2673,9 +2708,18 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
     {
       if (MaxGap && !haveFields)
         return FC(0, std::numeric_limits<GPTYPE>::max());
-      return allFields
+      PEER_PROFILE::Clock::time_point start;
+      if (profile.Enabled)
+        {
+          ++profile.ContainerLookups;
+          start = PEER_PROFILE::Clock::now();
+        }
+      const FC container = allFields
         ? Parent->GetPeerFc(hit)
         : Parent->GetPeerFc(hit, Fieldname);
+      if (profile.Enabled)
+        profile.ContainerTime += PEER_PROFILE::Clock::now() - start;
+      return container;
     };
 
   atomicIRSET OtherIrset(Irset);
@@ -2795,6 +2839,12 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
 	  RightHits.reserve(OtherHits.Size());
           if (MaxGap)
             {
+              if (profile.Enabled)
+                {
+                  ++profile.Records;
+                  profile.LeftHits += myHits.Size();
+                  profile.RightHits += OtherHits.Size();
+                }
               // The bound is the number of bytes BETWEEN the intervals.
               // A zero-byte gap includes adjacent and overlapping intervals.
               for (const auto& hit : OtherHits)
@@ -2888,6 +2938,7 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
                       if (!possible) continue;
                     }
 
+                  if (profile.Enabled) ++profile.PositionalHits;
                   // No field discovery until a positional candidate exists.
                   const FC container = ResolveContainer(hit);
                   const auto matches = range(hit, &container);
@@ -3150,6 +3201,11 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
 
           if (matchCount)
             {
+              if (profile.Enabled)
+                {
+                  ++profile.MatchedRecords;
+                  profile.Pairs += matchCount;
+                }
               NewTable[current] = *IresultPtr;
 
               newHitTable.MergeEntries();

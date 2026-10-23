@@ -26,10 +26,12 @@ struct Database : IDBOBJ {
   DFDT fields;
   std::vector<FC> zones;
   size_t calls = 0;
+  bool debug = false;
   explicit Database(std::vector<FC> z = {FC(0,199),FC(200,399)}) : zones(z) {
     if (!zones.empty()) { DFD field; field.SetFieldName("P"); fields.AddEntry(field); }
   }
   DFDT* GetDfdt() override { return &fields; }
+  bool GetDebugMode() const override { return debug; }
   FC container(const FC& hit) const {
     FC best = hit; bool found = false;
     for (const auto& zone : zones)
@@ -248,7 +250,43 @@ static void dense() {
   require(a[0].GetHitTable().Size()==2*n,"dense range join emits each contributing hit once");
   std::cout << "Dense bounded PEER: " << n*n << " pairs, " << db.calls << " container lookups, " << ms << " ms\n";
 }
+static std::vector<std::string> profileMessages;
+static int captureProfile(int, const char* message) {
+  if (std::string(message).find("Bounded PEER profile:")!=std::string::npos)
+    profileMessages.emplace_back(message);
+  return 0;
+}
+static void diagnostics() {
+  require(_globalMessageLogger.Init(LOG_ALL,"peer-profile",captureProfile),"enable profile log capture");
+  Database db; const Hits left={Hit(10,12,1),Hit(90,92,1)}, right={Hit(20,22,2)};
+  const auto run = [&](bool debug, GPTYPE span) {
+    db.debug=debug; auto a=operand(db,left), b=operand(db,right); a.Peer(b,span);
+    require(a.GetTotalEntries()==(span>=7?1:0),"profiling preserves bounded query membership");
+    if (span>=7) require(a[0].GetHitCount()==1 && a[0].GetHitTable().Size()==2,
+                        "profiling preserves pair count and evidence");
+  };
+  run(false,7); require(profileMessages.empty(),"normal queries do not emit profile diagnostics");
+  run(true,7); require(profileMessages.size()==1,"debug query emits one bounded-join profile");
+  require(profileMessages.back().find("PEER:7 records=1 left_hits=2 right_hits=1 positional_hits=1 "
+      "container_lookups=1 matched_records=1 pairs=1")!=std::string::npos,
+      "profile identifies candidate reduction, actual field lookups, and qualifying pairs");
+  require(profileMessages.back().find("elapsed_ms=")!=std::string::npos &&
+      profileMessages.back().find("container_ms=")!=std::string::npos &&
+      profileMessages.back().find("other_ms=")!=std::string::npos,"profile separates container time from other join work");
+  run(true,6); require(profileMessages.size()==2 &&
+      profileMessages.back().find("positional_hits=0 container_lookups=0 matched_records=0 pairs=0")!=std::string::npos,
+      "profile distinguishes a distance rejection without field access");
+  Database flat(std::vector<FC>{}); flat.debug=true;
+  auto a=operand(flat,left), b=operand(flat,right); a.Peer(b,GPTYPE(7));
+  require(profileMessages.size()==3 && profileMessages.back().find("positional_hits=1 container_lookups=0")!=std::string::npos,
+      "fieldless proximity does not report synthetic containers as field lookups");
+  atomicIRSET empty(&db); auto other=operand(db,right); empty.Peer(other,GPTYPE(7));
+  require(profileMessages.size()==4 && profileMessages.back().find("records=0")!=std::string::npos,
+      "empty joins still emit a complete debug profile");
+  _globalMessageLogger.Init(static_cast<_MessageFunc_t>(NULL));
+  _globalMessageLogger.Init(LOG_ALL & ~LOG_DEBUG,"peer-span",stderr);
+}
 int main() {
-  parser(); examples(); randomized(); dispatch(); dense();
+  parser(); examples(); randomized(); dispatch(); dense(); diagnostics();
   std::cout << "Bounded PEER parsing, ordering, distance, structure, provenance, and dense joins passed\n";
 }

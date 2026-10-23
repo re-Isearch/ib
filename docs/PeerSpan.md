@@ -69,6 +69,34 @@ It uses the existing positional and field indexes.
 In particular, `A B PROXIMITY:n SIBLING` is not a substitute for this check:
 the current SIBLING rewrite treats a completed proximity operand as opaque.
 
+## Diagnosing slow joins
+
+Add `-debug` to print one `Bounded PEER profile` line per bounded operator:
+
+```sh
+Isearch -debug -d PATENTS -show -max 1 risc processor PEER:130
+```
+
+The counters describe the full bounded join, before the displayed result limit:
+
+| Counter | Meaning |
+| --- | --- |
+| `records` | Records present in both input sets. |
+| `left_hits`, `right_hits` | Input hit counts across those shared records. |
+| `positional_hits` | Left hits with at least one right hit satisfying the byte gap and ordering, before checking containers. |
+| `container_lookups` | Actual calls to the container resolver after the positional filter. Zero for a database without structural fields. |
+| `matched_records`, `pairs` | Records and hit pairs passing the complete bounded PEER relationship. |
+| `elapsed_ms` | Wall time inside this bounded join, including copies, sorting and hit-table assembly. |
+| `container_ms` | Wall time spent inside container resolver calls. |
+| `other_ms` | The rest of the bounded join's elapsed time. |
+
+These timings exclude the earlier term searches and later result presentation.
+They include the overhead of the diagnostic clock reads; ordinary searches do
+not read the diagnostic clock or update these counters. A high `container_ms`
+points to structural lookup work; a high `other_ms` calls for investigating the
+remaining join work. The counters also show how much the positional filter
+actually reduces the number of hits needing container resolution.
+
 ## Regression test
 
 With `IB_BUILD_SCORING_TESTS=ON`, build `peer_span_test` and run
