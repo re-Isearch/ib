@@ -66,6 +66,20 @@ bound and the hit distribution. It does not change unbounded PEER into an
 approximate search or automatically choose a frequency threshold or distance.
 It uses the existing positional and field indexes.
 
+Container lookups share a resolver for the operation. It prepares field names,
+path depths and file numbers once, resolves each needed filename once, and
+retains the field mappings while the hits are checked. Field order, containment,
+range hints and the last-field cursor follow the scalar resolver's rules.
+The same context also serves unbounded PEER and its ordered forms.
+
+On 64-bit hosts the operation can temporarily exceed the field cache's normal
+512 MiB mapping budget. These are file-backed virtual mappings, with pages read
+on demand; they do not preallocate that amount of RAM. The cache returns to its
+normal LRU budget when the operation ends, keeping its existing allowance for
+one oversized table. If another mapping cannot be created, prepared lookups can
+read that field through the stream backend. On 32-bit hosts the normal mapping
+limit stays active throughout the operation.
+
 In particular, `A B PROXIMITY:n SIBLING` is not a substitute for this check:
 the current SIBLING rewrite treats a completed proximity operand as opaque.
 
@@ -89,18 +103,30 @@ The counters describe the full bounded join, before the displayed result limit:
 | `elapsed_ms` | Wall time inside this bounded join, including copies, sorting and hit-table assembly. |
 | `container_ms` | Wall time spent inside container resolver calls. |
 | `other_ms` | The rest of the bounded join's elapsed time. |
+| `field_tests` | Field descriptors considered by the shared resolver. |
+| `field_searches` | Searches in loaded field-coordinate tables. |
+| `field_maps` | New successful file mappings during this operation. |
+| `field_cache_hits` | Mapping-pool hits when switching tables; staying on the current table needs no pool lookup. |
+| `field_map_failures` | Mapping attempts that failed; prepared lookups can use the stream backend. |
 
 These timings exclude the earlier term searches and later result presentation.
 They include the overhead of the diagnostic clock reads; ordinary searches do
-not read the diagnostic clock or update these counters. A high `container_ms`
+not read the diagnostic clock or update per-hit profiling counters. Resolver
+cleanup is included in the elapsed join time. A high `container_ms`
 points to structural lookup work; a high `other_ms` calls for investigating the
 remaining join work. The counters also show how much the positional filter
 actually reduces the number of hits needing container resolution.
 
 ## Regression test
 
-With `IB_BUILD_SCORING_TESTS=ON`, build `peer_span_test` and run
-`ctest -R '^peer_span$' --output-on-failure`. The test compares the join against
+With `IB_BUILD_SCORING_TESTS=ON`, build `peer_span_test` and `peer_resolver_test`,
+then run `ctest -R '^peer_(span|resolver)$' --output-on-failure`. The span test compares the join against
 an independent pair oracle, exercises parser and INDEX dispatch, covers zero and
 large bounds, nested intervals, ordering, structural boundaries and provenance,
 and checks a dense join without materializing its Cartesian product.
+
+The `peer_resolver` test compares prepared resolution with the scalar rules
+over nested and overlapping fields, range hints, and different starting cursors.
+It reproduces cache eviction with a deliberately small mapping budget, verifies
+mapping and filename reuse, checks scope cleanup and stream reads, and exercises
+the resolver through bounded and ordered PEER operations.

@@ -30,15 +30,15 @@ static inline GPTYPE GP(const GPTYPE *ptr, int y = 0)
 
 
 FCACHE::FCACHE(const PIDBOBJ parent)
-{
-  Parent = parent;
-  Fp = NULL;
-}
+  : FCACHE(parent, size_t(512ULL * 1024 * 1024)) { }
+
+FCACHE::FCACHE(const PIDBOBJ parent, size_t maxMappedBytes)
+  : Sessions(maxMappedBytes), BaseAddress(NULL), Fp(NULL), Disk(true),
+    FieldTotal(0), Parent(parent) { }
 
 FCACHE::FCACHE(const PIDBOBJ parent, const STRING& fieldName, bool useDisk)
+  : FCACHE(parent)
 {
-  Parent = parent;
-  Fp = NULL;
   LoadFieldCache(fieldName, useDisk);
 }
 
@@ -66,6 +66,17 @@ bool FCACHE::SetFieldName(const STRING& fieldName, bool useDisk)
 
 size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
 {
+  return LoadFieldCache(fieldName, useDisk, NULL, true);
+}
+
+size_t FCACHE::LoadMappedField(const STRING& fieldName, const STRING& fileName)
+{
+  return LoadFieldCache(fieldName, false, &fileName, false);
+}
+
+size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk,
+    const STRING *fileName, bool deriveRange)
+{
   if (!FieldName.CaseEquals(fieldName))
     {
       STRING Fn;
@@ -81,7 +92,9 @@ size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk)
                   FieldName.c_str(), (void*)Parent, resolved, Fn.c_str());
 #endif
 
-      if (!FieldName.IsEmpty() && Parent->DfdtGetFileName(FieldName, &Fn))
+      const bool resolved = !FieldName.IsEmpty() &&
+          (fileName ? !(Fn = *fileName).IsEmpty() : Parent->DfdtGetFileName(FieldName, &Fn));
+      if (resolved)
         {
           if (!useDisk)
             {
@@ -101,9 +114,14 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
                 }
               else
 		{
-		  if (FileExists(Fn))
-                    message_log(LOG_ERROR, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
-		  return 0;
+		  if (!fileName)
+                    {
+                      if (FileExists(Fn))
+                        message_log(LOG_ERROR, "Could not map field table %s (%s)", Fn.c_str(), FieldName.c_str());
+                      return 0;
+                    }
+                  // A retained mapping set can exhaust address space. Prepared
+                  // lookups must still check this field using the stream path.
 	       }
             }
 
@@ -117,7 +135,7 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
 
               if ((Fp = Parent->ffopen(Fn, "rb")) != NULL)
                 FieldTotal = GetFileSize(Fp) / sizeof(FC);
-              else
+              else if (!fileName || FileExists(Fn))
                 message_log(LOG_ERRNO, "Could not open field table %s (%s)", Fn.c_str(), FieldName.c_str());
             }
         }
@@ -129,7 +147,7 @@ message_log(LOG_INFO, "LoadFieldCache: mmap attempt Fn=%s BaseAddress=%p Size=%z
   // are all already correct from the prior successful load. Do nothing.
 
 #if 1
-  if (FieldTotal)
+  if (deriveRange && FieldTotal)
     {
       FC range;
       GetRange(&range);

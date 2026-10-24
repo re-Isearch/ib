@@ -779,6 +779,7 @@ add_library(ibSearch
     ${SRC_DIR}/squery.cxx       ${SRC_DIR}/thesaurus.cxx
     ${SRC_DIR}/sterm.cxx        ${SRC_DIR}/termobj.cxx
     ${SRC_DIR}/rcache.cxx       ${SRC_DIR}/fcache.cxx
+    ${SRC_DIR}/peerresolver.cxx
     ${SRC_DIR}/filemap.cxx      ${SRC_DIR}/mergeunit.cxx
     ${SRC_DIR}/infix2rpn.cxx    ${SRC_DIR}/tokengen.cxx
     ${SRC_DIR}/merge.cxx        ${SRC_DIR}/stoplist.cxx
@@ -995,6 +996,10 @@ if(IB_BUILD_SCORING_TESTS)
     ib_common_includes(peer_span_test)
     target_link_libraries(peer_span_test PRIVATE ibSearch ibDoc ibProcess ibIO)
     add_test(NAME peer_span COMMAND peer_span_test)
+    add_executable(peer_resolver_test tests/peer_resolver.cpp)
+    ib_common_includes(peer_resolver_test)
+    target_link_libraries(peer_resolver_test PRIVATE ibSearch ibDoc ibProcess ibIO)
+    add_test(NAME peer_resolver COMMAND peer_resolver_test)
     add_executable(zip_merge_test tests/zip_merge.cpp)
     ib_common_includes(zip_merge_test)
     target_link_libraries(zip_merge_test PRIVATE ibSearch ibDoc ibProcess ibIO)

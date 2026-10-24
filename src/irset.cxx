@@ -2677,6 +2677,8 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
     Clock::duration ContainerTime = Clock::duration::zero();
     size_t Records = 0, LeftHits = 0, RightHits = 0, PositionalHits = 0;
     size_t ContainerLookups = 0, MatchedRecords = 0, Pairs = 0;
+    std::unique_ptr<PEER_RESOLVER> Resolver;
+    bool ResolverTried = false;
 
     PEER_PROFILE(bool enabled, const char *name, GPTYPE span)
       : Enabled(enabled), Name(name), Span(span),
@@ -2685,15 +2687,19 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
     ~PEER_PROFILE()
     {
       if (!Enabled) return;
+      const auto fields = Resolver ? Resolver->GetStatistics() : PEER_RESOLVER_STATISTICS();
+      Resolver.reset(); // Include context cleanup in the complete join time.
       const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - Start).count();
       const double containers = std::chrono::duration<double, std::milli>(ContainerTime).count();
       message_log(LOG_DEBUG,
           "Bounded PEER profile: %s:%llu records=%zu left_hits=%zu right_hits=%zu "
           "positional_hits=%zu container_lookups=%zu matched_records=%zu pairs=%zu "
-          "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f",
+          "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f "
+          "field_tests=%zu field_searches=%zu field_maps=%zu field_cache_hits=%zu field_map_failures=%zu",
           Name, (unsigned long long)Span, Records, LeftHits, RightHits,
           PositionalHits, ContainerLookups, MatchedRecords, Pairs,
-          elapsed, containers, std::max(0.0, elapsed - containers));
+          elapsed, containers, std::max(0.0, elapsed - containers),
+          fields.FieldTests, fields.FieldSearches, fields.FieldMaps, fields.FieldCacheHits, fields.FieldMapFailures);
     }
   } profile(MaxGap && Parent && Parent->GetDebugMode(),
       compFunc == _compGTE ? "PEERb" : compFunc == _compLTE ? "PEERa" : "PEER",
@@ -2714,9 +2720,13 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
           ++profile.ContainerLookups;
           start = PEER_PROFILE::Clock::now();
         }
-      const FC container = allFields
-        ? Parent->GetPeerFc(hit)
-        : Parent->GetPeerFc(hit, Fieldname);
+      if (allFields && !profile.ResolverTried)
+        {
+          profile.ResolverTried = true;
+          profile.Resolver = Parent->CreatePeerResolver();
+        }
+      const FC container = profile.Resolver ? profile.Resolver->Resolve(hit) :
+        allFields ? Parent->GetPeerFc(hit) : Parent->GetPeerFc(hit, Fieldname);
       if (profile.Enabled)
         profile.ContainerTime += PEER_PROFILE::Clock::now() - start;
       return container;
