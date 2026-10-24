@@ -72,6 +72,19 @@ retains the field mappings while the hits are checked. Field order, containment,
 range hints and the last-field cursor follow the scalar resolver's rules.
 The same context also serves unbounded PEER and its ordered forms.
 
+Each field also remembers the coordinate region in which its last search can
+be reused. That region preserves the binary-search decisions and every
+containing-run boundary test, including misses. Nearby hits can therefore
+reuse a proven absence or the same complete run of containing spans without
+switching tables or repeating the search. Field order and cursor updates are
+still applied for each hit. Merely lying inside a previously found container
+does not qualify for reuse: another hit may lie in a nested child field.
+
+This cache lasts for one operation, uses the existing coordinate tables, and
+preserves exact unbounded PEER semantics. It does not select a maximum distance.
+Cached runs are limited to 64 coordinates per field; longer runs use the normal
+search and traversal without retaining the run.
+
 On 64-bit hosts the operation can temporarily exceed the field cache's normal
 512 MiB mapping budget. These are file-backed virtual mappings, with pages read
 on demand; they do not preallocate that amount of RAM. The cache returns to its
@@ -85,29 +98,32 @@ the current SIBLING rewrite treats a completed proximity operand as opaque.
 
 ## Diagnosing slow joins
 
-Add `-debug` to print one `Bounded PEER profile` line per bounded operator:
+Add `-debug` to print one `Bounded PEER profile` or `Unbounded PEER profile`
+line per structural operator:
 
 ```sh
 Isearch -debug -d PATENTS -show -max 1 risc processor PEER:130
+Isearch -debug -d PATENTS -show -max 1 virus reduction PEER
 ```
 
-The counters describe the full bounded join, before the displayed result limit:
+The counters describe the full join, before the displayed result limit:
 
 | Counter | Meaning |
 | --- | --- |
 | `records` | Records present in both input sets. |
 | `left_hits`, `right_hits` | Input hit counts across those shared records. |
-| `positional_hits` | Left hits with at least one right hit satisfying the byte gap and ordering, before checking containers. |
+| `positional_hits` | For bounded PEER, left hits with a right hit satisfying the byte gap and ordering before checking containers. For unbounded PEER, all left hits in shared records. |
 | `container_lookups` | Actual calls to the container resolver after the positional filter. Zero for a database without structural fields. |
 | `matched_records`, `pairs` | Records and hit pairs passing the complete bounded PEER relationship. |
 | `elapsed_ms` | Wall time inside this bounded join, including copies, sorting and hit-table assembly. |
 | `container_ms` | Wall time spent inside container resolver calls. |
 | `other_ms` | The rest of the bounded join's elapsed time. |
 | `field_tests` | Field descriptors considered by the shared resolver. |
-| `field_searches` | Searches in loaded field-coordinate tables. |
+| `field_searches` | Actual searches in loaded field-coordinate tables, excluding reused results. |
 | `field_maps` | New successful file mappings during this operation. |
 | `field_cache_hits` | Mapping-pool hits when switching tables; staying on the current table needs no pool lookup. |
 | `field_map_failures` | Mapping attempts that failed; prepared lookups can use the stream backend. |
+| `field_result_hits` | Per-field searches avoided by reusing an exact coordinate region, including cached misses. |
 
 These timings exclude the earlier term searches and later result presentation.
 They include the overhead of the diagnostic clock reads; ordinary searches do
@@ -129,4 +145,11 @@ The `peer_resolver` test compares prepared resolution with the scalar rules
 over nested and overlapping fields, range hints, and different starting cursors.
 It reproduces cache eviction with a deliberately small mapping budget, verifies
 mapping and filename reuse, checks scope cleanup and stream reads, and exercises
-the resolver through bounded and ordered PEER operations.
+the resolver through bounded, unbounded and ordered PEER operations. Sequential
+lookups exercise reuse across nested children, gaps and field boundaries;
+extreme coordinates, changing hit lengths and long duplicate runs are covered.
+
+For an optional synthetic comparison with many sparse fields, run
+`peer_resolver_test --benchmark`. It reports field tests, actual table searches
+and resolver wall time for 16,384 driver hits across 324 fields. These figures
+measure the fixture, rather than predicting timings for a particular corpus.

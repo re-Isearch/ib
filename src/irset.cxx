@@ -34,6 +34,7 @@ Description:	Class IRSET - Internal Search Result Set
 #include <utility>
 #include <limits>
 #include <chrono>
+#include <string>
 
 using hit_table_type =
     typename std::decay<
@@ -2665,7 +2666,7 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
       return this;
     }
 
-  // Opt-in diagnostics measure the bounded join, including early returns.
+  // Opt-in diagnostics measure the complete join, including early returns.
   // Normal searches make no clock calls or diagnostic counter updates.
   struct PEER_PROFILE
   {
@@ -2673,6 +2674,7 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
     bool Enabled;
     const char *Name;
     GPTYPE Span;
+    bool Bounded;
     Clock::time_point Start;
     Clock::duration ContainerTime = Clock::duration::zero();
     size_t Records = 0, LeftHits = 0, RightHits = 0, PositionalHits = 0;
@@ -2680,8 +2682,8 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
     std::unique_ptr<PEER_RESOLVER> Resolver;
     bool ResolverTried = false;
 
-    PEER_PROFILE(bool enabled, const char *name, GPTYPE span)
-      : Enabled(enabled), Name(name), Span(span),
+    PEER_PROFILE(bool enabled, const char *name, const GPTYPE *span)
+      : Enabled(enabled), Name(name), Span(span ? *span : 0), Bounded(span != NULL),
         Start(enabled ? Clock::now() : Clock::time_point()) { }
 
     ~PEER_PROFILE()
@@ -2691,19 +2693,22 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
       Resolver.reset(); // Include context cleanup in the complete join time.
       const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - Start).count();
       const double containers = std::chrono::duration<double, std::milli>(ContainerTime).count();
+      const std::string token = Bounded ? std::string(Name) + ":" + std::to_string(Span) : Name;
       message_log(LOG_DEBUG,
-          "Bounded PEER profile: %s:%llu records=%zu left_hits=%zu right_hits=%zu "
+          "%s PEER profile: %s records=%zu left_hits=%zu right_hits=%zu "
           "positional_hits=%zu container_lookups=%zu matched_records=%zu pairs=%zu "
           "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f "
-          "field_tests=%zu field_searches=%zu field_maps=%zu field_cache_hits=%zu field_map_failures=%zu",
-          Name, (unsigned long long)Span, Records, LeftHits, RightHits,
+          "field_tests=%zu field_searches=%zu field_maps=%zu field_cache_hits=%zu field_map_failures=%zu "
+          "field_result_hits=%zu",
+          Bounded ? "Bounded" : "Unbounded", token.c_str(), Records, LeftHits, RightHits,
           PositionalHits, ContainerLookups, MatchedRecords, Pairs,
           elapsed, containers, std::max(0.0, elapsed - containers),
-          fields.FieldTests, fields.FieldSearches, fields.FieldMaps, fields.FieldCacheHits, fields.FieldMapFailures);
+          fields.FieldTests, fields.FieldSearches, fields.FieldMaps, fields.FieldCacheHits, fields.FieldMapFailures,
+          fields.FieldResultHits);
     }
-  } profile(MaxGap && Parent && Parent->GetDebugMode(),
+  } profile(Parent && Parent->GetDebugMode(),
       compFunc == _compGTE ? "PEERb" : compFunc == _compLTE ? "PEERa" : "PEER",
-      MaxGap ? *MaxGap : 0);
+      MaxGap);
 
   // When we have no fields we call the GetPeerFc that finds the field 
   // When we have a field we call the GetPeerFc that knows the field..
@@ -2847,14 +2852,14 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
 	  RightHits.clear();
  	  LeftHits.reserve(myHits.Size());
 	  RightHits.reserve(OtherHits.Size());
+          if (profile.Enabled)
+            {
+              ++profile.Records;
+              profile.LeftHits += myHits.Size();
+              profile.RightHits += OtherHits.Size();
+            }
           if (MaxGap)
             {
-              if (profile.Enabled)
-                {
-                  ++profile.Records;
-                  profile.LeftHits += myHits.Size();
-                  profile.RightHits += OtherHits.Size();
-                }
               // The bound is the number of bytes BETWEEN the intervals.
               // A zero-byte gap includes adjacent and overlapping intervals.
               for (const auto& hit : OtherHits)
@@ -2998,6 +3003,7 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
                   PEER_HIT entry;
 
                   entry.Hit = hit;
+                  if (profile.Enabled) ++profile.PositionalHits;
                   entry.Container = ResolveContainer(hit); // was Parent->GetPeerFc(hit);
 
                   LeftHits.push_back(entry);
@@ -3175,6 +3181,7 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
 
 	      for (const auto& MyFc : myHits)
                 {
+                  if (profile.Enabled) ++profile.PositionalHits;
                   const FC PeerFC = ResolveContainer(MyFc); // was Parent->GetPeerFc(MyFc);
 
 		  for (const auto& fc : OtherHits)
