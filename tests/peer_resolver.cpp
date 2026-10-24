@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <random>
 #include <stdexcept>
@@ -166,13 +167,107 @@ static void repeatedLookups()
   }
   const double newMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
   require(stats.FieldMaps == 2 && fast.PathLookups == 2,"each needed field is mapped and resolved by name only once");
-  require(stats.FieldTests == 395*3 && stats.FieldSearches > 395,"profile records repeated searches over retained tables");
+  require(stats.FieldTests == 395*3 && stats.FieldSearches < 395 && stats.FieldResultHits > 395,
+          "profile records search reuse as well as mapping reuse");
   require(old.Cache.GetMappingStatistics().Mappings > stats.FieldMaps*100,"scalar fixture reproduces repeated eviction and remapping");
   require(fast.Cache.CurrentMappedBytes() <= 2*sizeof(FC),"normal mapping budget is restored, allowing one oversized table");
   require(fast.Cache.GetTotal() && !fast.Cache.GetRecordFc(0).IsEmpty(),"active field remains valid after trimming the pool");
   std::cout << "395 lookups: scalar " << old.Cache.GetMappingStatistics().Mappings << " maps / " << old.PathLookups
             << " path lookups / " << oldMs << " ms; prepared " << stats.FieldMaps << " maps / " << fast.PathLookups
             << " path lookups / " << newMs << " ms\n";
+}
+
+static void searchWindows()
+{
+  for (bool hints : {false,true})
+    {
+      Database old("window-scalar"), fast("window-resolver");
+      populate(old,hints); populate(fast,hints);
+      for (size_t initial = 0; initial <= 7; ++initial)
+        {
+          old.Last = fast.Last = initial;
+          auto resolver = fast.CreatePeerResolver();
+          for (GPTYPE start = 0; start < 450; ++start)
+            for (GPTYPE length : {GPTYPE(0),GPTYPE(1),GPTYPE(7),GPTYPE(25),GPTYPE(100),GPTYPE(400)})
+              {
+                const FC hit(start,start+length);
+                require(resolver->Resolve(hit) == scalar(old,hit),
+                        "cached search regions preserve nested, crossing and boundary containment");
+                require(fast.Last == old.Last,"replayed field runs preserve cursor-dependent selection");
+              }
+        }
+    }
+  Database gaps("gap-windows");
+  gaps.Add("P",{FC(0,9999)});
+  gaps.Add("Q",{FC(0,10),FC(9000,9999)});
+  auto resolver = gaps.CreatePeerResolver();
+  for (GPTYPE i = 100; i < 2100; ++i)
+    require(resolver->Resolve(FC(i,i+2)) == FC(0,9999),"cached misses retain the containing parent field");
+  auto stats = resolver->GetStatistics();
+  require(stats.FieldSearches == 2 && stats.FieldResultHits == 3998,
+          "nearby hits reuse both successful field runs and proven misses without new table searches");
+
+  Database longRun("long-window-run");
+  longRun.Add("P",std::vector<FC>(70,FC(0,9999)));
+  auto capped = longRun.CreatePeerResolver();
+  require(capped->Resolve(FC(10,12)) == FC(0,9999) && capped->Resolve(FC(20,22)) == FC(0,9999),
+          "long duplicate runs retain their normal containment result");
+  require(capped->GetStatistics().FieldSearches == 2 && capped->GetStatistics().FieldResultHits == 0,
+          "long containing runs fall back to searches without retaining an unbounded cache");
+
+  // The same containing span can hide children; replay must require the
+  // complete search region, not just containment in the previous answer.
+  Database old("edge-scalar"), fast("edge-resolver");
+  const GPTYPE top = std::numeric_limits<GPTYPE>::max();
+  for (auto db : {&old,&fast})
+    {
+      db->Add("P",{FC(0,999),FC(top-999,top)});
+      db->Add("P/CHILD",{FC(100,200),FC(400,450),FC(top-800,top-700)});
+      db->Add("DUPLICATES",std::vector<FC>(70,FC(0,999)));
+    }
+  auto edges = fast.CreatePeerResolver();
+  const std::vector<FC> hits = {FC(0,0),FC(50,51),FC(100,101),FC(150,200),FC(150,201),
+    FC(300,301),FC(420,421),FC(450,451),FC(998,999),FC(999,1000),FC(1000,1001),
+    FC(top-999,top-998),FC(top-800,top-799),FC(top-750,top-700),FC(top-750,top-699),
+    FC(top-1,top),FC(top,top),FC(20,10),FC()};
+  for (size_t repeat = 0; repeat < 3; ++repeat)
+    for (const auto& hit : hits)
+      {
+        require(edges->Resolve(hit) == scalar(old,hit),"search regions handle extrema, empty hits and long duplicate runs");
+        require(fast.Last == old.Last,"edge lookups preserve field traversal state");
+      }
+}
+
+static void sparseFields(bool benchmark = false)
+{
+  const size_t fields = benchmark ? 324 : 64, records = benchmark ? 512 : 32, perRecord = 32;
+  Database db("sparse-fields");
+  for (size_t field = 0; field < fields; ++field)
+    {
+      std::vector<FC> zones;
+      for (size_t record = 0; record < records; ++record)
+        {
+          const GPTYPE base = record * 100000;
+          zones.emplace_back(base,base + (field ? 500 : 99999));
+        }
+      db.Add(STRING().form("F%03zu",field).c_str(),zones);
+    }
+  const auto start = std::chrono::steady_clock::now();
+  auto resolver = db.CreatePeerResolver();
+  for (size_t record = 0; record < records; ++record)
+    for (size_t hit = 0; hit < perRecord; ++hit)
+      {
+        const GPTYPE base = record * 100000, pos = base+1000+hit*100;
+        require(resolver->Resolve(FC(pos,pos+4)) == FC(base,base+99999),
+                "many sparse fields preserve the parent container for every driver hit");
+      }
+  const double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+  const auto stats = resolver->GetStatistics();
+  if (!benchmark)
+    require(stats.FieldSearches < stats.FieldTests/8 && stats.FieldResultHits > stats.FieldTests/2,
+            "sparse fields avoid repeated binary searches within the same coordinate region");
+  std::cout << fields << " fields, " << records*perRecord << " hits: " << stats.FieldTests
+            << " tests, " << stats.FieldSearches << " table searches, " << ms << " ms\n";
 }
 
 static void lifetimes()
@@ -215,7 +310,7 @@ static atomicIRSET result(Database& db, const std::vector<IRESULT::hit_type>& hi
 static std::string peerProfile;
 static int captureProfile(int, const char *message)
 {
-  if (std::string(message).find("Bounded PEER profile:") != std::string::npos) peerProfile = message;
+  if (std::string(message).find("PEER profile:") != std::string::npos) peerProfile = message;
   return 0;
 }
 
@@ -263,10 +358,27 @@ static void integration()
     require(db.Contexts == contexts+1 && left.GetTotalEntries() == 1 && left[0].GetHitCount() == 2,
             "unbounded peers also reuse the resolver and keep their distance-free pair count");
   }
+  require(_globalMessageLogger.Init(LOG_ALL,"peer-resolver",captureProfile),"enable unbounded profile capture");
+  db.Debug = true;
+  for (int direction : {0,1,-1})
+    {
+      peerProfile.clear();
+      auto left = result(db,{Hit(10,12,1),Hit(198,199,1)}), right = result(db,{Hit(20,22,2),Hit(200,201,2)});
+      if (direction == 1) left.BeforePeer(right);
+      else if (direction == -1) left.AfterPeer(right);
+      else left.Peer(right);
+      require(peerProfile.find("Unbounded PEER profile:") != std::string::npos &&
+              peerProfile.find("records=1 left_hits=2 right_hits=2 positional_hits=2 container_lookups=2") != std::string::npos &&
+              peerProfile.find("field_result_hits=") != std::string::npos,
+              "unbounded and ordered debug profiles expose actual structural work and cached search results");
+    }
+  _globalMessageLogger.Init(static_cast<_MessageFunc_t>(NULL));
+  _globalMessageLogger.Init(LOG_ALL & ~LOG_DEBUG,"peer-resolver",stderr);
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  equivalence(); repeatedLookups(); lifetimes(); integration();
+  if (argc == 2 && std::string(argv[1]) == "--benchmark") { sparseFields(true); return 0; }
+  equivalence(); repeatedLookups(); searchWindows(); sparseFields(); lifetimes(); integration();
   std::cout << "Prepared peer resolution, mapping reuse and lifetime regressions passed\n";
 }

@@ -3,8 +3,8 @@
 
 #include "idbobj.hxx"
 
-// Cache field descriptors and retain their mapped tables for one operation.
-// Keep the scalar resolver's field order and containing-run selection.
+// Cache field descriptors, mapped tables and exact search regions for one
+// operation. Keep the scalar resolver's field order and containing-run selection.
 class MAPPED_PEER_RESOLVER : public PEER_RESOLVER
 {
 public:
