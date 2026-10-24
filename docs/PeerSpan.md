@@ -4,6 +4,8 @@
 and have at most `n` bytes between them. Both conditions apply to the same pair
 of hits. Plain `PEER` continues to have no distance bound.
 
+For positional proximity without a field-instance check, see [PROX](Proximity.md).
+
 | RPN operator | Relationship |
 | --- | --- |
 | `A B PEER:n` | A and B are peers, in either order, with byte gap at most n. |

@@ -19,6 +19,7 @@ Description:	Class IRSET - Internal Search Result Set
 #include "lang-codes.hxx"
 #include "index.hxx"
 #include "hybridcalibration.hxx"
+#include "proximity.hxx"
 
 #include <float.h>
 #ifndef MAXFLOAT
@@ -35,6 +36,8 @@ Description:	Class IRSET - Internal Search Result Set
 #include <limits>
 #include <chrono>
 #include <string>
+#include <cstdint>
+#include <cstring>
 
 using hit_table_type =
     typename std::decay<
@@ -4442,309 +4445,110 @@ OPOBJ *atomicIRSET::Nand (const OPOBJ& OtherIrset)
 // If metric < 1 then its % of the size of the document.
 OPOBJ *atomicIRSET::CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T direction)
 {
-#if 1
-  if (Parent && Parent != OtherIrset.GetParent())
-    {
-      Parent->SetErrorCode(0); // No error
-      message_log (LOG_DEBUG, "Proximity between different physical indexes is not defined.");
-      // Nothing
-      MinScore=MAXFLOAT;
-      MaxScore=0.0;
-      TotalEntries = 0;
-      return this;
-    }
-#endif
-
-  if (Metric == 0)
-    return Peer(OtherIrset); // Semantics is distance=0 -> same set
-
-
-  if (OtherIrset.GetSort() != ByIndex)
-    return _CharProx (OtherIrset, Metric, direction);
-  const size_t    OtherTotal = OtherIrset.GetTotalEntries();
-  if (OtherTotal == 0 || TotalEntries == 0) {
-    // Nothing
+  const auto empty = [&]() -> OPOBJ* {
     MinScore = MAXFLOAT;
     MaxScore = 0.0;
-    TotalEntries = 0;
-    return this;		// Can't do proximity with nothing..
-  }
-  // Merge both result sets into one sorted...
+    TotalEntries = HitTotal = 0;
+    return this;
+  };
+  if (Parent && Parent != OtherIrset.GetParent())
+    {
+      Parent->SetErrorCode(0);
+      message_log(LOG_DEBUG, "Proximity between different physical indexes is not defined.");
+      return empty();
+    }
+  // Test the representation so this check also works with -ffast-math.
+  uint32_t metricBits;
+  static_assert(sizeof(metricBits) == sizeof(Metric), "binary32 proximity metric");
+  std::memcpy(&metricBits, &Metric, sizeof(metricBits));
+  if ((metricBits & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000))
+    return empty();
+  if (Metric == 0)
+    return Peer(OtherIrset); // Existing zero-metric PEER semantics.
+
+  if (OtherIrset.GetSort() != ByIndex)
+    return _CharProx(OtherIrset, Metric, direction);
+  const size_t otherTotal = OtherIrset.GetTotalEntries();
+  if (!otherTotal || !TotalEntries) return empty();
   SortByIndex();
 
-  _index_id_t     idx1 =0, idx2=0;
-  size_t          pos1 = 1, opos1 = 0;
-  size_t          pos2 = 1, opos2 = 0;
-  size_t          newMaxEntries = TotalEntries > OtherTotal ? OtherTotal : TotalEntries;
-// @@@@
-  PIRESULT        NewTable = new IRESULT[newMaxEntries];
-  size_t          current = 0;
+  const size_t capacity = std::min(TotalEntries, otherTotal);
+  PIRESULT result = new IRESULT[capacity];
+  const IRESULT *other = static_cast<const atomicIRSET&>(OtherIrset).Table;
+  size_t leftPos = 0, rightPos = 0, count = 0;
+  DOUBLE minimum = MAXFLOAT, maximum = 0.0;
+  hit_table_type evidence;
+  const bool fractional = Metric > -1 && Metric < 1;
+  const double integerDistance = std::trunc(static_cast<double>(Metric));
+  const double exclusiveLimit = std::ldexp(1.0, std::numeric_limits<GPTYPE>::digits);
 
-  DOUBLE          newMinScore = MAXFLOAT;
-  DOUBLE          newMaxScore = 0.0;
-
-  IRESULT        *OtherTable = ((const atomicIRSET *) &OtherIrset)->Table;
-  IRESULT        *IresultPtr = NULL;
-  IRESULT        *OtherIresultPtr = NULL;
-  hit_table_type  newHitTable;
-  MDTREC          mdtrec;
-  INT             Distance;
-
-  while (pos1 <= TotalEntries && pos2 <= OtherTotal) {
-    if (pos1 != opos1) {
-      opos1 = pos1;
-      IresultPtr = Table + pos1 - 1;
-      idx1 = IresultPtr->GetIndex();
+  while (leftPos < TotalEntries && rightPos < otherTotal)
+    {
+      const _index_id_t leftId = Table[leftPos].GetIndex();
+      const _index_id_t rightId = other[rightPos].GetIndex();
+      if (leftId == rightId)
+        {
+          double signedDistance = integerDistance;
+          bool haveDistance = true;
+          if (fractional)
+            {
+              MDTREC record;
+              const MDT *mdt = GetMdt(leftPos+1);
+              haveDistance = mdt && mdt->GetEntry(Table[leftPos].GetMdtIndex(), &record);
+              if (haveDistance)
+                {
+                  const GPTYPE span = record.GetLocalRecordEnd() - record.GetLocalRecordStart();
+                  // Preserve the existing fractional rounding and minimum.
+                  signedDistance = std::trunc(0.5 + Metric * span);
+                  if (signedDistance == 0 || signedDistance == 1) signedDistance = 2;
+                }
+            }
+          size_t pairs = 0;
+          if (haveDistance)
+            {
+              const bool far = signedDistance < 0;
+              const double magnitude = far ? -signedDistance : signedDistance;
+              // Converting a metric at/above 2^GPTYPE_BITS to GPTYPE is invalid.
+              // Such a near bound includes all gaps; such a far bound includes none.
+              const bool beyondRange = magnitude >= exclusiveLimit;
+              if (!beyondRange || !far)
+                pairs = ib_proximity::Join(Table[leftPos].GetHitTable(), other[rightPos].GetHitTable(),
+                    beyondRange ? std::numeric_limits<GPTYPE>::max() : static_cast<GPTYPE>(magnitude),
+                    far, direction, evidence);
+            }
+          if (pairs)
+            {
+              result[count] = Table[leftPos];
+              result[count].SetHitTable(evidence);
+              result[count].SetHitCount(pairs);
+              result[count].SetAuxCount(2);
+              const DOUBLE score = result[count++].GetScore();
+              if (score < minimum) minimum = score;
+              if (score > maximum) maximum = score;
+            }
+        }
+      if (leftId <= rightId) ++leftPos;
+      if (rightId <= leftId) ++rightPos;
     }
-    if (pos2 != opos2) {
-      opos2 = pos2;
-      OtherIresultPtr = OtherTable + pos2 - 1;
-      idx2 = OtherIresultPtr->GetIndex();
-    }
-    if (idx2 == idx1) {
-      if (Metric < 1 && Metric > -1 && ((float) ((int) Metric) != Metric)) {
-	// Got a Factor to multiply
-	GetMdt(pos1)->GetEntry(IresultPtr->GetMdtIndex(), &mdtrec);
-	Distance = (INT) (0.5 + Metric * (mdtrec.GetLocalRecordEnd()
-		- mdtrec.GetLocalRecordStart()));
-	if (Distance == 0 || Distance == 1)
-	  Distance = 2;
-      } else
-	Distance = (INT) Metric;
 
-      const auto   MyHits    = IresultPtr->GetHitTable();
-      const auto   OtherHits = OtherIresultPtr->GetHitTable();
-      const bool IsSorted = IresultPtr->HitTableIsSorted() && OtherIresultPtr->HitTableIsSorted();
-
-      size_t          matchCount = 0;
-
-      newHitTable.Clear();
-      for (const IRESULT::hit_type& MyFc : MyHits) {
-	for (const IRESULT::hit_type& OtherFc : OtherHits) {
-	  bool     IsMatch = false;
-	  const signed int diff = MyFc.GetFieldStart() - OtherFc.GetFieldStart();
-	  if (Distance >= 0) {
-	    // Near
-	    if (diff < 0) {
-	      if (direction != BEFORE &&
-		  ((size_t) ((OtherFc.GetFieldStart() -
-			      MyFc.GetFieldEnd() - 1)) <= (size_t) Distance))
-		IsMatch = true;
-	    } else if (direction != AFTER &&
-		       ((size_t) ((MyFc.GetFieldStart()
-		      - OtherFc.GetFieldEnd() - 1)) <= (size_t) Distance)) {
-	      IsMatch = true;
-	    }
-	  } else {
-	    // Far
-	    if (diff < 0) {
-	      if (direction != BEFORE &&
-		  ((size_t) ((OtherFc.GetFieldStart() -
-			  MyFc.GetFieldEnd() - 1)) >= (size_t) (-Distance)))
-		IsMatch = true;
-	    } else if (direction != AFTER &&
-		       ((size_t) ((MyFc.GetFieldStart()
-		   - OtherFc.GetFieldEnd() - 1)) >= (size_t) (-Distance))) {
-	      IsMatch = true;
-	    }
-	  }
-	  if (IsMatch) {
-	    matchCount++;
-	    newHitTable.AddEntry(OtherFc);
-	    newHitTable.AddEntry(MyFc);
-	  } else if (IsSorted) {
-	    // Not Matched. Can we stop?
-	    if ((direction != AFTER && diff > 0) || (direction != BEFORE && diff < 0))
-	      break;		// Assumes that its been sorted..
-
-	  }
-	}			// for
-      }				// for
-      if (matchCount)
-	{
-	  NewTable[current] = *IresultPtr;
-	  NewTable[current].SetHitTable (newHitTable);
-	  NewTable[current].SetHitCount (matchCount);
-          NewTable[current].SetAuxCount (2);
-          const DOUBLE score = NewTable[current++].GetScore();
-          if (score < newMinScore) newMinScore = score;
-          if (score > newMaxScore) newMaxScore = score;
-	}
-    }
-    if (idx1 <= idx2)
-      pos1++;
-    if (idx2 <= idx1)
-      pos2++;
-  }
-
-  if (Table) delete [] Table;
-  Table        = NewTable;
-  MaxEntries   = newMaxEntries;
-  TotalEntries = current;
-  Sort         = ByIndex;
-  MinScore     = newMinScore;
-  MaxScore     = newMaxScore;
+  delete [] Table;
+  Table = result;
+  MaxEntries = capacity;
+  TotalEntries = count;
+  Sort = ByIndex;
+  MinScore = minimum;
+  MaxScore = maximum;
+  HitTotal = 0;
   return this;
 }
 
-// CharProx added by Kevin Gamiel
-//
-// Example:  'dog' within 5 characters of 'cat'
-//
-// For(all entries in dog result-list)
-//   For(all entries in cat result-list)
-//     if(in same record)
-//       for(each hit in dog hit table)
-//         for(each hit in cat hit table)
-//           if(hits within 5 characters of each other)
-//             add current dog item to final result-list
-//
-// If metric < 1 then its % of the size of the document.
+// Normalize record order once, then use the same positional join. The old
+// fallback duplicated the unsafe sorted-hit early exit and fractional logic.
 OPOBJ *atomicIRSET::_CharProx (const OPOBJ& OtherIrset, const float Metric, DIR_T direction)
 {
-  IRESULT OtherIresult, MyIresult;
-  atomicIRSET MyResult (Parent);
-  const size_t OtherSetTotalEntries = OtherIrset.GetTotalEntries ();
-  MDTREC mdtrec;
-  INT Distance;
-#if STORE_PROX
-  hit_table_type newHitTable;
-#endif
-  if (TotalEntries == 0 || OtherSetTotalEntries == 0)
-    {
-      // Nothing
-      MinScore=MAXFLOAT;
-      MaxScore=0.0;
-      TotalEntries = 0;
-      return this; // Can't AND with nothing..
-    }
-
-  const atomicIRSET  *OtherPtr = (atomicIRSET *)&OtherIrset;
-  bool   OtherSorted = OtherPtr->Sort == ByIndex;
-  if (OtherSorted)
-    SortByIndex();
-
-  _index_id_t  idx, other_idx;
-
-  for (size_t i = 1; i <= TotalEntries; i++)
-    {
-      GetEntry (i, &MyIresult);
-      idx = MyIresult.GetIndex ();
-      for (size_t j = 1; j <= OtherSetTotalEntries; j++)
-	{
-	  OtherIrset.GetEntry (j, &OtherIresult);
-	  other_idx = OtherIresult.GetIndex ();
-
-	  // Only bother with things in the same record.
-	  if (idx == other_idx)
-	    {
-	      if (Metric < 1 && Metric > -1 && ((float)((int)Metric) != Metric))
-		{
-		  // Got a Factor to multiply
-		  GetMdt(i)->GetEntry (MyIresult.GetMdtIndex (), &mdtrec);
-		  Distance = (INT)(0.5 + 
-			Metric*(mdtrec.GetLocalRecordStart()-mdtrec.GetLocalRecordEnd()));
-		  if (Distance == 0 || Distance == 1) Distance = 2;
-		} else Distance = (INT)Metric;
-
-	      const auto MyHits    = MyIresult.GetHitTable ();
-	      const auto OtherHits = OtherIresult.GetHitTable();
-	      const bool IsSorted = MyIresult.HitTableIsSorted() && OtherIresult.HitTableIsSorted();
-
-	      size_t matchCount = 0;
-#if STORE_PROX
-	      newHitTable.Clear();
-#endif
-	      for (const IRESULT::hit_type& MyFc : MyHits)
-		{
-		  for (const IRESULT::hit_type& OtherFc : OtherHits)
-		    {
-		      bool IsMatch = false;
-		      const INT diff = MyFc.GetFieldStart () - OtherFc.GetFieldStart ();
-		      if (Distance >= 0)
-			{
-			  // Near 
-			  if (diff < 0)
-			    {
-			      if (direction != BEFORE &&
-				  ((size_t) ((OtherFc.GetFieldStart () -
-				     MyFc.GetFieldEnd () - 1)) <= (size_t)Distance))
-				IsMatch = true;
-			    }
-			  else if (direction != AFTER &&
-				   ((size_t) ((MyFc.GetFieldStart ()
-				- OtherFc.GetFieldEnd () - 1)) <= (size_t)Distance))
-			    {
-			      IsMatch = true;
-			    }
-			}
-		      else
-			{
-			  // Far
-			  if (diff < 0)
-			    {
-			      if (direction != BEFORE &&
-				  ((size_t) ((OtherFc.GetFieldStart () -
-				     MyFc.GetFieldEnd () - 1)) >= (size_t)(-Distance)))
-				IsMatch = true;
-			    }
-			  else if (direction != AFTER &&
-				   ((size_t) ((MyFc.GetFieldStart ()
-				- OtherFc.GetFieldEnd () - 1)) >= (size_t)(-Distance)))
-			    {
-			      IsMatch = true;
-			    }
-			}
-		      if (IsMatch)
-			{
-			  matchCount++;
-#if STORE_PROX
-			  newHitTable.AddEntry( OtherFc );
-			  newHitTable.AddEntry(  MyFc );
-#else
-			  break;
-#endif
-			}
-		      else if (IsSorted)
-			{
-			  // Not Matched. Can we stop?
-			  if ((direction != AFTER && diff > 0) || ( direction != BEFORE && diff < 0))
-			    break; // Assumes that its been sorted..
-			}
-		    } // for
-#if STORE_PROX == 0
-		  if (matchCount)
-		    break;
-#endif
-		} // for
-#if STORE_PROX
-	      if (matchCount)
-		OtherIresult.SetHitTable(newHitTable);
-#endif
-	      if (matchCount)
-		{
-#if AWWW
-		  MyResult.FastAddEntry (OtherIresult);
-#else
-		  MyResult.AddEntry (OtherIresult, false);
-#endif
-		}
-	    }
-	  else if (OtherSorted && other_idx > idx)
-	    break;
-	} // for()
-    } // for()
-
-#if AWWW
-  if (OtherSetTotalEntries)
-    MyResult.MergeEntries(false);
-#endif
-
-  delete[]Table;
-  TotalEntries = MyResult.GetTotalEntries ();
-  MaxEntries = MyResult.MaxEntries;
-  Table = MyResult.StealTable ();
-  return this;
+  atomicIRSET other(OtherIrset);
+  other.SortByIndex();
+  return CharProx(other, Metric, direction);
 }
 
 // Within 5% of total size

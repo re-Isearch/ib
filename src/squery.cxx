@@ -415,7 +415,7 @@ if (arg_pos)
           {
             if (Metric)
               {
-                const char *ptr = Operator.c_str() +10;
+                const char *ptr = Operator.c_str() +5;
                 *Metric = atof ( ptr );
                 if (Operator[(unsigned)(Operator.GetLength()-1)] == '%')
                   *Metric /= 100.0;
@@ -730,7 +730,7 @@ SQUERY& SQUERY::Cat(const SQUERY& OtherSquery, const STRING& Opname)
     message_log (LOG_PANIC, "SQUERY::Cat : Operator %s undefined!", Opname.c_str());
   const bool combining = !Opstack.IsEmpty();
   Cat(OtherSquery, Op);
-  if (combining && (Op == OperatorPeer || Op == OperatorBeforePeer || Op == OperatorAfterPeer))
+  if (combining)
     {
       POPOBJ glue = NULL;
       if (Opstack >> glue)
