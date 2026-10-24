@@ -207,10 +207,40 @@ private:
 class MultiMMapSession
 {
 public:
+  struct STATISTICS
+  {
+    size_t Mappings = 0;
+    size_t Reuses = 0;
+    size_t Evictions = 0;
+    size_t Failures = 0;
+  };
+
+  // Hold mappings across a group of lookups. This retains virtual mappings,
+  // not resident pages; the OS still pages file data on demand.
+  class SCOPED_MAPPINGS
+  {
+  public:
+    SCOPED_MAPPINGS() noexcept : Owner(nullptr) { }
+    SCOPED_MAPPINGS(const SCOPED_MAPPINGS&) = delete;
+    SCOPED_MAPPINGS& operator=(const SCOPED_MAPPINGS&) = delete;
+    SCOPED_MAPPINGS(SCOPED_MAPPINGS&& other) noexcept : Owner(other.Owner)
+      { other.Owner = nullptr; }
+    ~SCOPED_MAPPINGS()
+      { if (Owner && --Owner->m_RetainDepth == 0) Owner->Trim(); }
+  private:
+    friend class MultiMMapSession;
+    explicit SCOPED_MAPPINGS(MultiMMapSession *owner) : Owner(owner)
+      { ++Owner->m_RetainDepth; }
+    MultiMMapSession *Owner;
+  };
+
   explicit MultiMMapSession(size_t maxBytes = 512ULL * 1024 * 1024) // e.g. 512MB budget
     : m_MaxBytes(maxBytes), m_CurrentBytes(0) {}
 
   ~MultiMMapSession() { Clear(); }
+
+  SCOPED_MAPPINGS RetainMappings() { return SCOPED_MAPPINGS(this); }
+  STATISTICS GetStatistics() const { return m_Statistics; }
 
   const unsigned char* GetMemoryBase(const STRING& FileName,
                                       enum mapping_access flag = MapRandom)
@@ -218,6 +248,7 @@ public:
     auto it = m_Index.find(FileName);
     if (it != m_Index.end())
       {
+        ++m_Statistics.Reuses;
         TouchMRU(it->second);
         return it->second->second.BaseAddress;
       }
@@ -225,16 +256,20 @@ public:
     MMAP* Mapped = new MMAP(FileName, flag);
     if (!Mapped || !Mapped->Ok())
       {
+        ++m_Statistics.Failures;
         delete Mapped;
         return nullptr;
       }
 
     const size_t FileBytes = Mapped->Size();
+    ++m_Statistics.Mappings;
 
     // Evict LRU entries until there's room for this one, or nothing left to evict.
     // A single huge file (e.g. 97MB "is") is allowed in even if it alone
     // exceeds a modest budget — see note below.
-    while (m_CurrentBytes + FileBytes > m_MaxBytes && !m_List.empty())
+    while (m_RetainDepth == 0 &&
+           (FileBytes > m_MaxBytes || m_CurrentBytes > m_MaxBytes - FileBytes) &&
+           !m_List.empty())
       EvictLRU();
 
     Slot S;
@@ -294,6 +329,8 @@ private:
 
   size_t   m_MaxBytes;
   size_t   m_CurrentBytes;
+  size_t   m_RetainDepth = 0;
+  STATISTICS m_Statistics;
   ListType m_List;
   std::unordered_map<STRING, ListType::iterator> m_Index;
 
@@ -306,11 +343,19 @@ private:
   {
     if (m_List.empty())
       return;
+    ++m_Statistics.Evictions;
     auto& lru = m_List.back();
     m_CurrentBytes -= lru.second.Bytes;
     CloseSlot(lru.second);
     m_Index.erase(lru.first);
     m_List.pop_back();
+  }
+
+  void Trim()
+  {
+    // As on insertion, keep a single oversized mapping if it is the MRU.
+    while (m_CurrentBytes > m_MaxBytes && m_List.size() > 1)
+      EvictLRU();
   }
 
   void CloseSlot(Slot& S)

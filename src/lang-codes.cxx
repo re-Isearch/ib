@@ -95,7 +95,10 @@ size_t _ib_UTF8TermLength(const UCHR *text, size_t length)
     bool term = _ib_IsUTF8TermChr(lookahead) != 0;
     if (!term && offset && bytes == 1 && IsDotInWord(text[offset]) && remaining > 1) {
       const UCHR next = text[offset+1];
-      term = !(next >= '0' && next <= '9') && _ib_IsUTF8TermChr(lookahead+1);
+      // Extend the ASCII lookahead only for a following UTF-8 character.
+      // Recursing through another dot-class byte would join 0..word even
+      // though ParseWordsUTF8 ended the indexed token at the first dot.
+      term = next >= 0x80 && _ib_IsUTF8TermChr(lookahead+1);
     }
     if (!term) break;
     offset += size_t(bytes);

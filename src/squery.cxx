@@ -29,6 +29,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #include "attrlist.hxx"
 #include "squery.hxx"
 #include "operator.hxx"
+#include "peer_span.hxx"
 #include "infix2rpn.hxx"
 #if 1
 # include "vidb.hxx"
@@ -352,6 +353,18 @@ t_Operator SQUERY::GetOperator (const STRING& Operator, FLOAT *Metric, STRING *S
 
 // Handle OPERATOR:arg
     const size_t arg_pos = Operator.Search(':');
+    const bool peer = arg_pos == 5 && Operator.CaseCompare("PEER", 4) == 0;
+    const bool beforePeer = arg_pos == 6 && Operator.CaseCompare("PEERb", 5) == 0;
+    const bool afterPeer = arg_pos == 6 && Operator.CaseCompare("PEERa", 5) == 0;
+    if (peer || beforePeer || afterPeer)
+      {
+        const STRING argument(Operator.c_str() + arg_pos);
+        GPTYPE span;
+        if (!ParsePeerByteSpan(argument, &span)) return OperatorERR;
+        if (Metric) *Metric = static_cast<FLOAT>(span);
+        if (StringArgs) *StringArgs = argument;
+        return beforePeer ? OperatorBeforePeer : afterPeer ? OperatorAfterPeer : OperatorPeer;
+      }
 if (arg_pos)
     switch ( arg_pos )
       {
@@ -386,14 +399,7 @@ if (arg_pos)
               }
           }
         break;
-// PEER
       case 5:
-        if (Operator.Compare("PEER", 4) == 0)
-          {
-            if (Metric)
-              *Metric = atof ( Operator.c_str() + 5 );
-            return OperatorPeer;
-          }
         if (Operator.Compare("NEAR", 4) == 0)
           {
             if (Metric)
@@ -409,7 +415,7 @@ if (arg_pos)
           {
             if (Metric)
               {
-                const char *ptr = Operator.c_str() +10;
+                const char *ptr = Operator.c_str() +5;
                 *Metric = atof ( ptr );
                 if (Operator[(unsigned)(Operator.GetLength()-1)] == '%')
                   *Metric /= 100.0;
@@ -717,10 +723,23 @@ if (arg_pos)
 // edz: Added Concatination
 SQUERY& SQUERY::Cat(const SQUERY& OtherSquery, const STRING& Opname)
 {
-  t_Operator Op = GetOperator(Opname);
+  FLOAT metric = 0;
+  STRING argument;
+  t_Operator Op = GetOperator(Opname, &metric, &argument);
   if (Op == OperatorERR)
     message_log (LOG_PANIC, "SQUERY::Cat : Operator %s undefined!", Opname.c_str());
+  const bool combining = !Opstack.IsEmpty();
   Cat(OtherSquery, Op);
+  if (combining && (Op == OperatorPeer || Op == OperatorBeforePeer || Op == OperatorAfterPeer))
+    {
+      POPOBJ glue = NULL;
+      if (Opstack >> glue)
+        {
+          glue->SetOperatorMetric(metric);
+          glue->SetOperatorString(argument);
+          Opstack << glue;
+        }
+    }
   return *this;
 }
 
@@ -786,6 +805,8 @@ SQUERY& SQUERY::Cat(const SQUERY& OtherSquery, t_Operator OpGlue)
         }
     }
   Operator.SetOperatorType (OpGlue);
+  Operator.SetOperatorMetric(0);
+  Operator.SetOperatorString(NulString);
   NewOpstack << Operator;
   Opstack = NewOpstack;
   return *this;
@@ -2186,6 +2207,23 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
               {
                 switch (OpPtr->GetOperatorType ())
                   {
+                  case OperatorPeer:
+                  case OperatorBeforePeer:
+                  case OperatorAfterPeer:
+                    {
+                      const char *what = OpPtr->GetOperatorType() == OperatorPeer ? "PEER" :
+                        OpPtr->GetOperatorType() == OperatorBeforePeer ? "PEERb" : "PEERa";
+                      const STRING argument = OpPtr->GetOperatorString();
+                      if (!argument.IsEmpty()) S = STRING(what) + ":" + argument;
+                      else if (OpPtr->GetOperatorMetric() != 0)
+                        {
+                          GPTYPE span;
+                          S.form(GetPeerByteSpan(*OpPtr, &span) ? "%s:%.0f" : "%s:%.9g",
+                              what, double(OpPtr->GetOperatorMetric()));
+                        }
+                      else S = what;
+                    }
+                    break;
                   case OperatorWithin:
                     S.form("WITHIN:%s", (OpPtr->GetOperatorString()).c_str() );
                     break;
@@ -2230,10 +2268,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                   case OperatorBefore:
                   case OperatorAfter:
                   case OperatorNear:
-                  case OperatorPeer:
                   case OperatorXPeer:
-                  case OperatorBeforePeer:
-                  case OperatorAfterPeer:
 		  case OperatorAncestor:
                   case OperatorReduce:
 		  case OperatorFocus:
@@ -2253,9 +2288,6 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                           case OperatorNear:      what = "NEAR";   break;
                           case OperatorBefore:    what = "BEFORE"; break;
                           case OperatorAfter:     what = "AFTER";  break;
-                          case OperatorPeer:      what = "PEER";   break;
-                          case OperatorBeforePeer:what = SOperatorBeforePeer; break;
-                          case OperatorAfterPeer: what = SOperatorAfterPeer; break;
                           case OperatorXPeer:     what =  SOperatorXPeer;  break;
 			  case OperatorAncestor:  what = "ANCESTOR"; break;
                           case OperatorReduce:    what = "REDUCE"; break;
@@ -2285,10 +2317,7 @@ size_t SQUERY::fetchTerm (PSTRING StringBuffer, bool WantRpn) const
                         case OperatorNear:      S = SOperatorNear;      break;
                         case OperatorBefore:    S = SOperatorBefore;    break;
                         case OperatorAfter:     S = SOperatorAfter;     break;
-                        case OperatorPeer:	S = SOperatorPeer;      break;
                         case OperatorXPeer:     S = SOperatorXPeer;     break;
-                        case OperatorBeforePeer:S = SOperatorBeforePeer; break;
-                        case OperatorAfterPeer: S = SOperatorAfterPeer; break;
 			case OperatorAncestor:  S = "ANCESTOR";         break;
 			case OperatorSibling:   S = "SIBLING";          break;
                         case OperatorReduce:    S = "REDUCE:0";         break; // SPECIAL CASE
@@ -3218,8 +3247,9 @@ static bool FlattenAssociative(QUERY_NODE *Node)
 
   const t_Operator op = Node->GetOperatorType();
 
-  if (!IsAssociativeOperator(op))
-    return false;
+  if (!IsAssociativeOperator(op) ||
+      (op == OperatorPeer && HasPeerByteSpan(*Node->Object)))
+    return false; // A distance-bound binary relation is not associative.
 
   std::vector<std::unique_ptr<QUERY_NODE> > flattened;
 
@@ -3826,25 +3856,29 @@ static const SQUERY::OPERATOR_DOC OperatorDocs[] =
     OperatorPeer,
     "PEER",
     2,
-    "A B PEER",
+    "A B PEER[:n]",
     "Returns matches whose hits occur within the same immediate non-root "
-    "structural container."
+    "structural container. Optional :n also requires the same pair of hits "
+    "to have at most n intervening bytes. n is a nonnegative integer; zero "
+    "includes adjacent or overlapping hits."
   },
   {
     OperatorBeforePeer,
     "PEERb",
     2,
-    "A B PEERb",
+    "A B PEERb[:n]",
     "Ordered PEER relation using BEFORE ordering within the same immediate "
-    "structural container."
+    "structural container. Optional :n limits the intervening byte gap of "
+    "the same ordered pair."
   },
   {
     OperatorAfterPeer,
     "PEERa",
     2,
-    "A B PEERa",
+    "A B PEERa[:n]",
     "Ordered PEER relation using AFTER ordering within the same immediate "
-    "structural container."
+    "structural container. Optional :n limits the intervening byte gap of "
+    "the same ordered pair."
   },
   {
     OperatorXPeer,

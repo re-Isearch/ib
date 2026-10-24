@@ -19,6 +19,7 @@ Description:	Class IDBOBJ: Database object virtual class
 #include "nodetree.hxx"
 #include "words.hxx"
 #include "boost.hxx"
+#include <memory>
 
 #include "irset_fwd.hxx"
 
@@ -43,6 +44,19 @@ inline bool IsFastIndexingMode(t_merge_status status)
 
 class atomicIRSET;
 class METADATA;
+
+struct PEER_RESOLVER_STATISTICS
+{
+  size_t FieldTests = 0, FieldSearches = 0, FieldMaps = 0, FieldCacheHits = 0, FieldMapFailures = 0;
+};
+
+class PEER_RESOLVER
+{
+public:
+  virtual ~PEER_RESOLVER() { }
+  virtual FC Resolve(const FC& hit) = 0;
+  virtual PEER_RESOLVER_STATISTICS GetStatistics() const { return {}; }
+};
 
 class IDBOBJ {
 friend class IDB;
@@ -457,6 +471,9 @@ private:
   virtual  GPTYPE ParseWords(const DOCTYPE_ID&, UCHR*, GPTYPE, GPTYPE,
 		GPTYPE*, GPTYPE) { return 0; }; 
   virtual  size_t  ParseWords2(const STRING&, WORDSLIST *) const { return 0; }
+public:
+  // Optional context for repeated structural lookups in one search operation.
+  virtual std::unique_ptr<PEER_RESOLVER> CreatePeerResolver() { return nullptr; }
 };
 
 typedef IDBOBJ* PIDBOBJ;

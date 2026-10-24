@@ -32,6 +32,8 @@ Description:	Class IRSET - Internal Search Result Set
 
 #include <type_traits>
 #include <utility>
+#include <limits>
+#include <chrono>
 
 using hit_table_type =
     typename std::decay<
@@ -2609,19 +2611,19 @@ OPOBJ *atomicIRSET::_And (const OPOBJ& OtherIrset, size_t Limit)
 OPOBJ *atomicIRSET::Peer (const OPOBJ& Irset)
 {
   if (Parent && Parent->GetDfdt() ->GetTotalEntries() > 0)
-    return Peer(Irset, NULL);
+    return PeerMatches(Irset, NULL);
   return And(Irset);
 }
 OPOBJ *atomicIRSET::BeforePeer (const OPOBJ& Irset)
 {
   if (Parent && Parent->GetDfdt() ->GetTotalEntries() > 0)
-    return Peer(Irset, _compGTE);
+    return PeerMatches(Irset, _compGTE);
   return Before(Irset);
 }
 OPOBJ *atomicIRSET::AfterPeer (const OPOBJ& Irset)
 {
   if (Parent && Parent->GetDfdt() ->GetTotalEntries() > 0)
-    return Peer(Irset, _compLTE);
+    return PeerMatches(Irset, _compLTE);
   return After(Irset);
 }
 
@@ -2629,7 +2631,23 @@ OPOBJ *atomicIRSET::AfterPeer (const OPOBJ& Irset)
 // This is where the heavy lifting of PEER class functions are
 // Handles the magic for both AND:field and PEER as well as ordered versions thereof
 // (the compFunc handles the order)
-OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fieldname)
+OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, GPTYPE MaxGap)
+{
+  return PeerMatches(Irset, NULL, NulString, &MaxGap);
+}
+
+OPOBJ *atomicIRSET::BeforePeer(const OPOBJ& Irset, GPTYPE MaxGap)
+{
+  return PeerMatches(Irset, _compGTE, NulString, &MaxGap);
+}
+
+OPOBJ *atomicIRSET::AfterPeer(const OPOBJ& Irset, GPTYPE MaxGap)
+{
+  return PeerMatches(Irset, _compLTE, NulString, &MaxGap);
+}
+
+OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
+    const STRING& Fieldname, const GPTYPE *MaxGap)
 {
   if (Parent && Parent != Irset.GetParent())
     {
@@ -2647,14 +2665,71 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
       return this;
     }
 
+  // Opt-in diagnostics measure the bounded join, including early returns.
+  // Normal searches make no clock calls or diagnostic counter updates.
+  struct PEER_PROFILE
+  {
+    using Clock = std::chrono::steady_clock;
+    bool Enabled;
+    const char *Name;
+    GPTYPE Span;
+    Clock::time_point Start;
+    Clock::duration ContainerTime = Clock::duration::zero();
+    size_t Records = 0, LeftHits = 0, RightHits = 0, PositionalHits = 0;
+    size_t ContainerLookups = 0, MatchedRecords = 0, Pairs = 0;
+    std::unique_ptr<PEER_RESOLVER> Resolver;
+    bool ResolverTried = false;
+
+    PEER_PROFILE(bool enabled, const char *name, GPTYPE span)
+      : Enabled(enabled), Name(name), Span(span),
+        Start(enabled ? Clock::now() : Clock::time_point()) { }
+
+    ~PEER_PROFILE()
+    {
+      if (!Enabled) return;
+      const auto fields = Resolver ? Resolver->GetStatistics() : PEER_RESOLVER_STATISTICS();
+      Resolver.reset(); // Include context cleanup in the complete join time.
+      const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - Start).count();
+      const double containers = std::chrono::duration<double, std::milli>(ContainerTime).count();
+      message_log(LOG_DEBUG,
+          "Bounded PEER profile: %s:%llu records=%zu left_hits=%zu right_hits=%zu "
+          "positional_hits=%zu container_lookups=%zu matched_records=%zu pairs=%zu "
+          "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f "
+          "field_tests=%zu field_searches=%zu field_maps=%zu field_cache_hits=%zu field_map_failures=%zu",
+          Name, (unsigned long long)Span, Records, LeftHits, RightHits,
+          PositionalHits, ContainerLookups, MatchedRecords, Pairs,
+          elapsed, containers, std::max(0.0, elapsed - containers),
+          fields.FieldTests, fields.FieldSearches, fields.FieldMaps, fields.FieldCacheHits, fields.FieldMapFailures);
+    }
+  } profile(MaxGap && Parent && Parent->GetDebugMode(),
+      compFunc == _compGTE ? "PEERb" : compFunc == _compLTE ? "PEERa" : "PEER",
+      MaxGap ? *MaxGap : 0);
+
   // When we have no fields we call the GetPeerFc that finds the field 
   // When we have a field we call the GetPeerFc that knows the field..
   const bool allFields = Fieldname.IsEmpty() || Fieldname == "*";
+  const bool haveFields = Parent && Parent->GetDfdt() &&
+    Parent->GetDfdt()->GetTotalEntries() != 0;
   const auto ResolveContainer = [&](const FC& hit) -> FC
     {
-      return allFields
-        ? Parent->GetPeerFc(hit)
-        : Parent->GetPeerFc(hit, Fieldname);
+      if (MaxGap && !haveFields)
+        return FC(0, std::numeric_limits<GPTYPE>::max());
+      PEER_PROFILE::Clock::time_point start;
+      if (profile.Enabled)
+        {
+          ++profile.ContainerLookups;
+          start = PEER_PROFILE::Clock::now();
+        }
+      if (allFields && !profile.ResolverTried)
+        {
+          profile.ResolverTried = true;
+          profile.Resolver = Parent->CreatePeerResolver();
+        }
+      const FC container = profile.Resolver ? profile.Resolver->Resolve(hit) :
+        allFields ? Parent->GetPeerFc(hit) : Parent->GetPeerFc(hit, Fieldname);
+      if (profile.Enabled)
+        profile.ContainerTime += PEER_PROFILE::Clock::now() - start;
+      return container;
     };
 
   atomicIRSET OtherIrset(Irset);
@@ -2772,14 +2847,149 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
 	  RightHits.clear();
  	  LeftHits.reserve(myHits.Size());
 	  RightHits.reserve(OtherHits.Size());
-          /*
-           * Fast path for ordinary unordered PEER.
-           *
-           * All left-side hits sharing the same PeerFC
-           * have the same right-side containment range.
-           */
-          if (compFunc == NULL)
+          if (MaxGap)
             {
+              if (profile.Enabled)
+                {
+                  ++profile.Records;
+                  profile.LeftHits += myHits.Size();
+                  profile.RightHits += OtherHits.Size();
+                }
+              // The bound is the number of bytes BETWEEN the intervals.
+              // A zero-byte gap includes adjacent and overlapping intervals.
+              for (const auto& hit : OtherHits)
+                if (!hit.IsEmpty()) RightHits.push_back(hit);
+              std::sort(RightHits.begin(), RightHits.end(), FcLess);
+
+              std::vector<GPTYPE> maxEnds;
+              maxEnds.reserve(RightHits.size());
+              bool monotoneEnds = true;
+              for (const auto& hit : RightHits)
+                {
+                  const GPTYPE end = hit.GetFieldEnd();
+                  if (!maxEnds.empty() && end < maxEnds.back()) monotoneEnds = false;
+                  maxEnds.push_back(maxEnds.empty() ? end : std::max(end, maxEnds.back()));
+                }
+
+              const GPTYPE limit = std::numeric_limits<GPTYPE>::max();
+              const GPTYPE radius = *MaxGap == limit ? limit : *MaxGap + 1;
+              const auto withinGap = [&](const FC& left, const FC& right) -> bool
+                {
+                  if (left.GetFieldEnd() < right.GetFieldStart())
+                    return right.GetFieldStart() - left.GetFieldEnd() - 1 <= *MaxGap;
+                  if (right.GetFieldEnd() < left.GetFieldStart())
+                    return left.GetFieldStart() - right.GetFieldEnd() - 1 <= *MaxGap;
+                  return true;
+                };
+
+              // Prefix maximum ends make candidate discovery safe for broad,
+              // nested interval operands as well as ordinary token positions.
+              const auto range = [&](const FC& hit, const FC* container)
+                  -> std::pair<size_t, size_t>
+                {
+                  GPTYPE firstStart = 0;
+                  GPTYPE lastStart = hit.GetFieldEnd() > limit - radius
+                    ? limit : hit.GetFieldEnd() + radius;
+                  GPTYPE firstEnd = hit.GetFieldStart() > radius
+                    ? hit.GetFieldStart() - radius : 0;
+                  GPTYPE lastEnd = limit;
+                  if (compFunc == _compGTE)
+                    {
+                      lastStart = std::min(lastStart, hit.GetFieldStart());
+                      lastEnd = hit.GetFieldEnd();
+                    }
+                  else if (compFunc == _compLTE)
+                    {
+                      firstStart = hit.GetFieldStart();
+                      firstEnd = std::max(firstEnd, hit.GetFieldEnd());
+                    }
+                  if (container)
+                    {
+                      if (container->IsEmpty()) return {0, 0};
+                      firstStart = std::max(firstStart, container->GetFieldStart());
+                      lastStart = std::min(lastStart, container->GetFieldEnd());
+                      lastEnd = std::min(lastEnd, container->GetFieldEnd());
+                    }
+                  if (firstStart > lastStart || firstEnd > lastEnd) return {0, 0};
+                  size_t begin = std::lower_bound(RightHits.begin(), RightHits.end(), firstStart,
+                    [](const IRESULT::hit_type& h, GPTYPE gp) {
+                      return h.GetFieldStart() < gp;
+                    }) - RightHits.begin();
+                  size_t end = std::upper_bound(RightHits.begin(), RightHits.end(), lastStart,
+                    [](GPTYPE gp, const IRESULT::hit_type& h) {
+                      return gp < h.GetFieldStart();
+                    }) - RightHits.begin();
+                  begin = std::max(begin, size_t(std::lower_bound(maxEnds.begin(), maxEnds.end(),
+                      firstEnd) - maxEnds.begin()));
+                  if (monotoneEnds)
+                    end = std::min(end, size_t(std::upper_bound(maxEnds.begin(), maxEnds.end(),
+                        lastEnd) - maxEnds.begin()));
+                  return {begin, end};
+                };
+
+              // For tokens / noncrossing intervals, matching right hits form
+              // one range. Count its pairs without enumerating the Cartesian
+              // product, and mark its evidence using range boundary events.
+              std::vector<size_t> starts(monotoneEnds ? RightHits.size() + 1 : 0, 0);
+              std::vector<size_t> stops(monotoneEnds ? RightHits.size() + 1 : 0, 0);
+              std::vector<unsigned char> used(monotoneEnds ? 0 : RightHits.size(), 0);
+              for (const auto& hit : myHits)
+                {
+                  if (hit.IsEmpty()) continue;
+                  const auto candidates = range(hit, NULL);
+                  if (candidates.first >= candidates.second) continue;
+                  if (!monotoneEnds)
+                    {
+                      bool possible = false;
+                      for (size_t r = candidates.first; r < candidates.second; ++r)
+                        if (withinGap(hit, RightHits[r]) &&
+                            (!compFunc || compFunc(hit, RightHits[r])))
+                          { possible = true; break; }
+                      if (!possible) continue;
+                    }
+
+                  if (profile.Enabled) ++profile.PositionalHits;
+                  // No field discovery until a positional candidate exists.
+                  const FC container = ResolveContainer(hit);
+                  const auto matches = range(hit, &container);
+                  if (matches.first >= matches.second) continue;
+                  if (monotoneEnds)
+                    {
+                      matchCount += matches.second - matches.first;
+                      ++starts[matches.first];
+                      ++stops[matches.second];
+                      newHitTable.AddEntry(hit);
+                    }
+                  else
+                    {
+                      bool matched = false;
+                      for (size_t r = matches.first; r < matches.second; ++r)
+                        if (container.Contains(RightHits[r]) && withinGap(hit, RightHits[r]) &&
+                            (!compFunc || compFunc(hit, RightHits[r])))
+                          {
+                            ++matchCount;
+                            used[r] = 1;
+                            matched = true;
+                          }
+                      if (matched) newHitTable.AddEntry(hit);
+                    }
+                }
+              size_t active = 0;
+              for (size_t r = 0; r < RightHits.size(); ++r)
+                {
+                  if (monotoneEnds)
+                    {
+                      active += starts[r];
+                      active -= stops[r];
+                    }
+                  if (monotoneEnds ? active != 0 : used[r] != 0)
+                    newHitTable.AddEntry(RightHits[r]);
+                }
+            }
+          else if (compFunc == NULL)
+            {
+              // All left hits with the same container share one containment
+              // range when there is no distance bound.
               // std::vector<PEER_HIT> LeftHits;
               // std::vector<FC> RightHits;
 
@@ -3001,6 +3211,11 @@ OPOBJ *atomicIRSET::Peer(const OPOBJ& Irset, peer_t compFunc, const STRING& Fiel
 
           if (matchCount)
             {
+              if (profile.Enabled)
+                {
+                  ++profile.MatchedRecords;
+                  profile.Pairs += matchCount;
+                }
               NewTable[current] = *IresultPtr;
 
               newHitTable.MergeEntries();
@@ -3324,7 +3539,7 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
     }
 
 
-  if (FieldName == "*") return Peer(Irset, compFunc);
+  if (FieldName == "*") return PeerMatches(Irset, compFunc);
 
 #if 1
   if (Parent && Parent != Irset.GetParent())
@@ -3405,7 +3620,7 @@ OPOBJ *atomicIRSET::Within(const OPOBJ& Irset, const STRING& FieldName,  peer_t 
 
 #if 1
   // We now let the common Peer method do the work
-  return Peer(Irset, compFunc, FieldName) ;
+  return PeerMatches(Irset, compFunc, FieldName) ;
 #else
   atomicIRSET OtherIrset (Irset);
 

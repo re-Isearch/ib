@@ -17,6 +17,7 @@ class FCACHE {
 public:
 
    FCACHE(const PIDBOBJ parent);
+   FCACHE(const PIDBOBJ parent, size_t maxMappedBytes);
    FCACHE(const PIDBOBJ parent, const STRING& fieldName, bool useDisk = false);
 
    bool Ok() const { return FieldTotal != 0; }
@@ -57,8 +58,15 @@ public:
 
    ~FCACHE();
    size_t LoadFieldCache(const STRING& fieldName, bool useDisk);
+   // Prepared lookup: the caller supplies the path and maintains range hints.
+   size_t LoadMappedField(const STRING& fieldName, const STRING& fileName);
+   MultiMMapSession::SCOPED_MAPPINGS RetainMappings() { return Sessions.RetainMappings(); }
+   MultiMMapSession::STATISTICS GetMappingStatistics() const { return Sessions.GetStatistics(); }
+   size_t CurrentMappedBytes() const { return Sessions.CurrentBytes(); }
 
 private:
+   size_t LoadFieldCache(const STRING& fieldName, bool useDisk,
+       const STRING *fileName, bool deriveRange);
    size_t GetZones (const GPTYPE HitGp, const STRING& fieldName, FCT *Zones);
    bool DeriveRange(FC *RangePtr); // Set Start and End addresses for cache
 

@@ -32,6 +32,7 @@ Description: Class IDB
 #include "dirent.hxx"
 #include "common.hxx"
 #include "idb.hxx"
+#include "peerresolver.hxx"
 #include "nlist.hxx"
 #ifdef HAVE_LOCALE
 #include <locale.h>
@@ -1818,21 +1819,11 @@ FC IDB::GetNextFC (const GPTYPE& HitGp, const STRING& fieldname, size_t offset)
 //
 
 
-// NOT USED YET: Part of a future optimization
-class PEER_RESOLVER
+std::unique_ptr<PEER_RESOLVER> IDB::CreatePeerResolver()
 {
-public:
-  explicit PEER_RESOLVER(IDB& db);
-  ~PEER_RESOLVER();
-
-  FC Resolve(const FC& hit);
-
-private:
-  IDB& Db;
-  size_t LastPeerField;
-
-  std::vector<FILE*> Files;
-};
+  return std::unique_ptr<PEER_RESOLVER>(
+      new MAPPED_PEER_RESOLVER(*this, *GetPeerFieldCache(), lastPeerField));
+}
 
 
 FC IDB::GetPeerFc(const GPTYPE& HitGp, STRING *NodeNamePtr)

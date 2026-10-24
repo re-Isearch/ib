@@ -2,6 +2,7 @@
 #include "index.hxx"
 #include "idbobj.hxx"
 #include "lang-codes.hxx"
+#include "magic.hxx"
 #include "xml.hxx"
 #include <algorithm>
 #include <cstring>
@@ -93,8 +94,11 @@ static void keys_and_lengths()
   require(compare(query.data(), stored.data()) < 0, "mid-sequence exact query is rejected");
   query = key(u8"école", 6); stored = term(u8"é");
   require(compare(query.data(), stored.data()) > 0, "short stored word bounds a longer query");
-  for (const std::string text : {u8"café", u8"中文", u8"𐐨", u8"café.rue", u8"foo.école"})
+  for (const std::string text : {u8"café", u8"中文", u8"𐐨", u8"café.rue", u8"foo.école", "0.word"})
     require(_ib_UTF8TermLength(bytes(text), text.size()) == text.size(), "term length advances over full UTF-8 characters");
+  for (const std::string text : {"0..word", "0__word", "0.&word", "0._word", "0.@word", "0.0"})
+    require(_ib_UTF8TermLength(bytes(text), text.size()) == 1,
+            "source recovery cannot extend a numeric token through adjacent ASCII punctuation");
   const std::string followed = u8"café. next";
   require(_ib_UTF8TermLength(bytes(followed), followed.size()) == std::string(u8"café").size(),
           "trailing punctuation ends a merge term");
@@ -139,7 +143,10 @@ static void partition(INDEX& index, Database& db, int number, size_t width, cons
   FILE *sis = fopen(db.ComposeDbFn(DbExtDict)+suffix, "wb");
   FILE *inx = fopen(db.stem+".inx"+suffix, "wb");
   require(sis && inx, "create partition files");
-  putINT2(0, inx);
+  const UINT2 magic = UINT2(((sizeof(GPTYPE) == 4 ? 0 : 1) << 14) |
+                           ((IsBigEndian() ? objINDEXl : objINDEXm) << 5) |
+                           (index.Version()%100));
+  putINT2(magic, inx);
   putc(int(width), sis); putc(charset, sis);
   GPTYPE total = 0;
   const CHARSET collation(charset);
@@ -331,11 +338,30 @@ static void indirect_and_dump()
   }
 
   SourceIndex lexical("source-order",20);
-  lexical.add(u8"êcole","a"); lexical.add(u8"école","b"); // Deliberately misordered posting buckets.
+  lexical.add(u8"êcole",u8"êcole"); lexical.add(u8"école",u8"école");
   lexical.publish();
+  // Reverse the stored keys and their posting groups, keeping endpoints valid.
+  FILE *sis = fopen(lexical.db.ComposeDbFn(DbExtDict)+".1","r+b");
+  FILE *inx = fopen(lexical.db.stem+".inx.1","r+b");
+  require(sis && inx, "open deliberately disordered dictionary");
+  std::vector<UCHR> first(lexical.width+1), second(lexical.width+1);
+  const long secondRow = long(2+lexical.width+1+sizeof(GPTYPE));
+  require(fseek(sis,2,SEEK_SET) == 0 && fread(first.data(),1,first.size(),sis) == first.size() &&
+          fseek(sis,secondRow,SEEK_SET) == 0 && fread(second.data(),1,second.size(),sis) == second.size(),
+          "read dictionary key windows");
+  require(fseek(sis,2,SEEK_SET) == 0 && fwrite(second.data(),1,second.size(),sis) == second.size() &&
+          fseek(sis,secondRow,SEEK_SET) == 0 && fwrite(first.data(),1,first.size(),sis) == first.size(),
+          "reverse dictionary key windows");
+  const GPTYPE a = lexical.index.GpFread(off_t(0),inx), b = lexical.index.GpFread(inx);
+  require(fseek(inx,2,SEEK_SET) == 0 && lexical.index.GpFwrite(b,inx) == 1 &&
+          lexical.index.GpFwrite(a,inx) == 1, "reverse the associated posting groups");
+  fclose(sis); fclose(inx);
   std::ostringstream errors;
   require(lexical.index.Dump(0,errors,true) == 1 && errors.str().find("term order") != std::string::npos,
-          "Dump detects Unicode ordering errors beyond the first byte");
+          "Dump detects stored Unicode ordering errors beyond the first byte");
+  require(errors.str().find(u8"StoredKey=\"école\"") != std::string::npos &&
+          errors.str().find(u8"PreviousKey=\"êcole\"") != std::string::npos,
+          "dictionary order diagnostics identify both stored keys");
 
   SourceIndex prefixPostings("source-prefix-postings",3);
   prefixPostings.add("abcz","abcz"); prefixPostings.add("abca","abca");
@@ -344,6 +370,8 @@ static void indirect_and_dump()
   std::ostringstream prefixErrors;
   require(prefixPostings.index.Dump(0,prefixErrors,true) == 0,
           "different full terms sharing a SIS prefix can restart their posting GPs");
+  require(prefixPostings.index.Dump(1,prefixErrors,true) == 0,
+          "skipping postings still selects the correct SIS range");
 
   SourceIndex postings("source-postings",20);
   postings.add(u8"ÉCOLE",u8"école"); postings.add(u8"école",u8"école");
@@ -433,6 +461,183 @@ static void xml_indirect_and_dump()
   SetGlobalCharset("UTF-8");
 }
 
+static void numeric_punctuation_after_merge()
+{
+  SourceIndex fixture("xml-zero-merge",3);
+  XML xml(&fixture.db,"XML");
+  fixture.db.doctype = &xml;
+  SetGlobalCharset("UTF-8");
+  const std::vector<std::string> sources = {
+    "<LINE>0..alpha 0._beta 0.&gamma 0.0 0.1 0.omega</LINE>",
+    "<LINE>0 0__delta 0 0.@epsilon 0 0.omega</LINE>"
+  };
+  size_t zeros = 0;
+  for (size_t shard = 0; shard < sources.size(); ++shard) {
+    const auto& source = sources[shard];
+    const GPTYPE base = fixture.store(source);
+    std::vector<UCHR> normalized(source.begin(),source.end());
+    normalized.resize(source.size()+StringCompLength+1,0);
+    std::vector<GPTYPE> positions(source.size()+1);
+    const size_t count = xml.ParseWords(normalized.data(),source.size(),0,positions.data(),positions.size());
+    require(count > 0, "tokenize numeric XML fixture through the real doctype");
+    Rows rows;
+    for (size_t i = 0; i < count; ++i) {
+      const std::string term(reinterpret_cast<const char *>(normalized.data()+positions[i]));
+      rows[term.substr(0,fixture.width)].push_back(base+positions[i]);
+      if (term == "0") ++zeros;
+    }
+    partition(fixture.index,fixture.db,int(shard+1),fixture.width,rows);
+  }
+  require(zeros > 2 && fixture.db.mdt.SetIndexNum(2), "publish numeric XML ingestion shards");
+  std::ostringstream before, after;
+  const long beforeErrors = fixture.index.Dump(0,before,true);
+  require(fixture.index.MergeIndexFiles(), "zip numeric XML shards without retokenizing");
+  const long afterErrors = fixture.index.Dump(0,after,true);
+  if (beforeErrors || afterErrors) std::cerr << before.str() << after.str();
+  require(beforeErrors == 0 && afterErrors == 0,
+          "numeric punctuation has identical token boundaries before and after merging");
+  FILE *sis = fopen(fixture.db.ComposeDbFn(DbExtDict),"rb");
+  require(sis && getc(sis) == int(fixture.width) && getc(sis) == Charset2Id("UTF-8") &&
+          getc(sis) == 1 && getc(sis) == '0', "merged dictionary retains the singleton zero key");
+  require(fseek(sis,long(fixture.width-1),SEEK_CUR) == 0 && endpoint(sis)+1 == zeros,
+          "merge preserves every singleton zero posting");
+  fclose(sis);
+  SCANLIST list;
+  require(fixture.index.Scan(&list,NulString,STRING("0."),-1) == 1 &&
+          list.GetEntry(1).Term() == STRING("0.omega") && list.GetEntry(1).Frequency() == 2,
+          "numeric compound scan retains a single dot followed by a letter");
+  fixture.db.doctype = nullptr;
+}
+
+struct TextIngestDatabase : Database {
+  DFDT dfdt;
+  DOCTYPE text;
+  bool firstCharacterOnly = false;
+  explicit TextIngestDatabase(const char *name) : Database(name), text(this,"TEXT") { doctype = &text; }
+  size_t GetIndexingMemory() const override { return 32768; }
+  PDFDT GetMainDfdt() override { return &dfdt; }
+  STRING GetDbFileStem() const override { return stem; }
+  void SelectRegions(const RECORD& record, FCT *regions) const override {
+    regions->AddEntry(FC(0,firstCharacterOnly ? 0 : record.GetRecordEnd()-record.GetRecordStart()));
+  }
+  GPTYPE ParseWords(const DOCTYPE_ID&, UCHR *buffer, GPTYPE length, GPTYPE start,
+                   GPTYPE *postings, GPTYPE capacity) override {
+    return text.ParseWords(buffer,length,start,postings,capacity);
+  }
+};
+
+static void shared_ingestion_check()
+{
+  TextIngestDatabase db("shared-ingestion");
+  INDEX index(&db,db.stem+".inx");
+  index.SetMergeStatus(iNothing);
+  index.SetSisLimit(20);
+  SetGlobalCharset("UTF-8");
+  FILE *queue = fopen("shared-ingestion.queue","w+b");
+  require(queue != nullptr, "create shared tokenizer ingestion queue");
+  for (size_t i = 0; i < 3; ++i) {
+    const STRING filename = db.stem+STRING().form("-%u.json",unsigned(i));
+    std::string source = u8"{\"text\":\"0—X 00−Y 000∞ 0000€ 000m₀ 0\",\"number\":0.001,\"filler\":\"";
+    for (size_t j = 0; j < 64; ++j) source += "z ";
+    source += "\"}\n";
+    source.resize(8192,' ');
+    std::ofstream file(filename.c_str(),std::ios::binary);
+    file << source; file.close();
+    require(bool(file), "write raw UTF-8 ingestion source with JSON syntax");
+    RECORD record(filename);
+    record.SetDocumentType("TEXT");
+    record.SetRecordEnd(source.size()-1);
+    record.SetKey(STRING().form("shared-%u",unsigned(i)));
+    putc('#',queue); record.Write(queue);
+  }
+  rewind(queue);
+  require(index.AddRecordList(queue), "ingest through the real shared tokenizer, sort and flush path");
+  fclose(queue);
+  require(db.mdt.GetIndexNum() > 1, "shared ingestion creates multiple real shards");
+  std::ostringstream before, after;
+  const long beforeErrors = index.Dump(0,before,true);
+  require(index.MergeIndexFiles(), "zip real shared-tokenizer shards");
+  const long afterErrors = index.Dump(0,after,true);
+  if (beforeErrors || afterErrors) std::cerr << before.str() << after.str();
+  require(beforeErrors == 0 && afterErrors == 0,
+          "stored numeric keys validate before and after merge despite longer recovered source text");
+}
+
+static void selected_region_check()
+{
+  TextIngestDatabase db("selected-region");
+  db.firstCharacterOnly = true;
+  INDEX index(&db,db.stem+".inx");
+  SetGlobalCharset("UTF-8");
+  std::ofstream source("selected-region.txt"); source << "0more"; source.close();
+  FILE *queue = fopen("selected-region.queue","w+b");
+  require(queue != nullptr, "create selected region ingestion queue");
+  RECORD record("selected-region.txt");
+  record.SetDocumentType("TEXT"); record.SetRecordEnd(4); record.SetKey("selected-zero");
+  putc('#',queue); record.Write(queue); rewind(queue);
+  require(index.AddRecordList(queue), "index a region ending inside the original source word");
+  fclose(queue);
+  std::ostringstream errors;
+  require(index.Dump(0,errors,true) == 0, "stored token boundaries retain the selected region end");
+}
+
+static void dictionary_integrity_checks()
+{
+  SetGlobalCharset("UTF-8");
+  SourceIndex mismatch("source-mismatch",20);
+  mismatch.add("0<&\"tail","999"); mismatch.publish();
+  std::ostringstream errors;
+  require(mismatch.index.Dump(0,errors,true) == 1 &&
+          errors.str().find("source term mismatch") != std::string::npos &&
+          errors.str().find("StoredKey=\"999\"") != std::string::npos &&
+          errors.str().find("SourceOffset=\"0\"") != std::string::npos &&
+          errors.str().find("Context=\"0&lt;&amp;&quot;tail\"") != std::string::npos,
+          "a wrong posting association reports the stored key, raw offset and escaped context");
+  for (int kind = 0; kind < 5; ++kind) {
+    const std::string name = "broken-dictionary-"+std::to_string(kind);
+    SourceIndex broken(name.c_str(),20);
+    broken.add("abc","abc"); broken.publish();
+    const STRING path = broken.db.ComposeDbFn(DbExtDict)+".1";
+    if (kind == 0) std::filesystem::resize_file(path.c_str(),std::filesystem::file_size(path.c_str())-1);
+    if (kind == 1) {
+      FILE *fp = fopen(broken.db.stem+".inx.1","ab");
+      require(fp && broken.index.GpFwrite(broken.rows.begin()->second.front(),fp) == 1,
+              "append a posting not covered by the SIS");
+      fclose(fp);
+    }
+    if (kind == 2) {
+      std::fstream fp(path.c_str(),std::ios::binary|std::ios::in|std::ios::out);
+      fp.seekp(2); fp.put(char(broken.width+1));
+      require(bool(fp), "write an oversized dictionary key length");
+    }
+    if (kind == 3) require(std::filesystem::remove(path.c_str()), "remove a required dictionary");
+    if (kind == 4) {
+      FILE *fp = fopen(path,"r+b");
+      require(fp && fseek(fp,long(2+broken.width+1),SEEK_SET) == 0 &&
+              ::Write(GPTYPE(1),fp) == int(sizeof(GPTYPE)), "write an out-of-range posting endpoint");
+      fclose(fp);
+    }
+    std::ostringstream failure;
+    require(broken.index.Dump(0,failure,true) == 1 && failure.str().find("broken SIS") != std::string::npos,
+            "the checker rejects malformed or missing SIS data and incomplete posting coverage");
+  }
+  SourceIndex unreadable("broken-posting",20);
+  unreadable.add("abc","abc"); unreadable.publish();
+  FILE *fp = fopen(unreadable.db.stem+".inx.1","r+b");
+  require(fp && fseek(fp,2,SEEK_SET) == 0 && unreadable.index.GpFwrite(GPTYPE(-1),fp) == 1,
+          "replace a posting with the reserved EOF value");
+  fclose(fp);
+  std::ostringstream earlyEnd;
+  require(unreadable.index.Dump(0,earlyEnd,true) == 1 && earlyEnd.str().find("INX read failure") != std::string::npos,
+          "an early posting-stream sentinel is a reported index error");
+  Database empty("empty-dictionary");
+  INDEX emptyIndex(&empty,empty.stem+".inx");
+  partition(emptyIndex,empty,1,20,Rows{});
+  require(empty.mdt.SetIndexNum(1), "publish an empty index pair");
+  std::ostringstream emptyErrors;
+  require(emptyIndex.Dump(0,emptyErrors,true) == 0, "an empty dictionary and posting stream validate");
+}
+
 int main()
 {
   try {
@@ -442,6 +647,10 @@ int main()
     differing_widths();
     indirect_and_dump();
     xml_indirect_and_dump();
+    numeric_punctuation_after_merge();
+    shared_ingestion_check();
+    selected_region_check();
+    dictionary_integrity_checks();
     collapse(32, "whole");
     collapse(3, "prefix"); // splits 2/3/4-byte sequences without reading GP bytes
     std::cout << "UTF-8 SIS ordering, byte limits, callbacks, source recovery, Dump checks and real three-partition collapse passed\n";

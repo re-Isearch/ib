@@ -441,9 +441,10 @@ static void HelpUsage(const char *progname)
         "                   //   BEFORE[:num] and AFTER[:num] := As NEAR but in specific order" << endl << 
 	"                   //     num as integer is characters. As fraction of 1 its % of doc" << endl <<
 	"                   //   DIST[>,>=,<,<=]num := distance between words in source measured in bytes." << endl <<
-        "                   //   PEER  := Elements in the same (unnamed) final tree leaf node" << endl <<
-	"                   //   PEERa := like PEER but after" << endl <<
-	"                   //   PEERb := like PEER but ordered after" << endl <<
+        "                   //   PEER[:n] := Same (unnamed) final tree leaf node; optional byte gap <= n" << endl <<
+	"                   //   PEERa[:n] := like PEER but after" << endl <<
+	"                   //   PEERb[:n] := like PEER but before" << endl <<
+	"                   //     n is a nonnegative integer; 0 includes adjacent or overlapping hits" << endl <<
 	"                   //   XPEER := Not in the same container" << endl <<
         "                   //   AND:field := Elements in the same node instance of field" << endl <<
 	"                   //   BEFORE:field := like AND:field but before" << endl <<
