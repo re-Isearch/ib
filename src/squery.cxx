@@ -730,7 +730,7 @@ SQUERY& SQUERY::Cat(const SQUERY& OtherSquery, const STRING& Opname)
     message_log (LOG_PANIC, "SQUERY::Cat : Operator %s undefined!", Opname.c_str());
   const bool combining = !Opstack.IsEmpty();
   Cat(OtherSquery, Op);
-  if (combining && (Op == OperatorPeer || Op == OperatorBeforePeer || Op == OperatorAfterPeer))
+  if (combining)
     {
       POPOBJ glue = NULL;
       if (Opstack >> glue)
