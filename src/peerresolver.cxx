@@ -19,6 +19,14 @@ struct MAPPED_PEER_RESOLVER::STATE
         hit.GetFieldEnd() >= MinEnd && hit.GetFieldEnd() <= MaxEnd;
     }
 
+    void Intersect(const SEARCH_WINDOW& other)
+    {
+      MinStart = std::max(MinStart, other.MinStart);
+      MaxStart = std::min(MaxStart, other.MaxStart);
+      MinEnd = std::max(MinEnd, other.MinEnd);
+      MaxEnd = std::min(MaxEnd, other.MaxEnd);
+    }
+
     bool Contains(const FC& zone, const FC& hit)
     {
       if (zone.Contains(hit))
@@ -58,6 +66,13 @@ struct MAPPED_PEER_RESOLVER::STATE
     std::vector<FC> Run;
     bool Reusable = false;
   };
+  struct RESOLUTION
+  {
+    SEARCH_WINDOW Window;
+    FC Peer;
+    size_t StartField = 0, LastField = 0, RangeRevision = 0;
+    bool Found = false, Reusable = false;
+  } Previous;
   IDBOBJ& Db;
   DFDT *Fields;
   FCACHE& Cache;
@@ -105,13 +120,26 @@ struct MAPPED_PEER_RESOLVER::STATE
   {
     const size_t total = Descriptors.size();
     if (!total) return hit;
-    FC peer = hit;
-    STRING peerName;
-    size_t peerDepth = 0;
-    bool first = true, haveDepth = false;
     if (LastPeerField < 1 || LastPeerField > total)
       if ((LastPeerField = total / 3) < 1) LastPeerField = 1;
     const size_t start = LastPeerField - 1;
+
+    // The intersection proves that every visited field would follow the same
+    // range check and search run. Match the incoming cursor too: a containing
+    // span alone does not prove which nested/crossing field will be selected.
+    if (Previous.Reusable && Previous.StartField == start &&
+        Previous.RangeRevision == Fields->GetFcRangeRevision() && Previous.Window.Includes(hit))
+      {
+        if (Profile) ++Statistics.ContainerResultHits;
+        LastPeerField = Previous.LastField;
+        return Previous.Found ? Previous.Peer : hit;
+      }
+
+    FC peer = hit;
+    STRING peerName;
+    size_t peerDepth = 0;
+    bool first = true, haveDepth = false, reusable = true;
+    SEARCH_WINDOW window;
     for (size_t i = start; i < total + start; ++i)
       {
         const size_t x = i % total;
@@ -125,7 +153,7 @@ struct MAPPED_PEER_RESOLVER::STATE
         // Ranges can be populated while loading a field, so read the current
         // DFDT entry rather than caching an initially missing range.
         const bool haveRange = Fields->GetFcRange(field.FileNumber, &range);
-        if (haveRange && !range.Contains(hit)) continue;
+        if (haveRange && !window.Contains(range, hit)) continue;
 
         const auto accept = [&](const FC& fc, bool firstInRun)
           {
@@ -133,6 +161,10 @@ struct MAPPED_PEER_RESOLVER::STATE
               {
                 if (first || peer.Contains(fc))
                   {
+                    // A normal nonempty name always updates the first peer's
+                    // cursor. Do not cache a malformed empty-name field whose
+                    // update could instead depend on equality with this hit.
+                    if (first && field.Name.IsEmpty()) reusable = false;
                     first = false;
                     if (peer != fc || field.Name.GetLength() > peerName.GetLength())
                       {
@@ -158,6 +190,7 @@ struct MAPPED_PEER_RESOLVER::STATE
         if (field.Reusable && field.Window.Includes(hit))
           {
             if (Profile) ++Statistics.FieldResultHits;
+            window.Intersect(field.Window);
             for (size_t j = 0; j < field.Run.size(); ++j) accept(field.Run[j], j == 0);
             continue;
           }
@@ -168,14 +201,28 @@ struct MAPPED_PEER_RESOLVER::STATE
           }
         if (!field.HasPath) continue;
         const size_t count = Cache.LoadMappedField(field.Name, field.FileName);
-        if (!count) continue;
-        if (!haveRange) Cache.GetRange(&range);
+        if (!count)
+          {
+            // Zero can mean an unreadable table as well as an empty one. Keep
+            // retrying normally instead of treating a failed read as a proof.
+            reusable = false;
+            continue;
+          }
+        // Loading may establish a previously missing hint for later lookups.
+        // Include that future guard, or avoid caching this resolution if its
+        // new hint would reject the current hit.
+        if (!haveRange && Cache.GetRange(&range) && !window.Contains(range, hit))
+          reusable = false;
         if (Profile) ++Statistics.FieldSearches;
         field.Window = SEARCH_WINDOW();
         field.Run.clear();
         field.Reusable = true;
         size_t pos = Find(hit, count, field.Window);
-        if (!pos) continue;
+        if (!pos)
+          {
+            window.Intersect(field.Window);
+            continue;
+          }
         --pos;
         while (pos > 0 && field.Window.Contains(Cache.GetRecordFc(pos - 1), hit)) --pos;
         FC fc = Cache.GetRecordFc(pos);
@@ -196,7 +243,15 @@ struct MAPPED_PEER_RESOLVER::STATE
               }
           }
         if (!field.Reusable) field.Run.clear();
+        window.Intersect(field.Window);
       }
+    Previous.Window = window;
+    Previous.Peer = peer;
+    Previous.StartField = start;
+    Previous.LastField = LastPeerField;
+    Previous.RangeRevision = Fields->GetFcRangeRevision();
+    Previous.Found = !first;
+    Previous.Reusable = reusable;
     return peer;
   }
 };

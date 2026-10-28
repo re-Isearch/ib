@@ -167,8 +167,9 @@ static void repeatedLookups()
   }
   const double newMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
   require(stats.FieldMaps == 2 && fast.PathLookups == 2,"each needed field is mapped and resolved by name only once");
-  require(stats.FieldTests == 395*3 && stats.FieldSearches < 395 && stats.FieldResultHits > 395,
-          "profile records search reuse as well as mapping reuse");
+  require(stats.FieldTests + stats.ContainerResultHits*3 == 395*3 &&
+          stats.ContainerResultHits > 300 && stats.FieldSearches < 395 && stats.FieldResultHits > 0,
+          "profile separates whole resolutions from per-field search and mapping reuse");
   require(old.Cache.GetMappingStatistics().Mappings > stats.FieldMaps*100,"scalar fixture reproduces repeated eviction and remapping");
   require(fast.Cache.CurrentMappedBytes() <= 2*sizeof(FC),"normal mapping budget is restored, allowing one oversized table");
   require(fast.Cache.GetTotal() && !fast.Cache.GetRecordFc(0).IsEmpty(),"active field remains valid after trimming the pool");
@@ -204,16 +205,20 @@ static void searchWindows()
   for (GPTYPE i = 100; i < 2100; ++i)
     require(resolver->Resolve(FC(i,i+2)) == FC(0,9999),"cached misses retain the containing parent field");
   auto stats = resolver->GetStatistics();
-  require(stats.FieldSearches == 2 && stats.FieldResultHits == 3998,
-          "nearby hits reuse both successful field runs and proven misses without new table searches");
+  require(stats.FieldSearches == 2 && stats.FieldTests == 2 && stats.ContainerResultHits == 1999,
+          "nearby hits reuse a complete resolution including proven misses without walking the field list");
 
   Database longRun("long-window-run");
   longRun.Add("P",std::vector<FC>(70,FC(0,9999)));
   auto capped = longRun.CreatePeerResolver();
   require(capped->Resolve(FC(10,12)) == FC(0,9999) && capped->Resolve(FC(20,22)) == FC(0,9999),
           "long duplicate runs retain their normal containment result");
-  require(capped->GetStatistics().FieldSearches == 2 && capped->GetStatistics().FieldResultHits == 0,
-          "long containing runs fall back to searches without retaining an unbounded cache");
+  require(capped->Resolve(FC(10001,10002)) == FC(10001,10002) &&
+          capped->Resolve(FC(30,32)) == FC(0,9999),
+          "leaving the complete search region still checks a long run normally");
+  require(capped->GetStatistics().FieldSearches == 2 && capped->GetStatistics().FieldResultHits == 0 &&
+          capped->GetStatistics().ContainerResultHits == 1,
+          "long runs reuse a constant-size final decision while retaining the per-field run cap");
 
   // The same containing span can hide children; replay must require the
   // complete search region, not just containment in the previous answer.
@@ -235,6 +240,94 @@ static void searchWindows()
       {
         require(edges->Resolve(hit) == scalar(old,hit),"search regions handle extrema, empty hits and long duplicate runs");
         require(fast.Last == old.Last,"edge lookups preserve field traversal state");
+      }
+}
+
+static void completeResolutions()
+{
+  // A cached absence must return this hit, not the hit that established it.
+  Database gaps("whole-misses");
+  gaps.Add("P",{FC(0,10)}); gaps.Add("Q",{FC(9000,9999)});
+  auto resolver = gaps.CreatePeerResolver();
+  require(resolver->Resolve(FC(100,102)) == FC(100,102) &&
+          resolver->Resolve(FC(200,202)) == FC(200,202),
+          "complete cached misses retain each input interval");
+  require(resolver->GetStatistics().ContainerResultHits == 1 &&
+          resolver->GetStatistics().FieldTests == 2,
+          "range-hint rejections also establish reusable complete search regions");
+
+  Database hints("whole-hint-changes");
+  hints.Add("P",{FC(0,999)},false);
+  hints.Fields.UpdateFcRange("P",FC(0,10));
+  auto changing = hints.CreatePeerResolver();
+  require(changing->Resolve(FC(100,102)) == FC(100,102),"an initial range hint rejects the hit");
+  hints.Fields.UpdateFcRange("P",FC(0,999));
+  require(changing->Resolve(FC(200,202)) == FC(0,999),
+          "updated range hints invalidate a complete cached absence");
+  require(changing->Resolve(FC(300,302)) == FC(0,999),"the updated hint permits exact reuse");
+  const size_t beforeClear = changing->GetStatistics().ContainerResultHits;
+  require(hints.Fields.InvalidateFcRanges("whole-hint-changes"),"clear the fixture range hints");
+  require(changing->Resolve(FC(400,402)) == FC(0,999) &&
+          changing->GetStatistics().ContainerResultHits == beforeClear,
+          "clearing range hints also invalidates the complete resolution proof");
+
+  Database missing("whole-missing-table");
+  missing.Add("A",{FC(200,299)},false); missing.Add("B",{FC(0,999)});
+  const STRING missingPath = missing.Files["A"];
+  require(std::remove(missingPath.c_str()) == 0,"temporarily remove one field table");
+  auto retry = missing.CreatePeerResolver();
+  require(retry->Resolve(FC(210,212)) == FC(0,999) &&
+          retry->Resolve(FC(220,222)) == FC(0,999),"unavailable tables retain the normal fallback");
+  FILE *restored = fopen(missingPath,"wb");
+  require(restored != NULL,"restore the temporarily unavailable field table");
+  ::Write(FC(200,299),restored);
+  require(fclose(restored) == 0,"finish restoring the field table");
+  require(missing.Cache.LoadMappedField("B",missing.Files["B"]) == 1,
+          "switch the active field cache so its normal load path can retry the restored table");
+  require(retry->Resolve(FC(230,232)) == FC(200,299),
+          "a failed table read is retried instead of reused as a complete absence");
+
+  // Vary table geometry, traversal cursor, hit length and access order, rather
+  // than relying only on the hand-written nesting fixture. Keep all mappings
+  // within the normal budget so this tests selection, not remapping speed.
+  std::mt19937 random(15485863);
+  for (bool hints : {false,true})
+    for (bool high : {false,true})
+      {
+        Database old("whole-oracle",8*1024*1024), fast("whole-resolver",8*1024*1024);
+        const GPTYPE base = high ? std::numeric_limits<GPTYPE>::max()-20000 : 0;
+        for (size_t f = 0; f < 18; ++f)
+          {
+            std::vector<FC> zones;
+            for (size_t j = 0; j < 40; ++j)
+              {
+                const GPTYPE start = base + random()%12000;
+                const GPTYPE end = start + random()%1500;
+                zones.emplace_back(start,end);
+                if (j%13 == 0) zones.push_back(zones.back());
+              }
+            std::sort(zones.begin(),zones.end(),[](const FC& a,const FC& b)
+              { return a.GetFieldStart() != b.GetFieldStart() ?
+                  a.GetFieldStart() < b.GetFieldStart() : a.GetFieldEnd() < b.GetFieldEnd(); });
+            const STRING name = f%3 ? STRING().form("F%02zu/P%zu",f/3,f%3) : STRING().form("F%02zu",f/3);
+            old.Add(name.c_str(),zones,hints); fast.Add(name.c_str(),zones,hints);
+          }
+        auto prepared = fast.CreatePeerResolver();
+        GPTYPE position = 0;
+        for (size_t i = 0; i < 6000; ++i)
+          {
+            if (i%17 == 0) old.Last = fast.Last = random()%21;
+            if (i%24 == 0) position = random()%14000;
+            else position = (position+1)%14000;
+            const GPTYPE length = i%5 ? 2 : random()%1000;
+            const FC hit(base+position,base+position+length);
+            require(prepared->Resolve(hit) == scalar(old,hit),
+                    "complete resolution regions agree with scalar selection over randomized field tables");
+            require(fast.Last == old.Last,
+                    "complete resolution reuse preserves externally changed cursors and field traversal order");
+          }
+        require(prepared->GetStatistics().ContainerResultHits > 0,
+                "randomized streams exercise complete resolution reuse");
       }
 }
 
@@ -264,10 +357,12 @@ static void sparseFields(bool benchmark = false)
   const double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
   const auto stats = resolver->GetStatistics();
   if (!benchmark)
-    require(stats.FieldSearches < stats.FieldTests/8 && stats.FieldResultHits > stats.FieldTests/2,
-            "sparse fields avoid repeated binary searches within the same coordinate region");
+    require(stats.ContainerResultHits > records*perRecord*9/10 &&
+            stats.FieldTests < records*perRecord*fields/8,
+            "sparse fields avoid whole descriptor walks within proven coordinate regions");
   std::cout << fields << " fields, " << records*perRecord << " hits: " << stats.FieldTests
-            << " tests, " << stats.FieldSearches << " table searches, " << ms << " ms\n";
+            << " tests, " << stats.FieldSearches << " table searches, "
+            << stats.ContainerResultHits << " complete resolution reuses, " << ms << " ms\n";
 }
 
 static void lifetimes()
@@ -369,7 +464,8 @@ static void integration()
       else left.Peer(right);
       require(peerProfile.find("Unbounded PEER profile:") != std::string::npos &&
               peerProfile.find("records=1 left_hits=2 right_hits=2 positional_hits=2 container_lookups=2") != std::string::npos &&
-              peerProfile.find("field_result_hits=") != std::string::npos,
+              peerProfile.find("field_result_hits=") != std::string::npos &&
+              peerProfile.find("container_result_hits=") != std::string::npos,
               "unbounded and ordered debug profiles expose actual structural work and cached search results");
     }
   _globalMessageLogger.Init(static_cast<_MessageFunc_t>(NULL));
@@ -379,6 +475,6 @@ static void integration()
 int main(int argc, char **argv)
 {
   if (argc == 2 && std::string(argv[1]) == "--benchmark") { sparseFields(true); return 0; }
-  equivalence(); repeatedLookups(); searchWindows(); sparseFields(); lifetimes(); integration();
+  equivalence(); repeatedLookups(); searchWindows(); completeResolutions(); sparseFields(); lifetimes(); integration();
   std::cout << "Prepared peer resolution, mapping reuse and lifetime regressions passed\n";
 }

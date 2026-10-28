@@ -48,7 +48,7 @@ class METADATA;
 struct PEER_RESOLVER_STATISTICS
 {
   size_t FieldTests = 0, FieldSearches = 0, FieldMaps = 0, FieldCacheHits = 0, FieldMapFailures = 0;
-  size_t FieldResultHits = 0;
+  size_t FieldResultHits = 0, ContainerResultHits = 0;
 };
 
 class PEER_RESOLVER

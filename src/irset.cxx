@@ -2702,12 +2702,12 @@ OPOBJ *atomicIRSET::PeerMatches(const OPOBJ& Irset, peer_t compFunc,
           "positional_hits=%zu container_lookups=%zu matched_records=%zu pairs=%zu "
           "elapsed_ms=%.3f container_ms=%.3f other_ms=%.3f "
           "field_tests=%zu field_searches=%zu field_maps=%zu field_cache_hits=%zu field_map_failures=%zu "
-          "field_result_hits=%zu",
+          "field_result_hits=%zu container_result_hits=%zu",
           Bounded ? "Bounded" : "Unbounded", token.c_str(), Records, LeftHits, RightHits,
           PositionalHits, ContainerLookups, MatchedRecords, Pairs,
           elapsed, containers, std::max(0.0, elapsed - containers),
           fields.FieldTests, fields.FieldSearches, fields.FieldMaps, fields.FieldCacheHits, fields.FieldMapFailures,
-          fields.FieldResultHits);
+          fields.FieldResultHits, fields.ContainerResultHits);
     }
   } profile(Parent && Parent->GetDebugMode(),
       compFunc == _compGTE ? "PEERb" : compFunc == _compLTE ? "PEERa" : "PEER",

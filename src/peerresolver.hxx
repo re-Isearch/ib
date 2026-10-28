@@ -4,7 +4,9 @@
 #include "idbobj.hxx"
 
 // Cache field descriptors, mapped tables and exact search regions for one
-// operation. Keep the scalar resolver's field order and containing-run selection.
+// operation. Reuse a complete resolution only within the intersection of its
+// exact field-search regions and for the same incoming last-field cursor.
+// Keep the scalar resolver's field order and containing-run selection.
 class MAPPED_PEER_RESOLVER : public PEER_RESOLVER
 {
 public:

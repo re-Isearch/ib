@@ -1135,6 +1135,7 @@ void DFDT::ClearFcRanges(bool markChanged)
 {
   FcRanges.clear();
   FcRangesChanged = markChanged;
+  ++FcRangeRevision;
 }
 
 bool DFDT::GetFcRange(INT FileNumber, FC *RangePtr) const
