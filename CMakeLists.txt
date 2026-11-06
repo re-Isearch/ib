@@ -177,6 +177,10 @@ option(USE_BERKELEY_DB "Use Berkeley DB"                      ON)
 
 option(IB_ENABLE_FAST_MATH "Enable -ffast-math in optimized GNU/Clang builds" ON)
 option(IB_BUILD_SCORING_TESTS "Build focused scoring and typed-search regression tests" OFF)
+option(IB_BUILD_ZUGFERD_TESTS "Build ZUGFeRD extraction and doctype regression tests" OFF)
+set(IB_ZUGFERD "AUTO" CACHE STRING "ZUGFeRD PDF invoice support: AUTO, ON or OFF")
+set_property(CACHE IB_ZUGFERD PROPERTY STRINGS AUTO ON OFF)
+set(QPDF_ROOT "" CACHE PATH "Optional qpdf installation prefix")
 
 option(IB_CREATE_USER_PLUGIN_DIR "Create $HOME/.ib/lib/plugins while configuring" OFF)
 
@@ -388,6 +392,54 @@ endif()
 # Core dependencies
 # -----------------------------------------------------------------------------
 find_package(Threads REQUIRED)
+
+# ZUGFeRD only needs PDF object/attachment decoding, never page rendering or an
+# external PDF filter. AUTO keeps installations without qpdf usable.
+string(TOUPPER "${IB_ZUGFERD}" _IB_ZUGFERD)
+if(NOT _IB_ZUGFERD MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "IB_ZUGFERD must be AUTO, ON or OFF")
+endif()
+set(IB_HAVE_ZUGFERD OFF)
+set(IB_QPDF_TARGET "")
+if(NOT _IB_ZUGFERD STREQUAL "OFF")
+    cmake_policy(PUSH)
+    if(POLICY CMP0144)
+        cmake_policy(SET CMP0144 NEW)
+    endif()
+    # qpdf's config packages require the same major when a version is passed
+    # to find_package. Check the minimum ourselves to accept newer majors.
+    find_package(qpdf QUIET CONFIG HINTS "${QPDF_ROOT}")
+    cmake_policy(POP)
+    if(TARGET qpdf::libqpdf AND qpdf_VERSION VERSION_GREATER_EQUAL "11.0")
+        set(IB_QPDF_TARGET qpdf::libqpdf)
+    else()
+        find_path(QPDF_INCLUDE_DIR NAMES qpdf/QPDFEmbeddedFileDocumentHelper.hh
+            HINTS "${QPDF_ROOT}" PATH_SUFFIXES include)
+        find_library(QPDF_LIBRARY NAMES qpdf
+            HINTS "${QPDF_ROOT}" PATH_SUFFIXES lib lib64)
+        set(_IB_QPDF_VERSION "")
+        if(QPDF_INCLUDE_DIR AND EXISTS "${QPDF_INCLUDE_DIR}/qpdf/DLL.h")
+            file(STRINGS "${QPDF_INCLUDE_DIR}/qpdf/DLL.h" _IB_QPDF_VERSION_LINE
+                REGEX "define QPDF_VERSION \"[0-9]+\\.[0-9]+\\.[0-9]+")
+            string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" _IB_QPDF_VERSION "${_IB_QPDF_VERSION_LINE}")
+        endif()
+        if(QPDF_INCLUDE_DIR AND QPDF_LIBRARY AND _IB_QPDF_VERSION VERSION_GREATER_EQUAL "11.0")
+            add_library(ibQpdf INTERFACE)
+            target_include_directories(ibQpdf INTERFACE "${QPDF_INCLUDE_DIR}")
+            target_link_libraries(ibQpdf INTERFACE "${QPDF_LIBRARY}")
+            set(IB_QPDF_TARGET ibQpdf)
+        endif()
+    endif()
+    find_package(EXPAT QUIET)
+    if(IB_QPDF_TARGET AND EXPAT_FOUND)
+        set(IB_HAVE_ZUGFERD ON)
+        message(STATUS "[ib] ZUGFeRD: qpdf attachment reader and Expat")
+    elseif(_IB_ZUGFERD STREQUAL "ON")
+        message(FATAL_ERROR "IB_ZUGFERD=ON requires qpdf >= 11.0 and Expat development files. Set QPDF_ROOT or CMAKE_PREFIX_PATH if needed.")
+    else()
+        message(STATUS "[ib] ZUGFeRD: unavailable (install qpdf and Expat development files, or set IB_ZUGFERD=OFF)")
+    endif()
+endif()
 
 if(USE_OPENMP)
     # AppleClang commonly needs the libomp prefix as a hint.  GCC/Clang on
@@ -876,6 +928,7 @@ add_library(ibDoc
     ${DOCTYPE_DIR}/antihtml.cxx     ${DOCTYPE_DIR}/htmlcache.cxx
     ${DOCTYPE_DIR}/filter2.cxx      ${DOCTYPE_DIR}/pandoc.cxx
     ${DOCTYPE_DIR}/pdf.cxx          ${DOCTYPE_DIR}/markdown.cxx
+    ${DOCTYPE_DIR}/zugferd.cxx      ${DOCTYPE_DIR}/zugferd_pdf.cxx
     ${DOCTYPE_DIR}/cglomd.cxx       ${DOCTYPE_DIR}/jsondoc.cxx
     ${DOCTYPE_DIR}/jsonlddoc.cxx    ${DOCTYPE_DIR}/ejsondoc.cxx
     ${DOCTYPE_DIR}/tagml.cxx        ${DOCTYPE_DIR}/brat.cxx 
@@ -883,6 +936,10 @@ add_library(ibDoc
 )
 ib_common_includes(ibDoc)
 target_link_libraries(ibDoc PUBLIC ibUtils ibLocal)
+if(IB_HAVE_ZUGFERD)
+    target_compile_definitions(ibDoc PRIVATE IB_HAVE_ZUGFERD=1)
+    target_link_libraries(ibDoc PRIVATE ${IB_QPDF_TARGET} EXPAT::EXPAT)
+endif()
 
 # binary.hxx exposes libmagic types when USE_LIBMAGIC is enabled, and
 # binary.cxx is compiled into ibDoc.  The include directory and library
@@ -964,6 +1021,17 @@ endif()
 
 if(USE_OPENMP)
     list(APPEND COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+endif()
+
+if(IB_BUILD_ZUGFERD_TESTS)
+    if(NOT IB_HAVE_ZUGFERD)
+        message(FATAL_ERROR "IB_BUILD_ZUGFERD_TESTS requires ZUGFeRD support (IB_ZUGFERD=ON)")
+    endif()
+    enable_testing()
+    add_executable(zugferd_test tests/zugferd.cpp)
+    ib_common_includes(zugferd_test)
+    target_link_libraries(zugferd_test PRIVATE ibSearch ibDoc ibProcess ibIO ${IB_QPDF_TARGET})
+    add_test(NAME zugferd COMMAND zugferd_test)
 endif()
 
 if(IB_BUILD_SCORING_TESTS)

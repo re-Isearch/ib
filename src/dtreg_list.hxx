@@ -4,6 +4,7 @@ It is made available and licensed under the Apache 2.0 license: see LICENSE */
 #define _DTREG_LIST_HXX 1
 // List of "builtin" document types....
 #include "../doctype/ptext.hxx"
+#include "../doctype/zugferd.hxx"
 #include "../doctype/oneline.hxx"
 #include "../doctype/simple.hxx"
 #include "../doctype/sgmltag.hxx"

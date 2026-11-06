@@ -8,7 +8,7 @@ Author:		Edward Zimmermann
 
 /*
 
-This class depends upon the utility "pdftomemo" provided as a pdftomemo.cc
+Ordinary PDFs depend upon the utility "pdftomemo" provided as a pdftomemo.cc
 for Poppler (tested Poppler 26.09.0 API. but probably suitable for other versions)
 
 It is basically a modified pdftotext that produces a MEMODOC format: metadata followed
@@ -17,6 +17,9 @@ by the text in the body.
 We have provided (in contrib) the pdftomemo.cc pdftomemo.1 and a patch for the make. This
 instead of a forked Poppler since its really just a program that uses Poppler rather than
 a modification.
+
+Hybrid ZUGFeRD/Factur-X invoices bypass this filter and index their embedded
+XML through the ZUGFERD doctype when the attachment backend is available.
 
 */
 
@@ -28,6 +31,8 @@ a modification.
 #include "common.hxx"
 #include "process.hxx"
 #include "pdf.hxx"
+#include "zugferd.hxx"
+#include "zugferd_pdf.hxx"
 #include "doc_conf.hxx"
 
 static const STRING TEXT_ELEMENT ("text");
@@ -71,7 +76,7 @@ ADOBE_PDFDOC::ADOBE_PDFDOC(PIDBOBJ DbParent, const STRING& Name) : _VMEMODOC(DbP
 
   AllowZeroLengthPages(true);
   SetParseMessageStructure(true);
-  desc.form("Adobe PDF: Uses an external filter to MEMODOC.\nOptions:\n\
+  desc.form("Adobe PDF: Detects ZUGFeRD invoices before using an external filter to MEMODOC.\nOptions:\n\
    FILTER   Specifies the program to use (Default '%s')\n\
 If a <filename>.meta file is available (colon standard format) its used to\n\
 supplement metadata.", GetDefaultFilter());
@@ -90,7 +95,9 @@ their MEMODOC style output to standard output (stdout)";
       Filter = ResolveBinPath(s);
       if (!IsAbsoluteFilePath(Filter))
 	{
-	  message_log (LOG_WARN, "%s: Specified filter '%s' not found. Check Installation.",
+          // Invoice-only collections do not need a PDF text filter. Defer
+          // the warning until an ordinary PDF actually needs this path.
+          message_log (LOG_DEBUG, "%s: Specified filter '%s' not found. Check Installation.",
 		Doctype.c_str(), Filter.c_str()); 
 	}
       else if (!ExeExists(Filter))
@@ -232,6 +239,18 @@ off_t ADOBE_PDFDOC::RunPipe(FILE *fp, const STRING& Fn)
     }
   _IB_pclose(pp);
   return len;
+}
+
+void ADOBE_PDFDOC::ParseRecords(const RECORD& FileRecord)
+{
+  if (Db && ib_zugferd::Available()) {
+    auto* invoice = dynamic_cast<ZUGFERD*>(Db->GetDocTypePtr(DOCTYPE_ID("ZUGFERD")));
+    if (invoice && invoice->ParseIfInvoice(FileRecord)) return;
+  }
+  if (!Filter.IsEmpty() && !IsAbsoluteFilePath(Filter))
+    message_log(LOG_WARN, "%s: Specified filter '%s' not found. Check Installation.",
+                Doctype.c_str(), Filter.c_str());
+  _VMEMODOC::ParseRecords(FileRecord);
 }
 
 void ADOBE_PDFDOC::ParseFields(RECORD *RecordPtr)

@@ -26,8 +26,11 @@ Some are new for re-Isearch, some have been updated and some are quite old and n
        SGMLNORM        SGMLTAG         SIMPLE           SOIF
           TAGML         TSLDOC            TSV        XBINARY
         XFILTER            XML        XMLBASE         XMLREC
-      YAHOOLIST
+      YAHOOLIST        ZUGFERD
 </PRE>
+
+`ZUGFERD` (alias `FACTUR-X`) indexes embedded invoice XML directly from PDF
+containers and preserves the original PDF. See [ZUGFeRD build and usage](../docs/ZUGFERD.md).
 
 These doctypes are licensed to the re-iSearch project. Is is made available and licensed under the Apache 2.0 license: see LICENSE
 
