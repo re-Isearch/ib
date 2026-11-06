@@ -83,7 +83,7 @@ static void reader_tests() {
   pdf_fixture("invoice.pdf", {{"ZUGFeRD-invoice.xml",
       "<CrossIndustryDocument xmlns=\"urn:ferd:CrossIndustryDocument:invoice:1p0\"/>"}});
   require(ib_zugferd::Extract("invoice.pdf").status == ib_zugferd::Status::Invoice,
-          "recognize the ZUGFeRD 1 CII namespace without a prefix");
+          "extract ZUGFeRD 1 XML without depending on its namespace prefix");
   pdf_fixture("invoice.pdf", {{"factur-x.xml", invoice_xml}}, true, true, true);
   const auto bytes = read_file("invoice.pdf");
   const std::string prefix(4097, 'X');
@@ -97,25 +97,16 @@ static void reader_tests() {
   pdf_fixture("ordinary.pdf", {});
   require(ib_zugferd::Extract("ordinary.pdf").status == ib_zugferd::Status::NotInvoice,
           "ordinary PDF is not a hybrid invoice");
-  pdf_fixture("invalid.pdf", {{"factur-x.xml", "<Invoice>unrelated namespace</Invoice>"}});
+  // Extraction leaves XML interpretation to the normal XML doctype, just as
+  // for standalone XML input. There is no independent XML preflight parser.
+  const auto unparsed = invoice_xml + "<unfinished>";
+  pdf_fixture("invoice.pdf", {{"factur-x.xml", unparsed}}, true, true, true);
+  const auto extracted = ib_zugferd::Extract("invoice.pdf");
+  require(extracted.status == ib_zugferd::Status::Invoice && extracted.xml == unparsed,
+          "hand extracted bytes to the XML doctype without preflight validation");
+  pdf_fixture("invalid.pdf", {{"factur-x.xml", ""}});
   require(ib_zugferd::Extract("invalid.pdf").status == ib_zugferd::Status::InvalidInvoice,
-          "a filename alone cannot validate invoice XML");
-  pdf_fixture("invalid.pdf", {{"factur-x.xml", invoice_xml + "<broken>"}});
-  require(ib_zugferd::Extract("invalid.pdf").status == ib_zugferd::Status::InvalidInvoice,
-          "reject malformed XML, including trailing markup");
-  std::string utf16("\xff\xfe", 2);
-  const auto ascii_xml = invoice_xml.substr(invoice_xml.find("<rsm:"), invoice_xml.find("<ram:Name>") - invoice_xml.find("<rsm:")) +
-      "</rsm:SupplyChainTradeTransaction></rsm:CrossIndustryInvoice>";
-  for (char ch : ascii_xml) { utf16 += ch; utf16 += '\0'; }
-  pdf_fixture("invalid.pdf", {{"factur-x.xml", utf16}});
-  require(ib_zugferd::Extract("invalid.pdf").status == ib_zugferd::Status::InvalidInvoice,
-          "reject UTF-16 XML even without an encoding declaration");
-  const auto declaration_end = invoice_xml.find("?>") + 2;
-  pdf_fixture("invalid.pdf", {{"factur-x.xml", invoice_xml.substr(0, declaration_end) +
-      "<!DOCTYPE rsm:CrossIndustryInvoice SYSTEM \"file:///must-not-read\">" + invoice_xml.substr(declaration_end)}});
-  const auto dtd = ib_zugferd::Extract("invalid.pdf");
-  require(dtd.status == ib_zugferd::Status::InvalidInvoice && dtd.error.find("DTD") != std::string::npos,
-          "reject external DTDs before resolving them");
+          "an empty attachment cannot supply an invoice record");
   pdf_fixture("invalid.pdf", {{"factur-x.xml", invoice_xml}, {"xrechnung.xml", invoice_xml}});
   require(ib_zugferd::Extract("invalid.pdf").status == ib_zugferd::Status::InvalidInvoice,
           "reject two distinct invoice streams rather than choose one");

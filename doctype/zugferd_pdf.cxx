@@ -7,14 +7,11 @@
 #include <qpdf/QPDF.hh>
 #include <qpdf/QPDFEmbeddedFileDocumentHelper.hh>
 #include <qpdf/QPDFFileSpecObjectHelper.hh>
-#include <expat.h>
 #include <algorithm>
 #include <cstdio>
-#include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
-#include <type_traits>
 #include <vector>
 
 namespace {
@@ -91,54 +88,6 @@ bool invoice_name(const std::string& value) {
   return name == "factur-x.xml" || name == "zugferd-invoice.xml" || name == "xrechnung.xml";
 }
 
-struct XmlCheck {
-  XML_Parser parser;
-  bool root = false;
-  std::string error;
-  void fail(const char* why) {
-    error = why;
-    XML_StopParser(parser, XML_FALSE);
-  }
-};
-void XMLCALL start_element(void* opaque, const XML_Char* name, const XML_Char**) {
-  auto& state = *static_cast<XmlCheck*>(opaque);
-  if (state.root) return;
-  state.root = true;
-  const std::string qualified(name);
-  if (qualified != "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100\x1f" "CrossIndustryInvoice" &&
-      qualified != "urn:ferd:CrossIndustryDocument:invoice:1p0\x1f" "CrossIndustryDocument")
-    state.fail("Attachment is not a ZUGFeRD/Factur-X CII invoice XML document");
-}
-void XMLCALL doctype_decl(void* opaque, const XML_Char*, const XML_Char*, const XML_Char*, int) {
-  static_cast<XmlCheck*>(opaque)->fail("DTD declarations are not allowed in invoice XML");
-}
-void XMLCALL xml_decl(void* opaque, const XML_Char*, const XML_Char* encoding, int) {
-  if (encoding && ascii_lower(encoding) != "utf-8" && ascii_lower(encoding) != "utf8")
-    static_cast<XmlCheck*>(opaque)->fail("Invoice XML must use UTF-8 encoding");
-}
-std::string check_xml(const std::string& xml) {
-  if (xml.empty() || xml.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
-    return "Empty or oversized invoice XML";
-  // Expat can detect UTF-16 from its BOM even with UTF-8 as the requested
-  // encoding. NUL cannot occur in UTF-8 XML and catches those encodings before
-  // a valid UTF-16 CII document could be queued for the byte-oriented indexer.
-  if (xml.find('\0') != std::string::npos)
-    return "Invoice XML must use UTF-8 encoding";
-  using Parser = std::unique_ptr<std::remove_pointer<XML_Parser>::type, decltype(&XML_ParserFree)>;
-  Parser parser(XML_ParserCreateNS("UTF-8", '\x1f'), XML_ParserFree);
-  if (!parser) return "Cannot allocate the invoice XML parser";
-  XmlCheck state{parser.get(), false, {}};
-  XML_SetUserData(parser.get(), &state);
-  XML_SetStartElementHandler(parser.get(), start_element);
-  XML_SetStartDoctypeDeclHandler(parser.get(), doctype_decl);
-  XML_SetXmlDeclHandler(parser.get(), xml_decl);
-  XML_SetParamEntityParsing(parser.get(), XML_PARAM_ENTITY_PARSING_NEVER);
-  if (XML_Parse(parser.get(), xml.data(), static_cast<int>(xml.size()), XML_TRUE) != XML_STATUS_OK) {
-    if (!state.error.empty()) return state.error;
-    return std::string("Malformed invoice XML: ") + XML_ErrorString(XML_GetErrorCode(parser.get()));
-  }
-  return state.root ? std::string() : "Invoice XML has no document element";
-}
 }
 #endif
 
@@ -194,8 +143,7 @@ Invoice Extract(const std::string& filename, std::uint64_t start, std::uint64_t 
     const bool decoded = streams.front().pipeStreamData(&buffer, &filtered, 0, qpdf_dl_specialized, true);
     if (buffer.exceeded) throw std::runtime_error("Invoice XML exceeds MAXXMLBYTES");
     if (!decoded) throw std::runtime_error("Cannot decode the invoice attachment stream");
-    const auto error = check_xml(buffer.value);
-    if (!error.empty()) throw std::runtime_error(error);
+    if (buffer.value.empty()) throw std::runtime_error("Empty invoice attachment");
     result.xml = std::move(buffer.value);
     result.status = Status::Invoice;
   } catch (const std::exception& error) {
@@ -204,7 +152,7 @@ Invoice Extract(const std::string& filename, std::uint64_t start, std::uint64_t 
   }
 #else
   (void)filename; (void)start; (void)end; (void)maximum;
-  result.error = "ZUGFeRD support requires a build with qpdf and Expat (IB_ZUGFERD=ON)";
+  result.error = "ZUGFeRD support requires a build with qpdf (IB_ZUGFERD=ON)";
 #endif
   return result;
 }

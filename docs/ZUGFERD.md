@@ -11,7 +11,7 @@ in the invoice path. Ordinary PDFs continue to use the configured PDF filter.
 
 ## Build
 
-Install the development packages for **qpdf 11.0 or newer** and **Expat**, then
+Install the development package for **qpdf 11.0 or newer**, then
 configure the normal IB build with:
 
 ```sh
@@ -19,13 +19,13 @@ cmake -S . -B build -DIB_ZUGFERD=ON
 cmake --build build
 ```
 
-For example, Homebrew supplies these as `qpdf` and `expat`. A nonstandard
-installation can be located with `QPDF_ROOT` or `CMAKE_PREFIX_PATH`.
+For example, Homebrew supplies this as `qpdf`. A nonstandard installation can
+be located with `QPDF_ROOT` or `CMAKE_PREFIX_PATH`.
 
 | CMake option | Behavior |
 | --- | --- |
-| `IB_ZUGFERD=AUTO` (default) | Enable when both dependencies are available; otherwise keep the normal PDF path. |
-| `IB_ZUGFERD=ON` | Require the dependencies; fail configuration if unavailable. |
+| `IB_ZUGFERD=AUTO` (default) | Enable when qpdf is available; otherwise keep the normal PDF path. |
+| `IB_ZUGFERD=ON` | Require qpdf; fail configuration if unavailable. |
 | `IB_ZUGFERD=OFF` | Build without invoice attachment support. Explicit ZUGFERD input reports that support is unavailable. |
 | `IB_BUILD_ZUGFERD_TESTS=ON` | Build the focused extraction and doctype regression test. Requires the backend. |
 
@@ -92,25 +92,21 @@ Recognized attachment filenames (case insensitive) are:
 - `zugferd-invoice.xml` (including `ZUGFeRD-invoice.xml`)
 - `xrechnung.xml`
 
-A recognized name must contain well-formed UTF-8 XML with one of these roots,
-regardless of the namespace prefix used:
+The named attachment is extracted unchanged and passed to IB's normal XML
+processing, using the same field and span machinery as standalone XML. There
+is no separate XML preflight parser or XML validation dependency.
 
-| Root element | Namespace |
-| --- | --- |
-| `CrossIndustryInvoice` | `urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100` |
-| `CrossIndustryDocument` | `urn:ferd:CrossIndustryDocument:invoice:1p0` |
-
-An unrelated XML attachment does not make a PDF an invoice. The same stream
-referenced by both attachment mechanisms is read once. Multiple distinct
-invoice streams, malformed invoice XML, DTDs, and oversized XML are rejected
-with a diagnostic. A recognized but invalid invoice does not silently fall
-back to indexing the visual PDF text. Encrypted PDFs are unsupported by this
-invoice reader.
+An unrelated attachment name does not trigger invoice handling. The same
+stream referenced by both attachment mechanisms is read once. Multiple
+distinct invoice streams, empty attachments, decoding failures, and oversized
+payloads are rejected with a diagnostic. An extraction failure does not
+silently fall back to indexing the visual PDF text. Encrypted PDFs are
+unsupported by this invoice reader.
 
 This is format recognition and extraction, **not PDF/A, EN 16931, profile,
 Schematron, signature, or business-rule validation**. It does not prove that a
 document meets an invoicing regulation. Standalone invoice XML should use the
-existing XML doctype; this reader handles hybrid PDF/CII invoices, not UBL.
+existing XML doctype; this reader extracts attachments from hybrid PDF invoices.
 
 ## Original resource and presentation
 
@@ -148,7 +144,7 @@ ctest --test-dir build -R '^zugferd$' --output-on-failure
 
 The test generates its own PDF fixtures. It exercises compressed and
 uncompressed attachments, object streams, AF-only/name-tree-only containers,
-Unicode filenames, ambiguous and invalid attachments, XML limits, PDF hand-off
+Unicode filenames, ambiguous/empty attachments, XML limits, PDF hand-off
 without a filter, inherited XML fields, exact XML/PDF retrieval, relative
 paths, bounded source ranges, and ordinary-PDF fallback.
 It also builds and reopens a real UTF-8 IB index through `ZUGFERD`, `FACTUR-X`,

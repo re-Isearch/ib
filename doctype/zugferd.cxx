@@ -29,9 +29,9 @@ const char* ZUGFERD::Description(PSTRLIST list) const
   if (list->IsEmpty() && Doctype != "ZUGFERD") list->AddEntry(Doctype);
   list->AddEntry("ZUGFERD");
   XML::Description(list);
-  return "ZUGFeRD/Factur-X PDF invoices: extract embedded CII XML in-process,\n"
-         "index it as XML and preserve the original PDF resource. Requires qpdf\n"
-         "and Expat. MAXXMLBYTES limits decoded invoice XML (default 33554432).\n"
+  return "ZUGFeRD/Factur-X PDF invoices: extract embedded invoice XML in-process,\n"
+         "index it as XML and preserve the original PDF resource. Requires qpdf.\n"
+         "MAXXMLBYTES limits decoded invoice XML (default 33554432).\n"
          "SOURCE (SUTRS) / PDF return the PDF; FULLTEXT (SUTRS) / XML return XML.";
 }
 
@@ -58,7 +58,7 @@ void ZUGFERD::ParseRecords(const RECORD& record)
   if (!ParseIfInvoice(record))
     message_log(LOG_ERROR, "%s: '%s': %s", Doctype.c_str(), record.GetFullFileName().c_str(),
         ib_zugferd::Available() ? "No readable ZUGFeRD/Factur-X invoice attachment" :
-        "qpdf/Expat support is unavailable; configure with IB_ZUGFERD=ON");
+        "qpdf support is unavailable; configure with IB_ZUGFERD=ON");
 }
 
 bool ZUGFERD::StoreInvoice(const RECORD& source, const std::string& xml)
