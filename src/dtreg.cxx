@@ -141,6 +141,7 @@ enum Doctypes {
   _BRAT,
   _CGLOMD,
   _ISI_CIW,
+  _ZUGFERD,
 
   _MAX_ID, // This is the "last real" doctype
   _PLUGIN = 126
@@ -225,8 +226,10 @@ static const struct {
   { "BRAT",        _BRAT,    true},
   { "CGLOMD",      _CGLOMD,  true},
   { "ISI-CIW",     _ISI_CIW,   true},
+  { "ZUGFERD",     _ZUGFERD,   true},
 
   /* Aliases */
+  { "FACTUR-X",    _ZUGFERD,    false},
   { "TBINARY",    _TBINARY,     false},
   { "MEMODOC",    _MEMODOC,     false},
   { "TEXT",       _PLAINTEXT,   false},
@@ -841,6 +844,8 @@ PDOCTYPE        DTREG::GetDocTypePtr(const DOCTYPE_ID& DoctypeId)
       return RegisterDocType (Ident, new DIF(Db, Name));
     case _PDFDOC:
       return RegisterDocType (Ident, new ADOBE_PDFDOC(Db, Name));
+    case _ZUGFERD:
+      return RegisterDocType (Ident, new ZUGFERD(Db, Name));
     case _PSDOC:
       return RegisterDocType (Ident, new PSDOC(Db, Name));
     case _RESOURCEDOC:
