@@ -28,6 +28,9 @@ Description:	Command-line search utility
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <algorithm>
+#include <utility>
   
 using std::cout;
 using std::endl;
@@ -1580,6 +1583,17 @@ int _Isearch_main (int argc, char **argv)
 
   int nothing = 0;
 
+  // The shell owns complete IRSETs. RSETs below are disposable display windows.
+  // Ownership moves into/out of the stack; PUSH never duplicates the current set.
+  PIRSET shellCurrent = NULL;
+  std::vector<PIRSET> shellStack;
+  bool shellSearchPending = ShellFlag && !QueryString.IsEmpty();
+  size_t shellIncrement = TopK > 0 ? static_cast<size_t>(TopK) : 300;
+  if (ShellFlag && (Reduce || DropHits || DropAbsolute || DropScaled || MagFactor))
+    cout << "NOTICE: -reduce, -drop_* and -magnet do not apply to IRSET shell windows." << endl;
+  if (ShellFlag && !LoadTable.IsEmpty())
+    cout << "NOTICE: -loadtable is a legacy RSET session, not an IRSET shell operand." << endl;
+
 again:
   if (!Terse && !TabFormat && VerboseFlag)
     cout << "Searching database " << DBName
@@ -1590,14 +1604,16 @@ again:
     << ": (" << Total << " Records)" << endl;
 
  STRING originalQueryString( QueryString );
+ bool shellQueryValid = true;
 
- if (!QueryString.IsEmpty()) {
+ if (!QueryString.IsEmpty() && (!ShellFlag || shellSearchPending)) {
   if (InfixQuery)
     {
       if (!squery.SetInfixTerm (QueryString))
 	{
 	  cout << "InFix ERROR: " << squery.LastErrorMessage() << endl;
-	  return 0;
+	  if (!ShellFlag) return 0;
+	  shellQueryValid = false;
 	}
     }
   else if (RpnQuery)
@@ -1605,7 +1621,8 @@ again:
       if (!squery.SetRpnTerm (QueryString))
 	{
 	  cout << "RPN ERROR: " << squery.LastErrorMessage() << endl;
-	  return 0;
+	  if (!ShellFlag) return 0;
+	  shellQueryValid = false;
 	}
     }
   else if (QueryString.GetLength())
@@ -1621,12 +1638,61 @@ again:
     }
   }
 
-  size_t termCount = squery.GetRpnTerm (&QueryString);
+  size_t termCount = (ShellFlag && !shellSearchPending) || !shellQueryValid
+    ? 0 : squery.GetRpnTerm (&QueryString);
 
   SCANLIST List;
   clock_t s_search = clock();
 
-  if (prset == NULL && (termCount != 0 || ScanSearch))
+  if (ShellFlag && !ScanSearch)
+    {
+      if (shellSearchPending)
+        {
+          delete shellCurrent;
+          shellCurrent = NULL;
+          if (shellQueryValid && termCount != 0)
+            {
+              if (ExpandSynonyms)
+                {
+                  squery.ExpandQuery();
+                  termCount = squery.GetRpnTerm (&QueryString);
+                }
+              // Never impose the display TopK on the algebra. -clip and
+              // the engine's search CPU budget still control computation.
+              if (SmartQuery && !(AndWordsQuery || WordsQuery))
+                {
+                  if (SmartField == "--") SmartField.Clear();
+                  shellCurrent = pdb->SearchSmart(originalQueryString,
+                      SmartField, Sort, Method, &squery, -1);
+                  termCount = squery.GetRpnTerm (&QueryString);
+                }
+              else
+                shellCurrent = pdb->Search(squery, Sort, Method, -1);
+              if (shellCurrent == NULL)
+                cout << "Search ERROR: " << pdb->ErrorMessage() << endl;
+            }
+          shellSearchPending = false;
+        }
+
+      delete prset;
+      prset = NULL;
+      matches = shellCurrent ? shellCurrent->GetTotalEntries() : 0;
+      if (first < 1) first = 1;
+      if (last <= 0)
+        {
+          const size_t offset = static_cast<size_t>(first - 1);
+          const size_t remaining = matches > offset ? matches - offset : 0;
+          const size_t window = shellIncrement;
+          last = static_cast<INT>(offset + std::min(remaining, window));
+        }
+      if (static_cast<size_t>(last) > matches)
+        last = static_cast<INT>(matches);
+      if (shellCurrent && first <= last)
+        prset = shellCurrent->GetRset(static_cast<size_t>(first - 1),
+                                     static_cast<size_t>(last));
+      if (!prset) prset = new RSET();
+    }
+  else if (prset == NULL && (termCount != 0 || ScanSearch))
     {
       if (ExpandSynonyms)
 	{
@@ -1664,7 +1730,7 @@ again:
   clock_t s_end = clock();
 
 
-  if (prset)
+  if (prset && (!ShellFlag || ScanSearch))
     {
       if (Reduce)
         prset->Reduce (termCount);
@@ -1763,7 +1829,7 @@ again:
 
   n = prset->GetTotalEntries ();
   // Display only documents in -startdoc/-enddoc range
-  if (startDoc || endDoc)
+  if (!ShellFlag && (startDoc || endDoc))
     {
       if ((EndDoc = (endDoc < 0) ? n - endDoc : endDoc) == 0)
 	EndDoc = n;
@@ -1790,7 +1856,9 @@ again:
   pdb->GetGlobalDocType (&GlobalDoctype);
   if (last == 0)
     last = n;
-  if (matches == 0)
+  if (ShellFlag && !ScanSearch)
+    n = prset->GetTotalEntries();
+  else if (matches == 0)
     n = 0;
   else
     n = last - first + 1;
@@ -1881,7 +1949,8 @@ again:
 	}
       for (t = first; t <= last; t++)
 	{
-	  if (!prset->GetEntry (t, &result))
+	  const INT local = ShellFlag && !ScanSearch ? t - first + 1 : t;
+	  if (!prset->GetEntry (local, &result))
 	    continue;
           const DOUBLE score = result.GetScore ();
 	  if (!Negative_scores && score < 0.0)
@@ -2184,7 +2253,9 @@ again:
 	{
 	  if (ShowXML) cout << "<!-- ";
 	newline:
-	  cout << endl << "Enter Query (=), [un]set option, range first-last or Select file #[,element|@element|@path]: ";
+	  cout << endl << (ShellFlag
+              ? "Isearch shell (=query, push, pop, peek, size, depth, PEER, AND, OR, next, increment, range, #, quit): "
+              : "Enter Query (=), [un]set option, range first-last or Select file #[,element|@element|@path]: ");
 	cout.flush();
 #ifdef LINUX
 	  { STRING s;
@@ -2208,9 +2279,184 @@ again:
 	  //
 	  if (strncmp(Selection, "hel", 3) == 0 || *Selection == '?')
 	    {
-	       cout << "# Help: set/unset or NNN[,<ELEMENT>], NNN,<Ancestor>/<Descendant>, range nnn-mmm or =<Query Expression>" << endl;
+	       cout << "# Help: set/unset, range first-last|all, =<query>, "
+                    << "push, pop, peek [size|N], size, hits, depth, swap, clear, "
+                    << "AND, OR, PEER, increment N, next, previous, N[,element], quit." << endl;
 	       goto newline;
 	    }
+          if (ShellFlag && !ScanSearch)
+            {
+              if (strcasecmp(Selection, "size") == 0 ||
+                  strcasecmp(Selection, "hits") == 0)
+                {
+                  if (!shellCurrent)
+                    cout << "No current IRSET." << endl;
+                  else
+                    cout << shellCurrent->GetTotalEntries() << " entries, "
+                         << shellCurrent->GetHitTotal() << " hits." << endl;
+                  goto newline;
+                }
+              if (strncasecmp(Selection, "increment", 9) == 0 &&
+                  (Selection[9] == '\0' || isspace((unsigned char)Selection[9])))
+                {
+                  const char *arg = Selection + 9;
+                  while (isspace((unsigned char)*arg)) ++arg;
+                  if (*arg == '\0')
+                    cout << "Display increment: " << shellIncrement << endl;
+                  else
+                    {
+                      char *end = NULL;
+                      const unsigned long value = strtoul(arg, &end, 10);
+                      if (end == arg || *end || value == 0 || value > 100000)
+                        cout << "Usage: increment N (1..100000)." << endl;
+                      else
+                        {
+                          shellIncrement = static_cast<size_t>(value);
+                          cout << "Display increment: " << shellIncrement << endl;
+                        }
+                    }
+                  goto newline;
+                }
+              if (strcasecmp(Selection, "depth") == 0)
+                {
+                  cout << shellStack.size() << " stacked IRSETs." << endl;
+                  goto newline;
+                }
+              if (strncasecmp(Selection, "peek", 4) == 0 &&
+                  (Selection[4] == '\0' || isspace((unsigned char)Selection[4])))
+                {
+                  const char *arg = Selection + 4;
+                  while (isspace((unsigned char)*arg)) ++arg;
+                  size_t belowTop = 0;
+                  if (*arg && strcasecmp(arg, "size") != 0)
+                    {
+                      char *end = NULL;
+                      belowTop = strtoul(arg, &end, 10);
+                      if (end == arg || *end)
+                        {
+                          cout << "Usage: peek [size|N]; N=0 is top." << endl;
+                          goto newline;
+                        }
+                    }
+                  if (belowTop >= shellStack.size())
+                    cout << "No IRSET at that stack depth." << endl;
+                  else
+                    {
+                      const PIRSET saved = shellStack[shellStack.size()-1-belowTop];
+                      cout << saved->GetTotalEntries() << " entries, "
+                           << saved->GetHitTotal() << " hits." << endl;
+                    }
+                  goto newline;
+                }
+              if (strcasecmp(Selection, "push") == 0)
+                {
+                  if (!shellCurrent)
+                    { cout << "ERROR: nothing to push." << endl; goto newline; }
+                  shellStack.push_back(shellCurrent);
+                  shellCurrent = NULL;
+                  QueryString.Clear();
+                  first = 1; last = 0;
+                  goto again;
+                }
+              if (strcasecmp(Selection, "pop") == 0)
+                {
+                  if (shellStack.empty())
+                    { cout << "ERROR: empty stack." << endl; goto newline; }
+                  if (shellCurrent)
+                    { cout << "ERROR: current IRSET occupied; push or clear it first." << endl; goto newline; }
+                  shellCurrent = shellStack.back();
+                  shellStack.pop_back();
+                  QueryString.Clear();
+                  first = 1; last = 0;
+                  goto again;
+                }
+              if (strcasecmp(Selection, "clear") == 0)
+                {
+                  delete shellCurrent; shellCurrent = NULL;
+                  QueryString.Clear();
+                  first = 1; last = 0;
+                  goto again;
+                }
+              if (strcasecmp(Selection, "swap") == 0)
+                {
+                  if (shellStack.size() < 2)
+                    cout << "ERROR: swap requires two stacked IRSETs." << endl;
+                  else
+                    std::swap(shellStack[shellStack.size()-1],
+                              shellStack[shellStack.size()-2]);
+                  goto newline;
+                }
+              if (strcasecmp(Selection, "next") == 0 ||
+                  strcasecmp(Selection, "previous") == 0 ||
+                  strcasecmp(Selection, "prev") == 0)
+                {
+                  if (!shellCurrent || matches == 0)
+                    { cout << "No results to page." << endl; goto newline; }
+                  const INT increment = static_cast<INT>(shellIncrement);
+                  if (strcasecmp(Selection, "next") == 0)
+                    {
+                      if (static_cast<size_t>(last) >= matches)
+                        { cout << "End of results." << endl; goto newline; }
+                      first = last + 1;
+                      last = static_cast<INT>(std::min(static_cast<size_t>(first - 1)
+                          + static_cast<size_t>(increment), static_cast<size_t>(matches)));
+                    }
+                  else
+                    {
+                      if (first <= 1)
+                        { cout << "Beginning of results." << endl; goto newline; }
+                      last = first - 1;
+                      first = std::max(1, last - increment + 1);
+                    }
+                  goto again;
+                }
+              if (strcasecmp(Selection, "PEER") == 0 ||
+                  strcasecmp(Selection, "AND") == 0 ||
+                  strcasecmp(Selection, "OR") == 0)
+                {
+                  if (shellCurrent)
+                    { cout << "ERROR: push the current IRSET before a binary operator." << endl; goto newline; }
+                  if (shellStack.size() < 2)
+                    { cout << "ERROR: two stacked IRSETs required." << endl; goto newline; }
+                  if (pdb->GetIDBCount() != 1)
+                    { cout << "ERROR: stack algebra currently requires one physical database." << endl; goto newline; }
+                  if (shellStack[shellStack.size()-1]->GetParent() !=
+                      shellStack[shellStack.size()-2]->GetParent())
+                    { cout << "ERROR: operands belong to different indexes." << endl; goto newline; }
+
+                  // Copy-on-write keeps the operands intact if an operator fails.
+                  // The stack owns them until a complete result is available.
+                  PIRSET lhs = shellStack[shellStack.size()-2];
+                  PIRSET rhs = shellStack.back();
+                  PIRSET candidate = lhs->Duplicate();
+                  IDBOBJ *db = lhs->GetParent();
+                  if (db) db->SetErrorCode(0);
+                  OPOBJ *status = NULL;
+                  if (strcasecmp(Selection, "PEER") == 0)
+                    status = candidate->Peer(*rhs);
+                  else if (strcasecmp(Selection, "AND") == 0)
+                    status = candidate->And(*rhs);
+                  else
+                    status = candidate->Or(*rhs);
+
+                  if (!status || (db && db->GetErrorCode()))
+                    {
+                      cout << "ERROR: algebra failed";
+                      if (db) cout << ": " << db->ErrorMessage();
+                      cout << endl;
+                      delete candidate;
+                      goto newline;
+                    }
+
+                  delete shellStack.back(); shellStack.pop_back();
+                  delete shellStack.back(); shellStack.pop_back();
+                  shellCurrent = candidate;
+                  shellCurrent->SortBy(Sort);
+                  QueryString = Selection;
+                  first = 1; last = 0;
+                  goto again;
+                }
+            }
 	  if (strncmp(Selection, "range", 5) == 0)
 	    {
 	      char *tcp = &Selection[5];
@@ -2218,7 +2464,7 @@ again:
 	      if (*tcp == 'a')
 		{
 		  first = 1;
-		  last  = 0;
+		  last  = ShellFlag && !ScanSearch ? static_cast<INT>(matches) : 0;
 	        }
 	      else if (!isdigit(*tcp))
 		{
@@ -2227,6 +2473,8 @@ again:
 		}
 	      else
 		sscanf(tcp, "%d-%d", &first, &last);
+              if (ShellFlag && !ScanSearch && !shellCurrent)
+                { cout << "No current IRSET." << endl; goto newline; }
 	      goto again;
 	    }
 	  else if (strncmp(Selection, "unset", 5) == 0)
@@ -2268,9 +2516,9 @@ again:
 	      else if (strncasecmp(tcp, "dat", 3) == 0)
 		DateFlag = true;
 	      else if (strncasecmp(tcp, "inf", 3) == 0)
-		InfixQuery = 1, RpnQuery = 0;
+		InfixQuery = 1, RpnQuery = 0, SmartQuery = false;
 	      else if (strncasecmp(tcp, "rpn", 3) == 0) 
-		RpnQuery = 1, InfixQuery = 0;
+		RpnQuery = 1, InfixQuery = 0, SmartQuery = false;
 	      else if (strncasecmp(tcp, "wor", 3) == 0)
 		RpnQuery = InfixQuery = 0;
 	      else if (strncasecmp(tcp, "ht", 2) == 0)
@@ -2320,17 +2568,21 @@ again:
               QueryString.Trim();
 	      first = 1;
 	      last = 0;
+              if (ShellFlag) shellSearchPending = true;
               goto again;
             }
 	  FileNum = atoi (Selection);
 	}
-      if ((FileNum > n) || (FileNum < 0))
+      const INT selectFirst = ShellFlag && !ScanSearch ? first : 1;
+      const INT selectLast  = ShellFlag && !ScanSearch ? last  : n;
+      if (FileNum != 0 && (FileNum > selectLast || FileNum < selectFirst))
 	{
-	  cout << endl << "Select a number between 1 and " << n << '.' << endl;
+	  cout << endl << "Select a number between " << selectFirst
+               << " and " << selectLast << '.' << endl;
 	}
-      if ((FileNum != 0) && (FileNum <= n) && (FileNum >= 1))
+      if ((FileNum != 0) && (FileNum <= selectLast) && (FileNum >= selectFirst))
 	{
-	  prset->GetEntry (FileNum, &result);
+	  prset->GetEntry (ShellFlag && !ScanSearch ? FileNum - first + 1 : FileNum, &result);
 
 	  STRING Buf;
 	  STRING Full;
@@ -2417,6 +2669,8 @@ again:
 	    }
 	  while (FileNum != 0 || ShellFlag);
 	  delete prset;
+          delete shellCurrent;
+          for (PIRSET saved : shellStack) delete saved;
 
 	  // #################################################################################
 	#if 0 /* HOUSEKEEPING CHECK 2008 March */
