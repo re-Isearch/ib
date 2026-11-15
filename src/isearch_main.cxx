@@ -1588,6 +1588,10 @@ int _Isearch_main (int argc, char **argv)
   PIRSET shellCurrent = NULL;
   std::vector<PIRSET> shellStack;
   bool shellSearchPending = ShellFlag && !QueryString.IsEmpty();
+  if (ShellFlag && (Reduce || DropHits || DropAbsolute || DropScaled || MagFactor))
+    cout << "NOTICE: -reduce, -drop_* and -magnet do not apply to IRSET shell windows." << endl;
+  if (ShellFlag && !LoadTable.IsEmpty())
+    cout << "NOTICE: -loadtable is a legacy RSET session, not an IRSET shell operand." << endl;
 
 again:
   if (!Terse && !TabFormat && VerboseFlag)
@@ -1725,7 +1729,7 @@ again:
   clock_t s_end = clock();
 
 
-  if (prset)
+  if (prset && (!ShellFlag || ScanSearch))
     {
       if (Reduce)
         prset->Reduce (termCount);
@@ -2274,7 +2278,9 @@ again:
 	  //
 	  if (strncmp(Selection, "hel", 3) == 0 || *Selection == '?')
 	    {
-	       cout << "# Help: set/unset or NNN[,<ELEMENT>], NNN,<Ancestor>/<Descendant>, range nnn-mmm or =<Query Expression>" << endl;
+	       cout << "# Help: set/unset, range first-last|all, =<query>, "
+                    << "push, pop, peek [size|N], size, hits, depth, swap, clear, "
+                    << "AND, OR, PEER, next, previous, N[,element], quit." << endl;
 	       goto newline;
 	    }
           if (ShellFlag && !ScanSearch)
@@ -2390,6 +2396,11 @@ again:
                     { cout << "ERROR: push the current IRSET before a binary operator." << endl; goto newline; }
                   if (shellStack.size() < 2)
                     { cout << "ERROR: two stacked IRSETs required." << endl; goto newline; }
+                  if (pdb->GetIDBCount() != 1)
+                    { cout << "ERROR: stack algebra currently requires one physical database." << endl; goto newline; }
+                  if (shellStack[shellStack.size()-1]->GetParent() !=
+                      shellStack[shellStack.size()-2]->GetParent())
+                    { cout << "ERROR: operands belong to different indexes." << endl; goto newline; }
 
                   // Copy-on-write keeps the operands intact if an operator fails.
                   // The stack owns them until a complete result is available.
