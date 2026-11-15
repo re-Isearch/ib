@@ -1588,6 +1588,7 @@ int _Isearch_main (int argc, char **argv)
   PIRSET shellCurrent = NULL;
   std::vector<PIRSET> shellStack;
   bool shellSearchPending = ShellFlag && !QueryString.IsEmpty();
+  size_t shellIncrement = TopK > 0 ? static_cast<size_t>(TopK) : 300;
   if (ShellFlag && (Reduce || DropHits || DropAbsolute || DropScaled || MagFactor))
     cout << "NOTICE: -reduce, -drop_* and -magnet do not apply to IRSET shell windows." << endl;
   if (ShellFlag && !LoadTable.IsEmpty())
@@ -1681,7 +1682,7 @@ again:
         {
           const size_t offset = static_cast<size_t>(first - 1);
           const size_t remaining = matches > offset ? matches - offset : 0;
-          const size_t window = TopK > 0 ? static_cast<size_t>(TopK) : remaining;
+          const size_t window = shellIncrement;
           last = static_cast<INT>(offset + std::min(remaining, window));
         }
       if (static_cast<size_t>(last) > matches)
@@ -2253,7 +2254,7 @@ again:
 	  if (ShowXML) cout << "<!-- ";
 	newline:
 	  cout << endl << (ShellFlag
-              ? "Isearch shell (=query, push, pop, peek, size, depth, PEER, AND, OR, next, range, #, quit): "
+              ? "Isearch shell (=query, push, pop, peek, size, depth, PEER, AND, OR, next, increment, range, #, quit): "
               : "Enter Query (=), [un]set option, range first-last or Select file #[,element|@element|@path]: ");
 	cout.flush();
 #ifdef LINUX
@@ -2280,7 +2281,7 @@ again:
 	    {
 	       cout << "# Help: set/unset, range first-last|all, =<query>, "
                     << "push, pop, peek [size|N], size, hits, depth, swap, clear, "
-                    << "AND, OR, PEER, next, previous, N[,element], quit." << endl;
+                    << "AND, OR, PEER, increment N, next, previous, N[,element], quit." << endl;
 	       goto newline;
 	    }
           if (ShellFlag && !ScanSearch)
@@ -2293,6 +2294,27 @@ again:
                   else
                     cout << shellCurrent->GetTotalEntries() << " entries, "
                          << shellCurrent->GetHitTotal() << " hits." << endl;
+                  goto newline;
+                }
+              if (strncasecmp(Selection, "increment", 9) == 0 &&
+                  (Selection[9] == '\0' || isspace((unsigned char)Selection[9])))
+                {
+                  const char *arg = Selection + 9;
+                  while (isspace((unsigned char)*arg)) ++arg;
+                  if (*arg == '\0')
+                    cout << "Display increment: " << shellIncrement << endl;
+                  else
+                    {
+                      char *end = NULL;
+                      const unsigned long value = strtoul(arg, &end, 10);
+                      if (end == arg || *end || value == 0 || value > 100000)
+                        cout << "Usage: increment N (1..100000)." << endl;
+                      else
+                        {
+                          shellIncrement = static_cast<size_t>(value);
+                          cout << "Display increment: " << shellIncrement << endl;
+                        }
+                    }
                   goto newline;
                 }
               if (strcasecmp(Selection, "depth") == 0)
@@ -2370,7 +2392,7 @@ again:
                 {
                   if (!shellCurrent || matches == 0)
                     { cout << "No results to page." << endl; goto newline; }
-                  const INT increment = TopK > 0 ? TopK : 300;
+                  const INT increment = static_cast<INT>(shellIncrement);
                   if (strcasecmp(Selection, "next") == 0)
                     {
                       if (static_cast<size_t>(last) >= matches)
