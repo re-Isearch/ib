@@ -7564,21 +7564,55 @@ for (size_t i = 0; i < x; )
 
                 if (_is_globalUTF8)
                   {
-                    // Normalize and check a candidate without moving the GP
-                    // until its source span is known to match.
+                    // Buffer[anchor] is the SIS term's posting GP, not
+                    // necessarily the start of the complete source phrase.
+                    const size_t anchor = start + (size_t)Offset;
+                    if (anchor >= (size_t)readBytes) continue;
+                    size_t matchAt = (size_t)readBytes;
+                    size_t matchLength = 0;
+                    const auto tryMatch = [&](size_t at) {
+                      if (at > anchor) return false;
+                      size_t consumed = 0;
+                      if (Compare((const UCHR *)SearchTerm.c_str(),
+                                  Buffer+at, FullTerm_length, &consumed) != 0)
+                        return false;
+                      // Require the matched phrase to cover the selected SIS
+                      // word, otherwise this is an unrelated occurrence.
+                      if (at + consumed + 1 <= anchor) return false;
+                      matchAt = at;
+                      matchLength = consumed;
+                      return true;
+                    };
                     const size_t aligned = source_match::align_start(
                       Buffer, (size_t)readBytes, start, true,
                       [](const UCHR *p) { return IsTermChr(p) != 0; });
-                    if (aligned >= (size_t)readBytes ||
-                        Compare((const UCHR *)SearchTerm.c_str(),
-                                Buffer+aligned, FullTerm_length, &myLength) != 0)
-                      continue;
-                    if (aligned < start) {
-                      const size_t back = start - aligned;
+                    if (aligned >= (size_t)readBytes || !tryMatch(aligned))
+                      {
+                        // Extra source whitespace can shift the first word
+                        // relative to the query's byte-based Offset. Look for
+                        // an earlier whole-word start that covers the anchor.
+                        bool previousWord = false;
+                        for (size_t at = 0; at <= anchor; )
+                          {
+                            const bool word = IsTermChr(Buffer+at) != 0;
+                            if (word && !previousWord && tryMatch(at)) break;
+                            previousWord = word;
+                            const size_t step = _ib_UTF8CharBytes(
+                                Buffer+at, (size_t)readBytes-at);
+                            if (!step) break;
+                            at += step;
+                          }
+                      }
+                    if (matchAt >= (size_t)readBytes) continue;
+                    myLength = matchLength;
+                    // The hit span starts at the phrase's first word. Account
+                    // for Offset even if the initial alignment was exact.
+                    if (matchAt < anchor) {
+                      const size_t back = anchor - matchAt;
                       if (gp < back) continue;
                       gp -= back;
                     } else {
-                      gp += aligned - start;
+                      gp += matchAt - anchor;
                     }
                   }
                 else
