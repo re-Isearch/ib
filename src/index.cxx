@@ -6070,12 +6070,14 @@ static inline source_match::OrderedResult CompareSourceUTF8(
     const UCHR *term, const UCHR *ptr, size_t n)
 {
   const size_t sourceBytes = strlen((const char *)ptr);
-  std::vector<UCHR> p(ptr, ptr+sourceBytes);
-  p.push_back(0);
-  BufferClean(p.data(), sourceBytes, true);
-  // TermSearch has already folded the query into SearchTerm. Reuse those
-  // bytes for every posting rather than normalizing the query repeatedly.
-  return source_match::compare_folded(term, n, p.data(), sourceBytes);
+  // The hot posting scan can reuse scratch space without allocating for
+  // every binary-search probe. Each search thread owns its own buffer.
+  static thread_local std::vector<UCHR> candidate;
+  candidate.assign(ptr, ptr+sourceBytes);
+  candidate.push_back(0);
+  BufferClean(candidate.data(), sourceBytes, true);
+  // TermSearch already folded the query into SearchTerm.
+  return source_match::compare_folded(term, n, candidate.data(), sourceBytes);
 }
 
 // Right Truncated match
@@ -6123,7 +6125,10 @@ static inline INT TermCompare(const UCHR *term, const UCHR *ptr, const size_t n,
     {
       const auto match = CompareSourceUTF8(term, ptr, n);
       if (match.order) return match.order;
-      if (IsTermChr(ptr+match.bytes)) return -1;
+      // A bounded prefix may end in the middle of a multi-byte character.
+      // Never interpret a continuation byte as an exact word boundary.
+      if (((ptr[match.bytes] & 0xc0) == 0x80) ||
+          IsTermChr(ptr+match.bytes)) return -1;
       if (length) *length = match.bytes ? match.bytes - 1 : 0;
       return 0;
     }
@@ -7557,25 +7562,47 @@ for (size_t i = 0; i < x; )
                 if (readBytes <= 0 || start >= (size_t)readBytes)
                   continue;
 
-                // Align only on UTF-8 lead bytes and commit a GP change only
-                // after the candidate's normalized source has been verified.
-                const size_t aligned = _is_globalUTF8
-                  ? source_match::align_start(Buffer, (size_t)readBytes, start, true,
-                      [](const UCHR *p) { return IsTermChr(p) != 0; })
-                  : source_match::align_start(Buffer, (size_t)readBytes, start, false,
-                      [](const UCHR *p) { return IsTermChar(*p) != 0; });
-                if (aligned >= (size_t)readBytes) continue;
-                if (Compare(_is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
-                                        : (const UCHR *)RealTerm.c_str(),
-                            Buffer+aligned, FullTerm_length, &myLength) != 0)
-                  continue;
-                if (aligned < start) {
-                  const size_t back = start - aligned;
-                  if (gp < back) continue;
-                  gp -= back;
-                } else {
-                  gp += aligned - start;
-                }
+                if (_is_globalUTF8)
+                  {
+                    // Normalize and check a candidate without moving the GP
+                    // until its source span is known to match.
+                    const size_t aligned = source_match::align_start(
+                      Buffer, (size_t)readBytes, start, true,
+                      [](const UCHR *p) { return IsTermChr(p) != 0; });
+                    if (aligned >= (size_t)readBytes ||
+                        Compare((const UCHR *)SearchTerm.c_str(),
+                                Buffer+aligned, FullTerm_length, &myLength) != 0)
+                      continue;
+                    if (aligned < start) {
+                      const size_t back = start - aligned;
+                      if (gp < back) continue;
+                      gp -= back;
+                    } else {
+                      gp += aligned - start;
+                    }
+                  }
+                else
+                  {
+                    // Keep the historical single-byte source logic unchanged.
+                    if (start > 0)
+                      {
+                        if (IsTermChar(Buffer[start]))
+                          {
+                            while (start > 0 && IsTermChar(Buffer[start-1]))
+                              start--, gp--;
+                          }
+                        else
+                          {
+                            while (start < Buffer_Len && Buffer[start] &&
+                                   !IsTermChar(Buffer[start]))
+                              {
+                                start++, gp++;
+                              }
+                          }
+                      }
+                    if (Compare(RealTerm, Buffer+start, FullTerm_length, &myLength) != 0)
+                      continue;
+                  }
               }
             HitList.Add (gp, myLength);
           }	// Walk through
