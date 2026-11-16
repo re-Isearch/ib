@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -465,34 +466,42 @@ static void xml_indirect_and_dump()
 
 static void literal_phrase_source_verification()
 {
-  // Exercise the actual SIS -> posting -> source verification pipeline,
-  // including a short SIS prefix and accented uppercase source text.
+  // Exercise SIS -> posting -> actual source verification, including a short
+  // SIS prefix, case variants, expanded whitespace and evidence coordinates.
   SetGlobalCharset("UTF-8");
   SourceIndex fixture("literal-phrase-utf8", 3);
   const std::vector<std::string> text = {
-    u8"LA DÉFENSE", u8"La Défense", u8"La défonse"
+    u8"LA DÉFENSE", u8"La Défense", u8"La   Défense", u8"La défonse"
   };
+  std::vector<GPTYPE> starts;
   for (const auto& source : text) {
     const GPTYPE base = fixture.store(source);
+    starts.push_back(base);
     fixture.rows["la"].push_back(base);
-    const std::size_t second = source.find(' ');
+    const std::size_t second = source.find_first_not_of(' ', source.find(' '));
     require(second != std::string::npos, "phrase fixture has second word");
-    const std::string remainder = source.substr(second + 1);
+    const std::string remainder = source.substr(second);
     STRING folded;
     folded.SetTermLower(bytes(remainder), remainder.size());
     const std::string key = folded.toStdString();
-    fixture.rows[key.substr(0, fixture.width)].push_back(base + second + 1);
+    fixture.rows[key.substr(0, fixture.width)].push_back(base + second);
   }
   fixture.publish();
-  auto check = [&](const char *phrase, std::size_t expected) {
+  auto check = [&](const char *phrase, const std::vector<GPTYPE>& expected) {
     std::unique_ptr<IRSET> hits(fixture.index.TermSearch(phrase, NulString, INDEX::Exact));
-    require(hits && hits->GetTotalEntries() == expected,
-            "literal phrase matches complete UTF-8 source words with correct case folding");
+    require(hits && hits->GetTotalEntries() == expected.size(),
+            "literal UTF-8 phrase returns exactly the expected records");
+    std::set<GPTYPE> actualStarts;
+    for (size_t row = 1; row <= hits->GetTotalEntries(); ++row)
+      for (const auto& hit : hits->GetEntry(row).GetHitTable())
+        actualStarts.insert(hit.GetFieldStart());
+    require(actualStarts == std::set<GPTYPE>(expected.begin(), expected.end()),
+            "literal phrase hit coordinates start at the first source word");
   };
-  check(u8"La Défense", 2);
-  check(u8"LA DÉFENSE", 2);
-  check(u8"La défonse", 1);
-  check(u8"La Défencé", 0);
+  check(u8"La Défense", {starts[0], starts[1], starts[2]});
+  check(u8"LA DÉFENSE", {starts[0], starts[1], starts[2]});
+  check(u8"La défonse", {starts[3]});
+  check(u8"La Défencé", {});
 }
 
 static void numeric_punctuation_after_merge()
