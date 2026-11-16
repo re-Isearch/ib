@@ -103,6 +103,7 @@ extern bool _is_globalUTF8;
 #include <sys/stat.h>
 #include "common.hxx"
 #include "index.hxx"
+#include "source_match.hxx"
 #include "irset.hxx"
 #include "soundex.hxx"
 #include "metaphone.hxx"
@@ -6063,10 +6064,31 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
 }
 
 
+// Fold the source through the same length-preserving normalization used by
+// the SIS writer. The result retains ordering for binary-search callers.
+static inline source_match::OrderedResult CompareSourceUTF8(
+    const UCHR *term, const UCHR *ptr, size_t n)
+{
+  const size_t sourceBytes = strlen((const char *)ptr);
+  std::vector<UCHR> q(term, term+n);
+  std::vector<UCHR> p(ptr, ptr+sourceBytes);
+  q.push_back(0);
+  p.push_back(0);
+  BufferClean(q.data(), n, true);
+  BufferClean(p.data(), sourceBytes, true);
+  return source_match::compare_folded(q.data(), n, p.data(), sourceBytes);
+}
+
 // Right Truncated match
 static inline INT LeftTermCompare(const UCHR *term, const UCHR *ptr, const size_t n,
                                   size_t *length = NULL)
 {
+  if (_is_globalUTF8)
+    {
+      const auto match = CompareSourceUTF8(term, ptr, n);
+      if (!match.order && length) *length = match.bytes ? match.bytes - 1 : 0;
+      return match.order;
+    }
   return _strncasecmp(term, ptr, n, NULL, length);
 }
 
@@ -6098,6 +6120,14 @@ static inline INT TermCompareSpecial(const UCHR *term, const UCHR *ptr, const si
 static inline INT TermCompare(const UCHR *term, const UCHR *ptr, const size_t n,
                               size_t *length = NULL)
 {
+  if (_is_globalUTF8)
+    {
+      const auto match = CompareSourceUTF8(term, ptr, n);
+      if (match.order) return match.order;
+      if (IsTermChr(ptr+match.bytes)) return -1;
+      if (length) *length = match.bytes ? match.bytes - 1 : 0;
+      return 0;
+    }
   bool x;
   INT diff = _strncasecmp(term, ptr, n, &x, length);
   if (diff == 0 && x)
@@ -7110,11 +7140,14 @@ for (size_t i = 0; i < x; )
                   {
                     int             new_length = 0;
                     // Skip over while space
-                    while ( *tp && !IsTermChr ( tp ) )
-                      tp++;
-                    // Find out length..
-                    while ( IsTermChr ( tp+new_length ) )
-                      new_length++;
+                    while (*tp && !IsTermChr(tp))
+                      ++tp;
+                    // Find out length in bytes, advancing over whole codepoints.
+                    if (_is_globalUTF8)
+                      new_length = (int)_ib_UTF8TermLength(tp, strlen((const char *)tp));
+                    else
+                      while (IsTermChr(tp+new_length))
+                        ++new_length;
                     if ( new_length > 1 && !IsStopWord ( tp, new_length ) )
                       {
                         off_t          alt_first;
@@ -7506,26 +7539,27 @@ for (size_t i = 0; i < x; )
                 size_t      start = Offset > 0 ? (maxTermLength/5 + StringCompLength/4) : 0;
 
                 Cost += 0.1; // Overflows can get expensive
-                if (GetIndirectBuffer ( gp, Buffer, Offset + start, maxTermLength+start ) <= 0)
-                  continue; // No such string
-
-                if (start > 0)
-                  {
-                    if (IsTermChar(Buffer[start]))
-                      {
-                        while (start > 0 && IsTermChar(Buffer[start-1]))
-                          start--, gp--;
-                      }
-                    else
-                      {
-                        while (start < Buffer_Len && Buffer[start] && ! IsTermChar(Buffer[start]))
-			  {
-                            start++, gp++;
-			  }
-                      }
-                  }
-                if (Compare ( RealTerm, Buffer+start, FullTerm_length, &myLength ) != 0 )
+                const INT readBytes = GetIndirectBuffer(gp, Buffer, Offset + start, maxTermLength+start);
+                if (readBytes <= 0 || start >= (size_t)readBytes)
                   continue;
+
+                // Align only on UTF-8 lead bytes and commit a GP change only
+                // after the candidate's normalized source has been verified.
+                const size_t aligned = _is_globalUTF8
+                  ? source_match::align_start(Buffer, (size_t)readBytes, start, true,
+                      [](const UCHR *p) { return IsTermChr(p) != 0; })
+                  : source_match::align_start(Buffer, (size_t)readBytes, start, false,
+                      [](const UCHR *p) { return IsTermChar(*p) != 0; });
+                if (aligned >= (size_t)readBytes) continue;
+                if (Compare(RealTerm, Buffer+aligned, FullTerm_length, &myLength) != 0)
+                  continue;
+                if (aligned < start) {
+                  const size_t back = start - aligned;
+                  if (gp < back) continue;
+                  gp -= back;
+                } else {
+                  gp += aligned - start;
+                }
               }
             HitList.Add (gp, myLength);
           }	// Walk through
