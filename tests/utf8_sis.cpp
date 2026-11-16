@@ -461,6 +461,39 @@ static void xml_indirect_and_dump()
   SetGlobalCharset("UTF-8");
 }
 
+
+static void literal_phrase_source_verification()
+{
+  // Exercise the actual SIS -> posting -> source verification pipeline,
+  // including a short SIS prefix and accented uppercase source text.
+  SetGlobalCharset("UTF-8");
+  SourceIndex fixture("literal-phrase-utf8", 3);
+  const std::vector<std::string> text = {
+    u8"LA DÉFENSE", u8"La Défense", u8"La défonse"
+  };
+  for (const auto& source : text) {
+    const GPTYPE base = fixture.store(source);
+    fixture.rows["la"].push_back(base);
+    const std::size_t second = source.find(' ');
+    require(second != std::string::npos, "phrase fixture has second word");
+    const std::string remainder = source.substr(second + 1);
+    STRING folded;
+    folded.SetTermLower(bytes(remainder), remainder.size());
+    const std::string key = folded.toStdString();
+    fixture.rows[key.substr(0, fixture.width)].push_back(base + second + 1);
+  }
+  fixture.publish();
+  auto check = [&](const char *phrase, std::size_t expected) {
+    std::unique_ptr<IRSET> hits(fixture.index.TermSearch(phrase, NulString, INDEX::Exact));
+    require(hits && hits->GetTotalEntries() == expected,
+            "literal phrase matches complete UTF-8 source words with correct case folding");
+  };
+  check(u8"La Défense", 2);
+  check(u8"LA DÉFENSE", 2);
+  check(u8"La défonse", 1);
+  check(u8"La Défencé", 0);
+}
+
 static void numeric_punctuation_after_merge()
 {
   SourceIndex fixture("xml-zero-merge",3);
@@ -648,6 +681,7 @@ int main()
     indirect_and_dump();
     xml_indirect_and_dump();
     numeric_punctuation_after_merge();
+    literal_phrase_source_verification();
     shared_ingestion_check();
     selected_region_check();
     dictionary_integrity_checks();
