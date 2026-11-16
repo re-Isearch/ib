@@ -6070,13 +6070,12 @@ static inline source_match::OrderedResult CompareSourceUTF8(
     const UCHR *term, const UCHR *ptr, size_t n)
 {
   const size_t sourceBytes = strlen((const char *)ptr);
-  std::vector<UCHR> q(term, term+n);
   std::vector<UCHR> p(ptr, ptr+sourceBytes);
-  q.push_back(0);
   p.push_back(0);
-  BufferClean(q.data(), n, true);
   BufferClean(p.data(), sourceBytes, true);
-  return source_match::compare_folded(q.data(), n, p.data(), sourceBytes);
+  // TermSearch has already folded the query into SearchTerm. Reuse those
+  // bytes for every posting rather than normalizing the query repeatedly.
+  return source_match::compare_folded(term, n, p.data(), sourceBytes);
 }
 
 // Right Truncated match
@@ -7517,7 +7516,9 @@ for (size_t i = 0; i < x; )
                 // Exact Term match
                 Cost += 0.8;
                 if (GetIndirectBuffer ( gp, Buffer, Offset+1, FullTerm_length+3 ) <= 0 ||
-                    Compare ( ( const UCHR * ) RealTerm.c_str (), &Buffer[1], FullTerm_length, NULL ) != 0)
+                    Compare ( _is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
+                       : (const UCHR *)RealTerm.c_str(),
+                       &Buffer[1], FullTerm_length, NULL ) != 0)
                   {
 //cerr << "GetIndirect/Compare failed: " << &Buffer[1] << endl;
                     continue; // No match...
@@ -7537,6 +7538,19 @@ for (size_t i = 0; i < x; )
                 // 5 characters per word so max white space...
                 // if Offset == 0 then we don't need to read backwards
                 size_t      start = Offset > 0 ? (maxTermLength/5 + StringCompLength/4) : 0;
+                if (_is_globalUTF8 && Offset > 0) {
+                  // The chosen SIS word may be near the start of its record.
+                  // A fixed lookbehind would otherwise ask GetIndirectBuffer
+                  // to read outside that record and lose an exact phrase.
+                  MDTREC record;
+                  if (!Parent->GetMainMdt()->GetMdtRecord(gp, &record)) continue;
+                  const GPTYPE recordBegin =
+                      record.GetGlobalFileStart() + record.GetLocalRecordStart();
+                  const GPTYPE before = gp >= recordBegin ? gp - recordBegin : 0;
+                  const size_t safe = before >= (GPTYPE)Offset
+                      ? (size_t)(before - (GPTYPE)Offset) : 0;
+                  start = std::min(start, safe);
+                }
 
                 Cost += 0.1; // Overflows can get expensive
                 const INT readBytes = GetIndirectBuffer(gp, Buffer, Offset + start, maxTermLength+start);
@@ -7551,7 +7565,9 @@ for (size_t i = 0; i < x; )
                   : source_match::align_start(Buffer, (size_t)readBytes, start, false,
                       [](const UCHR *p) { return IsTermChar(*p) != 0; });
                 if (aligned >= (size_t)readBytes) continue;
-                if (Compare(RealTerm, Buffer+aligned, FullTerm_length, &myLength) != 0)
+                if (Compare(_is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
+                                        : (const UCHR *)RealTerm.c_str(),
+                            Buffer+aligned, FullTerm_length, &myLength) != 0)
                   continue;
                 if (aligned < start) {
                   const size_t back = start - aligned;
