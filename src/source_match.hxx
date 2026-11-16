@@ -40,6 +40,48 @@ inline Result folded(const unsigned char *query, std::size_t query_bytes,
     return {true, s};
 }
 
+
+// Comparison ordering is needed by TermSearch's binary search, not just by
+// post-lookup verification. Inputs are already folded, never raw UTF-8.
+// A 0 order means the query is a prefix; the caller decides whether the
+// following source codepoint disqualifies an exact-term match.
+struct OrderedResult {
+    int order = 0;
+    std::size_t bytes = 0;
+};
+
+inline OrderedResult compare_folded(const unsigned char *query, std::size_t query_bytes,
+                                   const unsigned char *source, std::size_t source_bytes)
+{
+    if (!query || !source) return {1, 0};
+    std::size_t q = 0, s = 0;
+    while (q < query_bytes) {
+        if (query[q] == ' ' && s < source_bytes && source[s] == ' ') {
+            do { ++q; } while (q < query_bytes && query[q] == ' ');
+            do { ++s; } while (s < source_bytes && source[s] == ' ');
+            continue;
+        }
+        if (s == source_bytes) return {1, s};
+        const std::size_t qb = q, sb = s;
+        while (q < query_bytes && query[q] != ' ') ++q;
+        while (s < source_bytes && source[s] != ' ') ++s;
+        const std::size_t length = (q - qb < s - sb) ? q - qb : s - sb;
+        const int order = length ? std::memcmp(query + qb, source + sb, length) : 0;
+        if (order) return {order, sb + length};
+        if (q - qb != s - sb) {
+            if (q - qb < s - sb) {
+                // A space or end of query sorts before a following word byte.
+                return {q < query_bytes ? int(query[q]) - int(source[sb+length])
+                                        : 0, sb + length};
+            }
+            return {int(query[qb+length]) -
+                    (s < source_bytes ? int(source[s]) : 0), s};
+        }
+        // Both runs ended; the next iteration checks equivalent separators.
+    }
+    return {0, s};
+}
+
 // Given a tentative source offset for a phrase, find the beginning of its
 // current word, or skip separators to the following word. Unlike the old
 // backward byte walk, UTF-8 continuation bytes are never classified as
