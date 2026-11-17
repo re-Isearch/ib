@@ -7605,14 +7605,18 @@ for (size_t i = 0; i < x; )
                       }
                     if (matchAt >= (size_t)readBytes) continue;
                     myLength = matchLength;
-                    // The hit span starts at the phrase's first word. Account
-                    // for Offset even if the initial alignment was exact.
-                    if (matchAt < anchor) {
-                      const size_t back = anchor - matchAt;
+                    // HITLIST::Fc(n, Offset) subtracts the query's anchor
+                    // offset when building the final evidence coordinate.
+                    // Preserve that convention here: only correct the gap
+                    // between the recovered source start and the expected
+                    // phrase start (Buffer[start]). Subtracting Offset here
+                    // would shift every hit left by the anchor offset twice.
+                    if (matchAt < start) {
+                      const size_t back = start - matchAt;
                       if (gp < back) continue;
                       gp -= back;
                     } else {
-                      gp += matchAt - anchor;
+                      gp += matchAt - start;
                     }
                   }
                 else
