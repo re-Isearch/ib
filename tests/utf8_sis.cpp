@@ -474,9 +474,11 @@ static void literal_phrase_source_verification()
     u8"LA DÉFENSE", u8"La Défense", u8"La   Défense", u8"La défonse"
   };
   std::vector<GPTYPE> starts;
+  std::map<GPTYPE, GPTYPE> expectedEnds;
   for (const auto& source : text) {
     const GPTYPE base = fixture.store(source);
     starts.push_back(base);
+    expectedEnds.emplace(base, base + (GPTYPE)source.size() - 1);
     fixture.rows["la"].push_back(base);
     const std::size_t second = source.find_first_not_of(' ', source.find(' '));
     require(second != std::string::npos, "phrase fixture has second word");
@@ -493,8 +495,13 @@ static void literal_phrase_source_verification()
             "literal UTF-8 phrase returns exactly the expected records");
     std::set<GPTYPE> actualStarts;
     for (size_t row = 1; row <= hits->GetTotalEntries(); ++row)
-      for (const auto& hit : hits->GetEntry(row).GetHitTable())
+      for (const auto& hit : hits->GetEntry(row).GetHitTable()) {
         actualStarts.insert(hit.GetFieldStart());
+        const auto found = expectedEnds.find(hit.GetFieldStart());
+        require(found != expectedEnds.end() &&
+                hit.GetFieldEnd() == found->second,
+                "literal phrase highlights the exact original byte span");
+      }
     require(actualStarts == std::set<GPTYPE>(expected.begin(), expected.end()),
             "literal phrase hit coordinates start at the first source word");
   };
