@@ -760,8 +760,8 @@ static void dictionary_integrity_checks()
 
 static void sgml_getterm_differential_fixtures()
 {
-  // These files are shared by two fresh child processes so the static
-  // IB_COMBINE_SGMLTERM_READ selection is exercised in each process.
+  // These files are shared by two fresh child processes so both the
+  // default combined path and explicit legacy diagnostic path are exercised.
   const std::vector<std::string> samples = {
     "<LINE>Attenuated herpesviruses and vaccines</LINE>",
     "<LINE>&amp;c. &amp;foobar foo&amp;bar &amp;&amp;word</LINE>",
@@ -793,10 +793,10 @@ static void sgml_getterm_differential_fixtures()
 static void sgml_getterm_differential_child(const std::string& mode)
 {
 #ifdef _WIN32
-  require(_putenv_s("IB_COMBINE_SGMLTERM_READ",mode == "combined" ? "1" : "0") == 0,
+  require(_putenv_s("IB_LEGACY_SGMLTERM_READ",mode == "legacy" ? "1" : "0") == 0,
           "select SGML differential child mode");
 #else
-  require(setenv("IB_COMBINE_SGMLTERM_READ",mode == "combined" ? "1" : "0",1) == 0,
+  require(setenv("IB_LEGACY_SGMLTERM_READ",mode == "legacy" ? "1" : "0",1) == 0,
           "select SGML differential child mode");
 #endif
   SetGlobalCharset("UTF-8");
