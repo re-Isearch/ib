@@ -29,6 +29,9 @@ struct Database : IDBOBJ
   DFDT fields;
   STRING stem = "proximity-fixture";
   mutable MDT mdt;
+  int lastError = 0;
+  int SetErrorCode(int code) override { lastError = code; return code; }
+  int GetErrorCode() const override { return lastError; }
   Database() : mdt(stem,false)
   {
     MDTREC record;
@@ -299,9 +302,35 @@ static void dense(Database& db)
   std::cout << "Dense PROX: " << n*n << " possible pairs, linear evidence, "
     << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count() << " ms for four joins\n";
 }
+static void malformedRpn(Database& db)
+{
+  // A six-term PEER chain needs five binary operators, not four.
+  SQUERY missingOperator, complete;
+  missingOperator.SetRpnTerm("to be PEER or PEER not PEER to PEER be");
+  complete.SetRpnTerm("to be PEER or PEER not PEER to PEER be PEER");
+  QUERY invalid(missingOperator,Unsorted,NoNormalization);
+  QUERY valid(complete,Unsorted,NoNormalization);
+  require(invalid.Run() == 108 && valid.Run() == 0,
+          "preflight recognizes the missing final PEER");
+
+  // Exercise INDEX::Search's actual residual-stack path with prebuilt RSETs;
+  // this does not depend on a real index or on stop-word handling.
+  INDEX index(&db,db.stem+".inx");
+  auto a = operand(db,{Hit(100,101,1)});
+  auto b = operand(db,{Hit(103,104,2)});
+  OPSTACK stack;
+  stack << a << b;
+  SQUERY dangling;
+  dangling.SetOpstack(stack);
+  db.lastError = 0;
+  std::unique_ptr<IRSET> result(index.Search(QUERY(dangling,Unsorted,NoNormalization)));
+  require(!result && db.GetErrorCode() == 108,
+          "malformed RPN must return an error, not its last partial result");
+}
+
 int main(int argc,char **argv)
 {
-  Database db; regression(db);
+  Database db; regression(db); malformedRpn(db);
   if (argc == 2 && std::string(argv[1]) == "--regression-only") return 0;
   examples(db); randomized(db); recordOrder(db); parser(); dispatch(db); dense(db);
   std::cout << "PROX sorted-hit regression, pair oracle, bounds, ordering, provenance and dense joins passed\n";
