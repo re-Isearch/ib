@@ -800,7 +800,10 @@ static void sgml_getterm_differential_child(const std::string& mode)
           "select SGML differential child mode");
 #endif
   SetGlobalCharset("UTF-8");
-  Database db("sgml-diff-db");
+  // Each child creates persistent MDT metadata. Reusing the same stem in
+  // the second child makes Database's initial MDT seed fail.
+  const std::string dbStem = "sgml-diff-db-" + mode;
+  Database db(dbStem.c_str());
   XML xml(&db,"XML");
   std::ofstream output("sgml-diff-"+mode+".bin",std::ios::binary);
   require(bool(output),"open SGML differential transcript");
