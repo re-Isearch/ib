@@ -800,11 +800,9 @@ static void sgml_getterm_differential_child(const std::string& mode)
           "select SGML differential child mode");
 #endif
   SetGlobalCharset("UTF-8");
-  // Each child creates persistent MDT metadata. Reusing the same stem in
-  // the second child makes Database's initial MDT seed fail.
-  const std::string dbStem = "sgml-diff-db-" + mode;
-  Database db(dbStem.c_str());
-  XML xml(&db,"XML");
+  // GetTerm reads the supplied source path directly; it needs no IDB or
+  // persistent MDT. Avoid seeding a second database inside test children.
+  XML xml(nullptr,"XML");
   std::ofstream output("sgml-diff-"+mode+".bin",std::ios::binary);
   require(bool(output),"open SGML differential transcript");
   for (size_t fileNumber = 0; fileNumber < 17; ++fileNumber) {
