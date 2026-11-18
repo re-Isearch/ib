@@ -525,6 +525,49 @@ static void literal_phrase_source_verification()
   checkCaseSensitive(u8"LA DÉFENSE", starts[0]);
 }
 
+// A common phrase anchor must not produce false hits or incorrect evidence.
+// The words all occur in each decoy, but not as one contiguous phrase.
+static void literal_phrase_common_anchor()
+{
+  require(SetGlobalCharset("UTF-8"), "select UTF-8 for common-anchor phrases");
+  SourceIndex fixture("literal-common-anchor", 3);
+  const std::string prefix = "The Winter's ";
+  const std::string decoy = "The Winter's Garden Tale";
+  for (size_t i = 0; i < 68; ++i) {
+    const GPTYPE base = fixture.store(decoy);
+    fixture.rows["the"].push_back(base);
+    fixture.rows["win"].push_back(base + 4);
+    fixture.rows["gar"].push_back(base + prefix.size());
+    fixture.rows["tal"].push_back(base + decoy.rfind("Tale"));
+  }
+  const GPTYPE exact = fixture.store("The Winter's Tale");
+  const GPTYPE upper = fixture.store("THE WINTER'S TALE");
+  for (const GPTYPE base : {exact, upper}) {
+    fixture.rows["the"].push_back(base);
+    fixture.rows["win"].push_back(base + 4);
+    fixture.rows["tal"].push_back(base + prefix.size());
+  }
+  fixture.publish();
+  const auto check = [&](const char *phrase, INDEX::MATCH typ,
+                         const std::set<GPTYPE>& expected) {
+    std::unique_ptr<IRSET> hits(fixture.index.TermSearch(phrase, NulString, typ));
+    require(hits && hits->GetTotalEntries() == expected.size(),
+            "common-anchor phrase matches only expected records");
+    std::set<GPTYPE> starts;
+    for (size_t row = 1; row <= hits->GetTotalEntries(); ++row)
+      for (const auto& hit : hits->GetEntry(row).GetHitTable()) {
+        starts.insert(hit.GetFieldStart());
+        require(hit.GetFieldEnd() == hit.GetFieldStart() + prefix.size() + 3,
+                "common-anchor evidence covers the entire original phrase");
+      }
+    require(starts == expected, "common-anchor phrase coordinates match source bytes");
+  };
+  check("The Winter's Tale", INDEX::Exact, {exact, upper});
+  check("The Winter's Tale", INDEX::AlwaysMatches, {exact});
+  check("THE WINTER'S TALE", INDEX::AlwaysMatches, {upper});
+  check("The Winter's Tales", INDEX::Exact, {});
+}
+
 static void numeric_punctuation_after_merge()
 {
   SourceIndex fixture("xml-zero-merge",3);
@@ -713,6 +756,7 @@ int main()
     xml_indirect_and_dump();
     numeric_punctuation_after_merge();
     literal_phrase_source_verification();
+    literal_phrase_common_anchor();
     shared_ingestion_check();
     selected_region_check();
     dictionary_integrity_checks();
