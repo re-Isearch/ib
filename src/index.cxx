@@ -111,6 +111,9 @@ extern bool _is_globalUTF8;
 #include <assert.h>
 #include <algorithm>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include "lock.hxx"
 //#include "dfdt.hxx"
 #include <iomanip>
@@ -4782,18 +4785,22 @@ error:
 
   TempStack >> NewIrset;
 
-  if (!StopEvaluation) {
-    if (!Stack.IsEmpty())
-      {
-        message_log (LOG_INFO, "Query stack was not empty. Malformed query.");
-        Parent->SetErrorCode(108); // "Malformed query";
-      }
-    if (!TempStack.IsEmpty())
-      {
-        message_log (LOG_INFO, "Search stack was not empty. Malformed RPN.");
-        Parent->SetErrorCode(108); // "Malformed query";
-      }
-   } else if (NewIrset == nullptr) return  new IRSET (Parent);
+  if (!StopEvaluation)
+    {
+      // A malformed RPN expression must not return the last partial operand.
+      // Otherwise the caller may present unrelated hits as a valid answer.
+      if (NewIrset == NULL || !Stack.IsEmpty() || !TempStack.IsEmpty())
+        {
+          message_log(LOG_INFO, "Malformed RPN: expression did not reduce to one result.");
+          Parent->SetErrorCode(108);
+          delete NewIrset;
+          DiscardOpStack(Stack);
+          DiscardOpStack(TempStack);
+          return ERROR_SET;
+        }
+    }
+  else if (NewIrset == nullptr)
+    return new IRSET (Parent);
 
   // Do we want to clip the set?
   if (!Query.isUnlimited())
@@ -6845,6 +6852,88 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 
   clock_t         startClock = clock();
 
+  // Opt-in source-verification profiling. All timers and counters are inactive
+  // unless IB_PROFILE_TERMSEARCH=1 (or another nonzero value) is set.
+  static const bool profileTermSearch = [] {
+    const char *flag = std::getenv("IB_PROFILE_TERMSEARCH");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+
+  struct TermSearchProfile {
+    using Clock = std::chrono::steady_clock;
+    const STRING& query;
+    const bool enabled;
+    const Clock::time_point started;
+    size_t shards = 0;
+    size_t candidates = 0;
+    size_t visited = 0;
+    size_t fieldRejected = 0;
+    size_t sourceChecks = 0;
+    size_t accepted = 0;
+    size_t sourceReads = 0;
+    size_t probeReads = 0;
+    size_t sourceBytes = 0;
+    size_t probeBytes = 0;
+    size_t compares = 0;
+    bool delegated = false;
+    std::chrono::nanoseconds sourceTime{0};
+    std::chrono::nanoseconds probeTime{0};
+    std::chrono::nanoseconds compareTime{0};
+
+    TermSearchProfile(const STRING& q, bool on)
+      : query(q), enabled(on),
+        started(on ? Clock::now() : Clock::time_point{}) {}
+    ~TermSearchProfile() {
+      if (!enabled) return;
+      const auto elapsed = Clock::now() - started;
+      const auto millis = [](std::chrono::nanoseconds ns) {
+        return std::chrono::duration<double, std::milli>(ns).count();
+      };
+      message_log(LOG_INFO,
+        "TERM_PROFILE query=\"%s\" shards=%zu candidates=%zu visited=%zu "
+        "field_rejected=%zu source_checks=%zu accepted=%zu "
+        "source_reads=%zu source_bytes=%zu source_ms=%.3f "
+        "probe_reads=%zu probe_bytes=%zu probe_ms=%.3f "
+        "compares=%zu compare_ms=%.3f elapsed_ms=%.3f delegated=%d",
+        query.c_str(), shards, candidates, visited, fieldRejected,
+        sourceChecks, accepted, sourceReads, sourceBytes, millis(sourceTime),
+        probeReads, probeBytes, millis(probeTime),
+        compares, millis(compareTime),
+        std::chrono::duration<double, std::milli>(elapsed).count(),
+        int(delegated));
+    }
+  } profile(QueryTerm, profileTermSearch);
+
+  const auto readIndirect = [&](GPTYPE posting, PUCHR dest, INT off,
+                                INT len, bool verifying) -> INT {
+    if (!profile.enabled)
+      return GetIndirectBuffer(posting, dest, off, len);
+    const auto begin = TermSearchProfile::Clock::now();
+    const INT got = GetIndirectBuffer(posting, dest, off, len);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        TermSearchProfile::Clock::now() - begin);
+    if (verifying) {
+      ++profile.sourceReads;
+      if (got > 0) profile.sourceBytes += size_t(got);
+      profile.sourceTime += elapsed;
+    } else {
+      ++profile.probeReads;
+      if (got > 0) profile.probeBytes += size_t(got);
+      profile.probeTime += elapsed;
+    }
+    return got;
+  };
+  const auto compareIndirect = [&](const UCHR *term, const UCHR *source,
+                                   size_t bytes, size_t *matched) -> INT {
+    if (!profile.enabled) return Compare(term, source, bytes, matched);
+    const auto begin = TermSearchProfile::Clock::now();
+    const INT result = Compare(term, source, bytes, matched);
+    profile.compareTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        TermSearchProfile::Clock::now() - begin);
+    ++profile.compares;
+    return result;
+  };
+
   STRING          RealTerm ( FullTerm, x );	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   STRING          SearchTerm ( TermClean ( RealTerm, true ) );
@@ -7104,6 +7193,7 @@ for (size_t i = 0; i < x; )
           }
         if ( fpi == NULL )
           continue;		// Next
+        if (profile.enabled) ++profile.shards;
 
         int fpi_d = IndexFd(fpi); // get file number 
 
@@ -7197,6 +7287,7 @@ for (size_t i = 0; i < x; )
                         if (*FullTerm == '\0')
                           {
                             ffclose(fpi);
+                            if (profile.enabled) profile.delegated = true;
                             return TermSearch(newTerm, FieldName, Typ);
                           }
                       }
@@ -7224,6 +7315,7 @@ for (size_t i = 0; i < x; )
                             message_log (LOG_INFO, "Phrase \"%s\" uses all common words (%ld > %ld : %ld) [%d]. " 
                                   "Using alternative search heuristic: %s",
                                   FullTerm, (long)ip,  (long)PhraseWaterlimit, (long)CommonWordsThreshold, jj, S.c_str());
+                            if (profile.enabled) profile.delegated = true;
                             return Search(query);
                           }
                         else
@@ -7256,11 +7348,11 @@ for (size_t i = 0; i < x; )
               {
                 oip = ip;
 
-                if ( ( gp = GpFread ( ip, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( ip, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
                     if ( ( z = first_char - ( UCHR ) _ib_tolower ( Buffer[0] ) ) == 0 &&
-                         ( z = Compare ( Term, Buffer, Term_length, NULL) ) == 0 )
+                         ( z = compareIndirect(Term, Buffer, Term_length, NULL) ) == 0 )
                       {
                         hit = true;	// Got a match
 
@@ -7300,10 +7392,10 @@ for (size_t i = 0; i < x; )
             nomatch = 0;
             do
               {
-                if ( ( gp = GpFread ( first, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
                 else
                   {
@@ -7333,10 +7425,10 @@ for (size_t i = 0; i < x; )
               {
                 if ( first > 0 )
                   first--;
-                if ( ( gp = GpFread ( first, fpi_d ) ) != ((GPTYPE)-1) && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != ((GPTYPE)-1) && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL);
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
               }
             while ( ( z == 0 ) && ( first > 0 ) );
@@ -7354,10 +7446,10 @@ for (size_t i = 0; i < x; )
             nomatch = maxip;
             do
               {
-                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
                 else
                   {
@@ -7391,10 +7483,10 @@ for (size_t i = 0; i < x; )
               {
                 if ( last < maxip )
                   last++;
-                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
               }
             while ( ( z == 0 ) && ( last < maxip ) );
@@ -7469,6 +7561,14 @@ for (size_t i = 0; i < x; )
             Parent->SetErrorCode ( 2 );
             continue;
           }
+        if (profile.enabled) {
+          profile.candidates += size_t(x);
+          message_log(LOG_INFO,
+            "TERM_PROFILE anchor query=\"%s\" shard=%d term=\"%.*s\" "
+            "offset=%d candidates=%zu overflow=%d",
+            QueryTerm.c_str(), int(jj), int(Term_length),
+            (const char *)Term, Offset, size_t(x), int(overflow));
+        }
         if ( CheckField && FirstTime )
           {
             FieldCache->SetFieldName ( FieldName ); // Note: Here we can adise we Disk
@@ -7492,10 +7592,12 @@ for (size_t i = 0; i < x; )
 		    break; // Timeout
 		  }
 	      }
+            if (profile.enabled) ++profile.visited;
             gp = gplist[ip];
             if ( CheckField && !FieldCache->ValidateInField ( gp ) )
               {
 //cerr << "Address " << ip << " not found/valid in field" << endl;
+                if (profile.enabled) ++profile.fieldRejected;
                 continue; // Not in field...
               }
 
@@ -7506,7 +7608,8 @@ for (size_t i = 0; i < x; )
               {
                 // Exact match
                 Cost = 0.8;
-                if (GetIndirectBuffer ( gp, Buffer, Offset, FullTerm_length ) <= 0 ||
+                if (profile.enabled) ++profile.sourceChecks;
+                if (readIndirect(gp, Buffer, Offset, FullTerm_length, true) <= 0 ||
                     RealTerm.Compare ( ( const char * ) Buffer, FullTerm_length ) != 0 )
                   {
 //cerr << "GetIndirect/Compare failed: " << &Buffer[1] << endl;
@@ -7520,8 +7623,9 @@ for (size_t i = 0; i < x; )
               {
                 // Exact Term match
                 Cost += 0.8;
-                if (GetIndirectBuffer ( gp, Buffer, Offset+1, FullTerm_length+3 ) <= 0 ||
-                    Compare ( _is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
+                if (profile.enabled) ++profile.sourceChecks;
+                if (readIndirect(gp, Buffer, Offset+1, FullTerm_length+3, true) <= 0 ||
+                    compareIndirect ( _is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
                        : (const UCHR *)RealTerm.c_str(),
                        &Buffer[1], FullTerm_length, NULL ) != 0)
                   {
@@ -7558,7 +7662,8 @@ for (size_t i = 0; i < x; )
                 }
 
                 Cost += 0.1; // Overflows can get expensive
-                const INT readBytes = GetIndirectBuffer(gp, Buffer, Offset + start, maxTermLength+start);
+                if (profile.enabled) ++profile.sourceChecks;
+                const INT readBytes = readIndirect(gp, Buffer, Offset + start, maxTermLength+start, true);
                 if (readBytes <= 0 || start >= (size_t)readBytes)
                   continue;
 
@@ -7573,7 +7678,7 @@ for (size_t i = 0; i < x; )
                     const auto tryMatch = [&](size_t at) {
                       if (at > anchor) return false;
                       size_t consumed = 0;
-                      if (Compare((const UCHR *)SearchTerm.c_str(),
+                      if (compareIndirect((const UCHR *)SearchTerm.c_str(),
                                   Buffer+at, FullTerm_length, &consumed) != 0)
                         return false;
                       // Require the matched phrase to cover the selected SIS
@@ -7638,10 +7743,11 @@ for (size_t i = 0; i < x; )
                               }
                           }
                       }
-                    if (Compare(RealTerm, Buffer+start, FullTerm_length, &myLength) != 0)
+                    if (compareIndirect(RealTerm, Buffer+start, FullTerm_length, &myLength) != 0)
                       continue;
                   }
               }
+            if (profile.enabled) ++profile.accepted;
             HitList.Add (gp, myLength);
           }	// Walk through
         delete[] gplist;
