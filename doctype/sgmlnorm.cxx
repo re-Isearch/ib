@@ -294,9 +294,12 @@ struct SGMLTermTimer {
   }
 };
 
-bool combinedSGMLTermRead() {
+// Combined lookbehind + source reads are the normal retrieval path.
+// Retain an explicit diagnostic opt-out for byte-for-byte differential tests
+// and investigating source-recovery regressions.
+bool legacySGMLTermRead() {
   static const bool enabled = [] {
-    const char *flag = std::getenv("IB_COMBINE_SGMLTERM_READ");
+    const char *flag = std::getenv("IB_LEGACY_SGMLTERM_READ");
     return flag && *flag && std::strcmp(flag, "0") != 0;
   }();
   return enabled;
@@ -325,9 +328,10 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
       return 0;
     }
 
-  // Opt-in: one read contains both the backward context and forward
-  // verification text. Normalize only the exact bytes selected by the old
-  // boundary algorithm. Keep the old scanner for long delimiter-free runs.
+  // By default one positioned read contains backward context and forward
+  // verification text. Normalize exactly the window the original boundary
+  // algorithm selects. Keep that scanner as a fallback for long runs without
+  // a safe delimiter, and as a diagnostic opt-out.
   const size_t maxRead = std::numeric_limits<INT>::max();
   const size_t maxDecoded = (maxRead-12)/12;
   off_t begin = Offset;
@@ -336,7 +340,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   bool prefetched = false;
   const size_t lookbehind = size_t(std::min<off_t>(Offset, 64));
 
-  if (combinedSGMLTermRead() && Length <= maxDecoded-lookbehind) {
+  if (!legacySGMLTermRead() && Length <= maxDecoded-lookbehind) {
     if (profile.totals) ++profile.totals->combinedAttempts;
     const size_t prefetchWant = (lookbehind+Length)*12 + 12;
     profile.next(sgmlAllocate);
