@@ -6930,13 +6930,6 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     return flag && *flag && std::strcmp(flag, "0") != 0;
   }();
 
-  // Experimental: order Exact candidate GPs by source position. Disabled by
-  // default so the original SIS/postings traversal remains the baseline.
-  static const bool sortExactGPs = [] {
-    const char *flag = std::getenv("IB_SORT_EXACT_GPS");
-    return flag && *flag && std::strcmp(flag, "0") != 0;
-  }();
-
   struct TermSearchProfile {
     using Clock = std::chrono::steady_clock;
     const STRING& query;
@@ -6956,15 +6949,12 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     size_t sourceFolds = 0;
     size_t gpAdjacentDescents = 0;
     size_t gpAdjacentPairs = 0;
-    size_t gpSortCalls = 0;
-    size_t gpSortItems = 0;
     const IndirectReadTiming indirectBegin;
     bool delegated = false;
     std::chrono::nanoseconds sourceTime{0};
     std::chrono::nanoseconds probeTime{0};
     std::chrono::nanoseconds compareTime{0};
     std::chrono::nanoseconds foldTime{0};
-    std::chrono::nanoseconds gpSortTime{0};
 
     TermSearchProfile(const STRING& q, bool on)
       : query(q), enabled(on),
@@ -6983,14 +6973,13 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         "probe_reads=%zu probe_bytes=%zu probe_ms=%.3f "
         "compares=%zu compare_ms=%.3f folds=%zu fold_ms=%.3f "
         "elapsed_ms=%.3f delegated=%d "
-        "gp_pairs=%zu gp_descents=%zu gp_sort_calls=%zu gp_sort_items=%zu gp_sort_ms=%.3f",
+        "gp_pairs=%zu gp_descents=%zu",
         query.c_str(), shards, candidates, visited, fieldRejected,
         sourceChecks, accepted, sourceReads, sourceBytes, millis(sourceTime),
         probeReads, probeBytes, millis(probeTime),
         compares, millis(compareTime), sourceFolds, millis(foldTime),
         std::chrono::duration<double, std::milli>(elapsed).count(),
-        int(delegated), gpAdjacentPairs, gpAdjacentDescents,
-        gpSortCalls, gpSortItems, millis(gpSortTime));
+        int(delegated), gpAdjacentPairs, gpAdjacentDescents);
       const auto& reads = indirectReadTiming;
       message_log(LOG_INFO,
         "INDIRECT_PROFILE query=\"%s\" calls=%zu direct=%zu delegated=%zu "
@@ -7680,32 +7669,17 @@ for (size_t i = 0; i < x; )
             FieldCache->SetFieldName ( FieldName ); // Note: Here we can adise we Disk
             FirstTime = false;
           }
-        // The SIS range is lexical; posting GPs need not be in source order.
-        // Count adjacent descents BEFORE sorting so profiling can quantify
-        // whether the experimental source-order traversal is useful.
+        // GP sorting does not help Exact/literal phrases on the measured
+        // SIS ranges: bird, rna, virus, and vaccines had zero GP descents.
+        // Keep the historical left-match sort only. Record disorder when
+        // profiling in case another index has different posting order.
         if (profile.enabled && x > 1) {
           profile.gpAdjacentPairs += size_t(x - 1);
           for (INT k = 1; k < x; ++k)
             if (gplist[k] < gplist[k - 1]) ++profile.gpAdjacentDescents;
         }
-
-        // Preserve historical sorting for left matches. Exact phrase sorting
-        // is experimental and only enabled when explicitly requested.
-        const bool sortGPs = x > 1 &&
-            (Typ == LeftMatch || Typ == LeftAlwaysMatches ||
-             (sortExactGPs && Typ == Exact));
-        if (sortGPs) {
-          const auto sortStarted = profile.enabled
-              ? TermSearchProfile::Clock::now()
-              : TermSearchProfile::Clock::time_point{};
+        if (x > 1 && (Typ == LeftMatch || Typ == LeftAlwaysMatches))
           QSORT_GP(gplist, x, sizeof(GPTYPE), gpcomp);
-          if (profile.enabled) {
-            ++profile.gpSortCalls;
-            profile.gpSortItems += size_t(x);
-            profile.gpSortTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                TermSearchProfile::Clock::now() - sortStarted);
-          }
-        }
 
         for ( ip = 0; ip < (off_t)x ; ip++ )
           {
