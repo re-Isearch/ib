@@ -39,6 +39,8 @@
 #include <ctype.h>
 #include <string.h>
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <limits>
 #include "common.hxx"
 #include "doctype.hxx"
@@ -193,9 +195,86 @@ INT SGMLNORM::GetRecordData(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) 
 }
 
 
+// Opt-in, per-thread source retrieval profile. Each invocation is accounted for
+// exactly once, including early returns. Report at thread/process exit so a
+// full Isearch query produces one line, rather than thousands of log entries.
+namespace {
+enum SGMLTermStage { sgmlOpen, sgmlBoundary, sgmlAllocate, sgmlRead,
+                     sgmlNormalize, sgmlOutput, sgmlDone, sgmlStages };
+
+struct SGMLTermTotals {
+  size_t calls = 0, boundaryReads = 0, boundaryBytes = 0;
+  size_t mainReads = 0, mainBytes = 0, failures = 0;
+  std::chrono::nanoseconds elapsed[sgmlStages] = {};
+  ~SGMLTermTotals() {
+    if (!calls) return;
+    const auto ms = [this](SGMLTermStage stage) {
+      return std::chrono::duration<double, std::milli>(elapsed[stage]).count();
+    };
+    const double total = ms(sgmlOpen)+ms(sgmlBoundary)+ms(sgmlAllocate)+
+                         ms(sgmlRead)+ms(sgmlNormalize)+ms(sgmlOutput);
+    std::fprintf(stderr,
+      "SGMLTERM_PROFILE calls=%zu failures=%zu boundary_reads=%zu boundary_bytes=%zu "
+      "main_reads=%zu main_bytes=%zu total_ms=%.3f open_ms=%.3f "
+      "boundary_ms=%.3f allocate_ms=%.3f read_close_ms=%.3f "
+      "normalize_ms=%.3f output_ms=%.3f\\n",
+      calls, failures, boundaryReads, boundaryBytes, mainReads, mainBytes,
+      total, ms(sgmlOpen), ms(sgmlBoundary), ms(sgmlAllocate), ms(sgmlRead),
+      ms(sgmlNormalize), ms(sgmlOutput));
+  }
+};
+
+struct SGMLTermTimer {
+  using Clock = std::chrono::steady_clock;
+  SGMLTermTotals *totals;
+  Clock::time_point last;
+  SGMLTermStage stage = sgmlOpen;
+  bool completed = false;
+  explicit SGMLTermTimer(bool enabled)
+    : totals(enabled ? &getTotals() : nullptr),
+      last(enabled ? Clock::now() : Clock::time_point{}) {}
+  static SGMLTermTotals& getTotals() {
+    static thread_local SGMLTermTotals totals;
+    return totals;
+  }
+  void next(SGMLTermStage nextStage) {
+    if (!totals) return;
+    const auto now = Clock::now();
+    totals->elapsed[stage] += now-last;
+    last = now;
+    stage = nextStage;
+  }
+  void boundaryRead(size_t bytes) {
+    if (totals) { ++totals->boundaryReads; totals->boundaryBytes += bytes; }
+  }
+  void mainRead(int bytes) {
+    if (totals) {
+      ++totals->mainReads;
+      if (bytes > 0) totals->mainBytes += size_t(bytes);
+    }
+  }
+  void success() { completed = true; }
+  ~SGMLTermTimer() {
+    if (!totals) return;
+    next(sgmlDone);
+    ++totals->calls;
+    if (!completed) ++totals->failures;
+  }
+};
+
+bool profileSGMLTerm() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_PROFILE_SGMLTERM");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+} // namespace
+
 // Recover the same entity-normalized bytes used to assign posting GPs.
 INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length)
 {
+  SGMLTermTimer profile(profileSGMLTerm());
   if (!Buffer) return 0;
   Buffer[0] = '\0';
   if (Offset < 0 || !Length) return 0;
@@ -206,6 +285,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
       return 0;
     }
 
+  profile.next(sgmlBoundary);
   // Entity contraction defers padding until the next word boundary. A GP
   // can therefore land inside the original entity spelling: &amp;c. is
   // indexed as c at the source byte 'a'. Normalize from a preceding safe
@@ -218,6 +298,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
     {
       const size_t span = size_t(std::min<off_t>(begin, sizeof(context)-1));
       const off_t from = begin - span;
+      profile.boundaryRead(span);
       if (DOCTYPE::ReadFile(fp, context, from, span) != INT(span))
         {
           ffclose(fp);
@@ -236,6 +317,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
       if (!boundary) begin = from;
     }
 
+  profile.next(sgmlAllocate);
   // An entity contains at most ten name bytes plus '&' and ';'. Include
   // enough raw text for the normalized prefix, Length decoded bytes and
   // an entity at the limit, including contractions before the posting GP.
@@ -261,13 +343,17 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
                    Doctype.c_str(), (unsigned long)want);
       return 0;
     }
+  profile.next(sgmlRead);
   const INT read = DOCTYPE::ReadFile(fp, tmp, begin, want);
+  profile.mainRead(read);
   ffclose(fp);
   if (read <= 0 || size_t(read) <= segment) return 0;
 
   // Match ingestion's padding policy. Presentation normalization can move
   // the decoded characters to different byte offsets.
+  profile.next(sgmlNormalize);
   Entities.normalize(tmp, size_t(read));
+  profile.next(sgmlOutput);
   tmp += segment;
   const size_t count = size_t(read)-segment;
   size_t i = 0, j = 0;
@@ -279,6 +365,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
         while (j < count && tmp[j] == ' ') ++j;
     }
   Buffer[i] = '\0';
+  profile.success();
   return INT(i);
 }
 
