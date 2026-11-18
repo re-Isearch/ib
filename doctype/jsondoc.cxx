@@ -1748,7 +1748,7 @@ struct JSONTermProfile {
     const auto millis = [](long long nanos) { return double(nanos) / 1000000.0; };
     std::fprintf(stderr,
       "JSONTERM_PROFILE calls=%zu failures=%zu input_bytes=%zu output_bytes=%zu "
-      "raw_ms=%.3f escape_ms=%.3f compact_ms=%.3f total_stages_ms=%.3f\\n",
+      "raw_ms=%.3f escape_ms=%.3f compact_ms=%.3f total_stages_ms=%.3f\n",
       count, failures.load(std::memory_order_relaxed),
       inputBytes.load(std::memory_order_relaxed),
       outputBytes.load(std::memory_order_relaxed),
