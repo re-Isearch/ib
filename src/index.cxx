@@ -4865,6 +4865,35 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
   }
 
 
+// Optional per-thread timing for indirect source reads. TermSearch reports
+// deltas, so unrelated calls before a query do not affect its totals.
+struct IndirectReadTiming {
+  using Clock = std::chrono::steady_clock;
+  using Duration = std::chrono::nanoseconds;
+  size_t calls = 0, delegated = 0, direct = 0;
+  Duration total{0}, mdt{0}, path{0}, delegate{0}, open{0}, read{0}, close{0};
+};
+static thread_local IndirectReadTiming indirectReadTiming;
+static const bool profileIndirectReads = [] {
+  const char *flag = std::getenv("IB_PROFILE_TERMSEARCH");
+  return flag && *flag && std::strcmp(flag, "0") != 0;
+}();
+
+struct IndirectReadScope {
+  bool enabled;
+  IndirectReadTiming::Clock::time_point begin;
+  explicit IndirectReadScope(bool on) : enabled(on),
+    begin(on ? IndirectReadTiming::Clock::now()
+             : IndirectReadTiming::Clock::time_point{}) {
+    if (on) ++indirectReadTiming.calls;
+  }
+  ~IndirectReadScope() {
+    if (enabled) indirectReadTiming.total +=
+        std::chrono::duration_cast<IndirectReadTiming::Duration>(
+            IndirectReadTiming::Clock::now() - begin);
+  }
+};
+
 //private
 // Default Off = 0, Length = StringCompLength
 //
@@ -4873,6 +4902,7 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
 //
 INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) const
 {
+    IndirectReadScope timing(profileIndirectReads);
     if (!Dest) return -1;
     Dest[0] = '\0';
     if (Length <= 0) return 0;
@@ -4885,7 +4915,15 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
 #endif
 
 
-    if (Parent && Parent->GetMainMdt ()->GetMdtRecord (gp, &Mdtrec))
+    const auto mdtStarted = timing.enabled
+        ? IndirectReadTiming::Clock::now()
+        : IndirectReadTiming::Clock::time_point{};
+    const bool hasRecord = Parent &&
+        Parent->GetMainMdt()->GetMdtRecord(gp, &Mdtrec);
+    if (timing.enabled)
+      indirectReadTiming.mdt += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+          IndirectReadTiming::Clock::now() - mdtStarted);
+    if (hasRecord)
       {
         int x = 0;
         // Added edz : 3 Sept 1999 : Don't bother with deleted records!!
@@ -4913,23 +4951,56 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
             const GPTYPE available = Mdtrec.GetLocalRecordEnd() - GPTYPE(Offset) + 1;
             if (GPTYPE(Length) > available) Length = INT(available);
 
+            const auto pathStarted = timing.enabled
+                ? IndirectReadTiming::Clock::now()
+                : IndirectReadTiming::Clock::time_point{};
             DOCTYPE     *DoctypePtr = Parent->GetDocTypePtr ( Mdtrec.GetDocumentType() );
             const STRING filename (  Parent->ResolvePathname(Mdtrec.GetFullFileName()) );
+            if (timing.enabled)
+              indirectReadTiming.path += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                  IndirectReadTiming::Clock::now() - pathStarted);
             if (DoctypePtr)
               {
                 if (DebugMode)
                   message_log (LOG_INFO, "Getting indirect term via %s::GetTerm(%s,%lu,%d)",
                         DoctypePtr->Name().c_str(), filename.c_str(), (unsigned long)Offset, (int)Length );
+                const auto started = timing.enabled
+                    ? IndirectReadTiming::Clock::now()
+                    : IndirectReadTiming::Clock::time_point{};
                 x = DoctypePtr->GetTerm(filename, (char *)Buffer, Offset, Length);
+                if (timing.enabled) {
+                  ++indirectReadTiming.delegated;
+                  indirectReadTiming.delegate += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                      IndirectReadTiming::Clock::now() - started);
+                }
                 if (DebugMode && x < Length) message_log (LOG_INFO, "Got %d Bytes", x);
               }
             else
               {
+                if (timing.enabled) ++indirectReadTiming.direct;
+                const auto openStarted = timing.enabled
+                    ? IndirectReadTiming::Clock::now()
+                    : IndirectReadTiming::Clock::time_point{};
                 FILE *fp = ffopen (filename, "rb");
+                if (timing.enabled)
+                  indirectReadTiming.open += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                      IndirectReadTiming::Clock::now() - openStarted);
                 if (fp != NULL)
                   {
+                    const auto readStarted = timing.enabled
+                        ? IndirectReadTiming::Clock::now()
+                        : IndirectReadTiming::Clock::time_point{};
                     x = pfread(fp, Buffer, Length, Offset);
+                    if (timing.enabled)
+                      indirectReadTiming.read += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                          IndirectReadTiming::Clock::now() - readStarted);
+                    const auto closeStarted = timing.enabled
+                        ? IndirectReadTiming::Clock::now()
+                        : IndirectReadTiming::Clock::time_point{};
                     ffclose(fp); // Close
+                    if (timing.enabled)
+                      indirectReadTiming.close += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                          IndirectReadTiming::Clock::now() - closeStarted);
                   }
               }
           }
@@ -6876,6 +6947,7 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     size_t probeBytes = 0;
     size_t compares = 0;
     size_t sourceFolds = 0;
+    const IndirectReadTiming indirectBegin;
     bool delegated = false;
     std::chrono::nanoseconds sourceTime{0};
     std::chrono::nanoseconds probeTime{0};
@@ -6884,7 +6956,8 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 
     TermSearchProfile(const STRING& q, bool on)
       : query(q), enabled(on),
-        started(on ? Clock::now() : Clock::time_point{}) {}
+        started(on ? Clock::now() : Clock::time_point{}),
+        indirectBegin(on ? indirectReadTiming : IndirectReadTiming{}) {}
     ~TermSearchProfile() {
       if (!enabled) return;
       const auto elapsed = Clock::now() - started;
@@ -6904,6 +6977,22 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         compares, millis(compareTime), sourceFolds, millis(foldTime),
         std::chrono::duration<double, std::milli>(elapsed).count(),
         int(delegated));
+      const auto& reads = indirectReadTiming;
+      message_log(LOG_INFO,
+        "INDIRECT_PROFILE query=\"%s\" calls=%zu direct=%zu delegated=%zu "
+        "total_ms=%.3f mdt_ms=%.3f path_ms=%.3f delegate_ms=%.3f "
+        "open_ms=%.3f read_ms=%.3f close_ms=%.3f",
+        query.c_str(),
+        reads.calls - indirectBegin.calls,
+        reads.direct - indirectBegin.direct,
+        reads.delegated - indirectBegin.delegated,
+        millis(reads.total - indirectBegin.total),
+        millis(reads.mdt - indirectBegin.mdt),
+        millis(reads.path - indirectBegin.path),
+        millis(reads.delegate - indirectBegin.delegate),
+        millis(reads.open - indirectBegin.open),
+        millis(reads.read - indirectBegin.read),
+        millis(reads.close - indirectBegin.close));
     }
   } profile(QueryTerm, profileTermSearch);
 
