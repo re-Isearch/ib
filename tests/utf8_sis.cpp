@@ -434,6 +434,15 @@ static void xml_indirect_and_dump()
         require(recoveredCount > 0 && recoveredPositions[0] == 0 &&
                 std::string(reinterpret_cast<const char *>(recovered)) == term,
                 "XML source recovery agrees with real ingestion at every GP without decoding twice");
+        // The literal verifier may request many terms from the same cached file.
+        // Repeating an entity-aware read must produce identical text and bytes.
+        UCHR again[StringCompLength*2+5] = {};
+        const int secondLength = xml.GetTerm(record.GetFullFileName(),
+                                             reinterpret_cast<char *>(again),
+                                             positions[i],StringCompLength+4);
+        require(secondLength == length && secondLength >= 0 &&
+                std::memcmp(again,recovered,size_t(secondLength)+1) == 0,
+                "repeated XML GetTerm on the same handle preserves normalized source bytes");
         fixture.rows[term.substr(0,fixture.width)].push_back(base+positions[i]);
         postingTerms.emplace(base+positions[i],term);
         ++fixture.terms[term];
