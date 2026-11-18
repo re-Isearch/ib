@@ -6,6 +6,9 @@
 #include "xml.hxx"
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
+#include <cstdint>
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -754,15 +757,111 @@ static void dictionary_integrity_checks()
   require(emptyIndex.Dump(0,emptyErrors,true) == 0, "an empty dictionary and posting stream validate");
 }
 
-int main()
+
+static void sgml_getterm_differential_fixtures()
+{
+  // These files are shared by two fresh child processes so the static
+  // IB_COMBINE_SGMLTERM_READ selection is exercised in each process.
+  const std::vector<std::string> samples = {
+    "<LINE>Attenuated herpesviruses and vaccines</LINE>",
+    "<LINE>&amp;c. &amp;foobar foo&amp;bar &amp;&amp;word</LINE>",
+    "<LINE>&#38;foobar foo&#46;bar alpha&#32;beta &#233;COLE</LINE>",
+    u8"<LINE>CAFÉ café ЖИЗНЬ 中文 𐐨 a\u0301 e\u0301</LINE>",
+    "<LINE>A&moon B&bogus; C&quot;quoted&quot; Z</LINE>",
+    "<LINE>" + std::string(250, 'z') + "word</LINE>",
+    "<LINE>" + std::string(160, 'x') + "&amp;word</LINE>",
+    "<LINE>" + std::string(170, 'x') + std::string(180, ' ') + "word</LINE>",
+    "<LINE>" + std::string(160, 'x') + "&#38;&#38;&#38;word</LINE>",
+    "<LINE>" + [] { std::string run; for (int i=0;i<180;++i) run += "&amp;"; return run; }() + "word</LINE>",
+    std::string("<LINE>") + "abc &amp; def",
+    std::string("<LINE>") + "abc &amp;",
+    std::string("<LINE>") + u8"é",
+    std::string("<LINE>") + "a",
+    "&amp;",
+    "a",
+    "",
+  };
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const std::string filename = "sgml-diff-"+std::to_string(i)+".xml";
+    std::ofstream file(filename,std::ios::binary);
+    file.write(samples[i].data(),std::streamsize(samples[i].size()));
+    file.close();
+    require(bool(file),"write SGML differential source");
+  }
+}
+
+static void sgml_getterm_differential_child(const std::string& mode)
+{
+#ifdef _WIN32
+  require(_putenv_s("IB_COMBINE_SGMLTERM_READ",mode == "combined" ? "1" : "0") == 0,
+          "select SGML differential child mode");
+#else
+  require(setenv("IB_COMBINE_SGMLTERM_READ",mode == "combined" ? "1" : "0",1) == 0,
+          "select SGML differential child mode");
+#endif
+  SetGlobalCharset("UTF-8");
+  Database db("sgml-diff-db");
+  XML xml(&db,"XML");
+  std::ofstream output("sgml-diff-"+mode+".bin",std::ios::binary);
+  require(bool(output),"open SGML differential transcript");
+  for (size_t fileNumber = 0; fileNumber < 17; ++fileNumber) {
+    const std::string filename = "sgml-diff-"+std::to_string(fileNumber)+".xml";
+    const std::uintmax_t size = std::filesystem::file_size(filename);
+    for (size_t pos = 0; pos <= size; ++pos) {
+      // Probe every byte near source start and end, plus representative
+      // positions through long entity runs and delimiter-free regions.
+      if (pos > 96 && pos + 96 < size && pos % 11 != 0) continue;
+      for (const size_t length : {size_t(1),size_t(2),size_t(9),size_t(37),size_t(101)}) {
+        char buffer[128] = {};
+        const int got = xml.GetTerm(STRING(filename.c_str()),buffer,off_t(pos),length);
+        require(got >= 0 && got <= int(length),"SGML differential GetTerm byte count");
+        // Length prefix and returned bytes (including trailing NUL) make the
+        // transcript unambiguous even if source text contains invalid UTF-8.
+        output.write(reinterpret_cast<const char *>(&got),sizeof(got));
+        output.write(buffer,std::streamsize(got+1));
+      }
+    }
+  }
+  output.close();
+  require(bool(output),"write SGML differential transcript");
+}
+
+static void sgml_getterm_differential(const std::string& executable)
+{
+  sgml_getterm_differential_fixtures();
+  // The environment selection is static per process; run each implementation
+  // in its own fresh instance instead of toggling a production hot-path flag.
+  for (const std::string mode : {"legacy","combined"}) {
+    const std::string command = "\"" + executable + "\" --sgml-diff-child " + mode;
+    require(std::system(command.c_str()) == 0,"SGML differential child succeeds");
+  }
+  const auto load = [](const char *name) {
+    std::ifstream input(name,std::ios::binary);
+    require(bool(input),"read SGML differential transcript");
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string legacy = load("sgml-diff-legacy.bin");
+  const std::string combined = load("sgml-diff-combined.bin");
+  require(!legacy.empty() && legacy == combined,
+          "combined SGML GetTerm matches legacy byte-for-byte across offsets and EOF");
+}
+
+int main(int argc, char **argv)
 {
   try {
+    if (argc == 3 && std::string(argv[1]) == "--sgml-diff-child") {
+      sgml_getterm_differential_child(argv[2]);
+      return 0;
+    }
+    const std::string executable = std::filesystem::absolute(argv[0]).string();
     comparisons(); keys_and_lengths();
     Scratch scratch;
     writer();
     differing_widths();
     indirect_and_dump();
     xml_indirect_and_dump();
+    sgml_getterm_differential(executable);
     numeric_punctuation_after_merge();
     literal_phrase_source_verification();
     literal_phrase_common_anchor();
