@@ -428,14 +428,8 @@ static void xml_indirect_and_dump()
         UCHR recovered[StringCompLength*2+5] = {};
         const int length = xml.GetTerm(record.GetFullFileName(),reinterpret_cast<char *>(recovered),
                                        positions[i],StringCompLength+4);
-        GPTYPE recoveredPositions[StringCompLength+5];
-        const size_t recoveredCount = length > 0 ? xml.DOCTYPE::ParseWords(recovered,length,0,
-            recoveredPositions,StringCompLength+5) : 0;
-        require(recoveredCount > 0 && recoveredPositions[0] == 0 &&
-                std::string(reinterpret_cast<const char *>(recovered)) == term,
-                "XML source recovery agrees with real ingestion at every GP without decoding twice");
-        // The literal verifier may request many terms from the same cached file.
-        // Repeating an entity-aware read must produce identical text and bytes.
+        // Compare the untouched GetTerm buffers before ParseWords tokenizes and
+        // modifies recovered in place. This verifies cached-handle repeatability.
         UCHR again[StringCompLength*2+5] = {};
         const int secondLength = xml.GetTerm(record.GetFullFileName(),
                                              reinterpret_cast<char *>(again),
@@ -443,6 +437,12 @@ static void xml_indirect_and_dump()
         require(secondLength == length && secondLength >= 0 &&
                 std::memcmp(again,recovered,size_t(secondLength)+1) == 0,
                 "repeated XML GetTerm on the same handle preserves normalized source bytes");
+        GPTYPE recoveredPositions[StringCompLength+5];
+        const size_t recoveredCount = length > 0 ? xml.DOCTYPE::ParseWords(recovered,length,0,
+            recoveredPositions,StringCompLength+5) : 0;
+        require(recoveredCount > 0 && recoveredPositions[0] == 0 &&
+                std::string(reinterpret_cast<const char *>(recovered)) == term,
+                "XML source recovery agrees with real ingestion at every GP without decoding twice");
         fixture.rows[term.substr(0,fixture.width)].push_back(base+positions[i]);
         postingTerms.emplace(base+positions[i],term);
         ++fixture.terms[term];
