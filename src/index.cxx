@@ -7673,14 +7673,40 @@ for (size_t i = 0; i < x; )
                     // necessarily the start of the complete source phrase.
                     const size_t anchor = start + (size_t)Offset;
                     if (anchor >= (size_t)readBytes) continue;
+                    // Normalize once per fetched source span, rather than
+                    // normalizing each candidate suffix. Keep Buffer intact
+                    // for original-byte offsets and word-boundary checks.
+                    const size_t sourceBytes = (size_t)(
+                        std::find(Buffer, Buffer + (size_t)readBytes, UCHR(0)) - Buffer);
+                    std::vector<UCHR> folded;
+                    if (!Special) {
+                      folded.assign(Buffer, Buffer + sourceBytes);
+                      folded.push_back(0);
+                      BufferClean(folded.data(), sourceBytes, true);
+                    }
                     size_t matchAt = (size_t)readBytes;
                     size_t matchLength = 0;
                     const auto tryMatch = [&](size_t at) {
-                      if (at > anchor) return false;
+                      if (at > anchor || at >= sourceBytes) return false;
                       size_t consumed = 0;
-                      if (compareIndirect((const UCHR *)SearchTerm.c_str(),
-                                  Buffer+at, FullTerm_length, &consumed) != 0)
-                        return false;
+                      if (Special) {
+                        if (compareIndirect((const UCHR *)SearchTerm.c_str(),
+                                            Buffer+at, FullTerm_length,
+                                            &consumed) != 0)
+                          return false;
+                      } else {
+                        const auto match = source_match::compare_folded(
+                            (const UCHR *)SearchTerm.c_str(), FullTerm_length,
+                            folded.data()+at, sourceBytes-at);
+                        if (match.order) return false;
+                        const size_t endAt = at + match.bytes;
+                        // Use TermCompare's exact-word policy on original bytes.
+                        if (endAt < sourceBytes &&
+                            (((Buffer[endAt] & 0xc0) == 0x80) ||
+                              IsTermChr(Buffer+endAt)))
+                          return false;
+                        consumed = match.bytes ? match.bytes - 1 : 0;
+                      }
                       // Require the matched phrase to cover the selected SIS
                       // word, otherwise this is an unrelated occurrence.
                       if (at + consumed + 1 <= anchor) return false;
