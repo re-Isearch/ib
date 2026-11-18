@@ -207,6 +207,10 @@ enum SGMLTermStage { sgmlOpen, sgmlBoundary, sgmlAllocate, sgmlRead,
 struct SGMLTermTotals {
   size_t calls = 0, boundaryReads = 0, boundaryBytes = 0;
   size_t mainReads = 0, mainBytes = 0, failures = 0;
+  size_t boundaryScans = 0, boundaryExtraReads = 0, boundaryFound = 0;
+  size_t boundaryReadSlow50us = 0, boundaryReadSlow100us = 0, boundaryReadSlow1ms = 0;
+  std::chrono::nanoseconds boundaryReadTime{0}, boundaryScanTime{0};
+  std::chrono::nanoseconds boundaryReadMax{0};
   std::chrono::nanoseconds elapsed[sgmlStages] = {};
   ~SGMLTermTotals() {
     if (!calls) return;
@@ -219,10 +223,18 @@ struct SGMLTermTotals {
       "SGMLTERM_PROFILE calls=%zu failures=%zu boundary_reads=%zu boundary_bytes=%zu "
       "main_reads=%zu main_bytes=%zu total_ms=%.3f open_ms=%.3f "
       "boundary_ms=%.3f allocate_ms=%.3f read_close_ms=%.3f "
-      "normalize_ms=%.3f output_ms=%.3f\n",
+      "normalize_ms=%.3f output_ms=%.3f "
+      "boundary_read_ms=%.3f boundary_scan_ms=%.3f boundary_read_max_us=%.1f "
+      "boundary_scans=%zu boundary_extra_reads=%zu boundary_found=%zu "
+      "boundary_read_ge50us=%zu boundary_read_ge100us=%zu boundary_read_ge1ms=%zu\n",
       calls, failures, boundaryReads, boundaryBytes, mainReads, mainBytes,
       total, ms(sgmlOpen), ms(sgmlBoundary), ms(sgmlAllocate), ms(sgmlRead),
-      ms(sgmlNormalize), ms(sgmlOutput));
+      ms(sgmlNormalize), ms(sgmlOutput),
+      std::chrono::duration<double, std::milli>(boundaryReadTime).count(),
+      std::chrono::duration<double, std::milli>(boundaryScanTime).count(),
+      std::chrono::duration<double, std::micro>(boundaryReadMax).count(),
+      boundaryScans, boundaryExtraReads, boundaryFound,
+      boundaryReadSlow50us, boundaryReadSlow100us, boundaryReadSlow1ms);
   }
 };
 
@@ -246,8 +258,22 @@ struct SGMLTermTimer {
     last = now;
     stage = nextStage;
   }
-  void boundaryRead(size_t bytes) {
-    if (totals) { ++totals->boundaryReads; totals->boundaryBytes += bytes; }
+  void boundaryRead(size_t bytes, std::chrono::nanoseconds readTime,
+                    bool extraBlock) {
+    if (!totals) return;
+    ++totals->boundaryReads;
+    totals->boundaryBytes += bytes;
+    totals->boundaryReadTime += readTime;
+    if (readTime > totals->boundaryReadMax) totals->boundaryReadMax = readTime;
+    if (readTime >= std::chrono::microseconds(50)) ++totals->boundaryReadSlow50us;
+    if (readTime >= std::chrono::microseconds(100)) ++totals->boundaryReadSlow100us;
+    if (readTime >= std::chrono::milliseconds(1)) ++totals->boundaryReadSlow1ms;
+    if (extraBlock) ++totals->boundaryExtraReads;
+  }
+  void boundaryScan(std::chrono::nanoseconds scanTime, bool found) {
+    if (!totals) return;
+    totals->boundaryScanTime += scanTime;
+    if (found) ++totals->boundaryFound;
   }
   void mainRead(int bytes) {
     if (totals) {
@@ -296,16 +322,28 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   off_t begin = Offset;
   char context[65];
   bool boundary = false;
+  size_t boundaryBlocks = 0;
   while (begin > 0 && !boundary)
     {
       const size_t span = size_t(std::min<off_t>(begin, sizeof(context)-1));
       const off_t from = begin - span;
-      profile.boundaryRead(span);
-      if (DOCTYPE::ReadFile(fp, context, from, span) != INT(span))
+      // Isolate positioned-read latency from delimiter scanning. No change
+      // to the boundary algorithm or bytes returned to the caller.
+      const auto readStarted = profile.totals ? SGMLTermTimer::Clock::now()
+          : SGMLTermTimer::Clock::time_point{};
+      const INT got = DOCTYPE::ReadFile(fp, context, from, span);
+      if (profile.totals)
+        profile.boundaryRead(span,
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            SGMLTermTimer::Clock::now() - readStarted), boundaryBlocks > 0);
+      ++boundaryBlocks;
+      if (got != INT(span))
         {
           ffclose(fp);
           return 0;
         }
+      const auto scanStarted = profile.totals ? SGMLTermTimer::Clock::now()
+          : SGMLTermTimer::Clock::time_point{};
       for (size_t i = span; i > 0;)
         {
           const unsigned char ch = context[--i];
@@ -316,8 +354,13 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
               break;
             }
         }
+      if (profile.totals)
+        profile.boundaryScan(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            SGMLTermTimer::Clock::now() - scanStarted), boundary);
       if (!boundary) begin = from;
     }
+  if (profile.totals) ++profile.totals->boundaryScans;
 
   profile.next(sgmlAllocate);
   // An entity contains at most ten name bytes plus '&' and ';'. Include
