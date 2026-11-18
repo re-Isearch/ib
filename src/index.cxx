@@ -7390,12 +7390,15 @@ for (size_t i = 0; i < x; )
                   }
 
                 // Do we have a bunch of *very* common terms?
-                // Positional rewriting cannot preserve byte-exact phrase semantics:
-                // it drops the AlwaysMatches case qualifier and does not verify
-                // literal whitespace/punctuation. Keep '=' phrases on the
-                // source-verification path regardless of anchor frequency.
+                // A literal phrase is not equivalent to a proximity chain:
+                // #< permits four bytes between terms (e.g. "solid it is"
+                // matches "solid" "is" #<), and the rewrite loses the '='
+                // qualifier for AlwaysMatches. Verify literal phrases from
+                // source even when every SIS anchor exceeds PhraseWaterlimit.
+                // Explicit positional queries still use CharProx.
                 if (ip >= PhraseWaterlimit &&
-                    Typ != AlwaysMatches && Typ != LeftAlwaysMatches)
+                    Typ != Exact && Typ != AlwaysMatches &&
+                    Typ != LeftAlwaysMatches)
                   {
                     if (!heuristic)
                       {
