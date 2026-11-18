@@ -40,6 +40,8 @@
 #include <string.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <limits>
 #include "common.hxx"
@@ -217,7 +219,7 @@ struct SGMLTermTotals {
       "SGMLTERM_PROFILE calls=%zu failures=%zu boundary_reads=%zu boundary_bytes=%zu "
       "main_reads=%zu main_bytes=%zu total_ms=%.3f open_ms=%.3f "
       "boundary_ms=%.3f allocate_ms=%.3f read_close_ms=%.3f "
-      "normalize_ms=%.3f output_ms=%.3f\\n",
+      "normalize_ms=%.3f output_ms=%.3f\n",
       calls, failures, boundaryReads, boundaryBytes, mainReads, mainBytes,
       total, ms(sgmlOpen), ms(sgmlBoundary), ms(sgmlAllocate), ms(sgmlRead),
       ms(sgmlNormalize), ms(sgmlOutput));
