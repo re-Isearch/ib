@@ -715,6 +715,20 @@ void HTMLEntities::normalize(char *input, size_t len) const
           return;
         }
 
+      // With no deferred entity contraction, ordinary ASCII is already
+      // normalized. Avoid Unicode term classification and the general
+      // entity/padding machinery for this overwhelmingly common case.
+      // Preserve the original path for '&', NUL, UTF-8 and pending padding.
+      if (!pendingPad && (unsigned char)*src < 0x80 && *src != '&')
+        {
+          if (counts) {
+            ++counts->ordinaryASCIIBytes;
+            ++counts->processedBytes;
+          }
+          *dst++ = *src++;
+          continue;
+        }
+
       char          output[4];
       size_t        srcLen = 1;
       size_t        outLen = 1;
