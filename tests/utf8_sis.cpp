@@ -509,6 +509,20 @@ static void literal_phrase_source_verification()
   check(u8"LA DÉFENSE", {starts[0], starts[1], starts[2]});
   check(u8"La défonse", {starts[3]});
   check(u8"La Défencé", {});
+
+  // '=' must remain original-byte exact, with no UTF-8 source folding.
+  const auto checkCaseSensitive = [&](const char *phrase, GPTYPE expected) {
+    std::unique_ptr<IRSET> hits(
+        fixture.index.TermSearch(phrase, NulString, INDEX::AlwaysMatches));
+    require(hits && hits->GetTotalEntries() == 1,
+            "case-sensitive literal returns only the byte-identical record");
+    bool found = false;
+    for (const auto& hit : hits->GetEntry(1).GetHitTable())
+      found = found || hit.GetFieldStart() == expected;
+    require(found, "case-sensitive literal retains original coordinates");
+  };
+  checkCaseSensitive(u8"La Défense", starts[1]);
+  checkCaseSensitive(u8"LA DÉFENSE", starts[0]);
 }
 
 static void numeric_punctuation_after_merge()
