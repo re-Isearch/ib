@@ -6875,10 +6875,12 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
     size_t sourceBytes = 0;
     size_t probeBytes = 0;
     size_t compares = 0;
+    size_t sourceFolds = 0;
     bool delegated = false;
     std::chrono::nanoseconds sourceTime{0};
     std::chrono::nanoseconds probeTime{0};
     std::chrono::nanoseconds compareTime{0};
+    std::chrono::nanoseconds foldTime{0};
 
     TermSearchProfile(const STRING& q, bool on)
       : query(q), enabled(on),
@@ -6894,11 +6896,12 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
         "field_rejected=%zu source_checks=%zu accepted=%zu "
         "source_reads=%zu source_bytes=%zu source_ms=%.3f "
         "probe_reads=%zu probe_bytes=%zu probe_ms=%.3f "
-        "compares=%zu compare_ms=%.3f elapsed_ms=%.3f delegated=%d",
+        "compares=%zu compare_ms=%.3f folds=%zu fold_ms=%.3f "
+        "elapsed_ms=%.3f delegated=%d", 
         query.c_str(), shards, candidates, visited, fieldRejected,
         sourceChecks, accepted, sourceReads, sourceBytes, millis(sourceTime),
         probeReads, probeBytes, millis(probeTime),
-        compares, millis(compareTime),
+        compares, millis(compareTime), sourceFolds, millis(foldTime),
         std::chrono::duration<double, std::milli>(elapsed).count(),
         int(delegated));
     }
@@ -7682,7 +7685,15 @@ for (size_t i = 0; i < x; )
                     if (!Special) {
                       folded.assign(Buffer, Buffer + sourceBytes);
                       folded.push_back(0);
+                      const auto foldStarted = profile.enabled
+                          ? TermSearchProfile::Clock::now()
+                          : TermSearchProfile::Clock::time_point{};
                       BufferClean(folded.data(), sourceBytes, true);
+                      if (profile.enabled) {
+                        ++profile.sourceFolds;
+                        profile.foldTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            TermSearchProfile::Clock::now() - foldStarted);
+                      }
                     }
                     size_t matchAt = (size_t)readBytes;
                     size_t matchLength = 0;
@@ -7695,9 +7706,17 @@ for (size_t i = 0; i < x; )
                                             &consumed) != 0)
                           return false;
                       } else {
+                        const auto comparedAt = profile.enabled
+                            ? TermSearchProfile::Clock::now()
+                            : TermSearchProfile::Clock::time_point{};
                         const auto match = source_match::compare_folded(
                             (const UCHR *)SearchTerm.c_str(), FullTerm_length,
                             folded.data()+at, sourceBytes-at);
+                        if (profile.enabled) {
+                          ++profile.compares;
+                          profile.compareTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              TermSearchProfile::Clock::now() - comparedAt);
+                        }
                         if (match.order) return false;
                         const size_t endAt = at + match.bytes;
                         // Use TermCompare's exact-word policy on original bytes.
