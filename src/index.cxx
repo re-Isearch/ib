@@ -7390,7 +7390,12 @@ for (size_t i = 0; i < x; )
                   }
 
                 // Do we have a bunch of *very* common terms?
-                if (ip >= PhraseWaterlimit) // Used PhraseWaterlimit instead of CommonWords.. 23 March 2004 edz@nonmonotonic.com
+                // Positional rewriting cannot preserve byte-exact phrase semantics:
+                // it drops the AlwaysMatches case qualifier and does not verify
+                // literal whitespace/punctuation. Keep '=' phrases on the
+                // source-verification path regardless of anchor frequency.
+                if (ip >= PhraseWaterlimit &&
+                    Typ != AlwaysMatches && Typ != LeftAlwaysMatches)
                   {
                     if (!heuristic)
                       {
