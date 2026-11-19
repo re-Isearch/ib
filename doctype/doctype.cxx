@@ -596,7 +596,7 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
 #ifndef _WIN32
       if (useSourcePread() && Buffer) {
         result = sourcePread(fp, Buffer, Length, Offset);
-        Buffer[result] = '\\0';
+        Buffer[result] = '\0';
       } else
 #endif
         result = ReadFile(fp, Buffer, Offset, Length);
