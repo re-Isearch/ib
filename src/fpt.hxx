@@ -23,6 +23,7 @@ public:
   FPT(size_t TableSize);
 
   FILE *ffopen(const STRING& FileName, const CHR* Type);
+  FILE *ffopenPositioned(const STRING& FileName, const CHR* Type);
   FILE *ffreopen(const STRING& Filename, const CHR* mode, FILE *stream);
   INT   ffclose(FILE *FilePointer);
 
