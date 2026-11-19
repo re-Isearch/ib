@@ -152,6 +152,9 @@ void RESULT::Write(FILE *fp) const
 
 bool RESULT::Read(FILE *fp)
 {
+#ifdef VECTOR_INDEX
+  VectorEvidence.clear(); // not serialized with the legacy RESULT format
+#endif
   obj_t obj = getObjID(fp);
   if (obj != objRESULTGP)
     {
