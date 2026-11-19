@@ -9,6 +9,11 @@
    ######################################################################## */
 
 #include <ctype.h>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include "doctype.hxx"
 #include "floatfield.hxx"
 #include "common.hxx"
@@ -505,19 +510,74 @@ INT DOCTYPE::ReadFile(FILE *fp, STRING *StringPtr, off_t Offset, size_t Length) 
   return result;
 }
 
+// Opt-in timing for the underlying positioned source-read path.  The
+// JSONTERM profiler includes the entire DOCTYPE::GetTerm call in raw_ms;
+// these subtotals distinguish cached open, pfread and logical close.
+// No file operations are changed by this instrumentation.
+namespace {
+struct PositionedReadProfile {
+  using Clock = std::chrono::steady_clock;
+  std::atomic<size_t> calls{0}, failures{0};
+  std::atomic<long long> openNs{0}, readNs{0}, closeNs{0};
+  ~PositionedReadProfile() {
+    const size_t count = calls.load(std::memory_order_relaxed);
+    if (!count) return;
+    const auto millis = [](long long ns) { return double(ns) / 1000000.0; };
+    std::fprintf(stderr,
+      "POSITIONED_READ_PROFILE calls=%zu failures=%zu open_ms=%.3f "
+      "read_ms=%.3f close_ms=%.3f total_ms=%.3f\\n",
+      count, failures.load(std::memory_order_relaxed),
+      millis(openNs.load(std::memory_order_relaxed)),
+      millis(readNs.load(std::memory_order_relaxed)),
+      millis(closeNs.load(std::memory_order_relaxed)),
+      millis(openNs.load(std::memory_order_relaxed) +
+             readNs.load(std::memory_order_relaxed) +
+             closeNs.load(std::memory_order_relaxed)));
+  }
+};
+PositionedReadProfile& positionedReadTotals() {
+  static PositionedReadProfile totals;
+  return totals;
+}
+bool profilePositionedReads() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_PROFILE_JSONTERM");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+}
+
 INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length) const
 {
-  STRINGINDEX   result = 0;
+  const bool profiling = profilePositionedReads();
+  using Clock = PositionedReadProfile::Clock;
+  const auto start = profiling ? Clock::now() : Clock::time_point{};
+  STRINGINDEX result = 0;
   // The FILE* overload uses pfread with an explicit offset. Cached handles
   // need not rewind here; keep ordinary ffopen semantics for sequential users.
-  FILE         *fp = ffopenPositioned(Filename, "rb");
+  FILE *fp = ffopenPositioned(Filename, "rb");
+  const auto opened = profiling ? Clock::now() : Clock::time_point{};
   if (fp)
     {
       result = ReadFile(fp, Buffer, Offset, Length);
-      if (fp == NULL)
-	message_log (LOG_PANIC, "Clobered Stream pointer!"); 
+      const auto read = profiling ? Clock::now() : Clock::time_point{};
       ffclose(fp);
+      if (profiling) {
+        PositionedReadProfile& totals = positionedReadTotals();
+        const auto closed = Clock::now();
+        totals.calls.fetch_add(1, std::memory_order_relaxed);
+        totals.openNs.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(opened-start).count(), std::memory_order_relaxed);
+        totals.readNs.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(read-opened).count(), std::memory_order_relaxed);
+        totals.closeNs.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(closed-read).count(), std::memory_order_relaxed);
+      }
     }
+  else if (profiling) {
+    PositionedReadProfile& totals = positionedReadTotals();
+    totals.calls.fetch_add(1, std::memory_order_relaxed);
+    totals.failures.fetch_add(1, std::memory_order_relaxed);
+    totals.openNs.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(opened-start).count(), std::memory_order_relaxed);
+  }
   return (INT)result;
 }
 
