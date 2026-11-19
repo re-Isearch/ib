@@ -620,7 +620,7 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
             std::fprintf(stderr,
                 "SOURCE_READ_MISMATCH offset=%lld requested=%zu "
                 "stdio=%zu pread=%zu first_diff=%zu "
-                "stdio_byte=%d pread_byte=%d\\n",
+                "stdio_byte=%d pread_byte=%d\n",
                 (long long)Offset, Length, stdioCount, directCount, first,
                 first < stdioCount ? (unsigned char)buffered[first] : -1,
                 first < directCount ? (unsigned char)Buffer[first] : -1);
