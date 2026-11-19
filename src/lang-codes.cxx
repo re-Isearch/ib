@@ -110,16 +110,12 @@ int CHARSET::CompareSIS(const UCHR *left, size_t leftLength,
                         const UCHR *right, size_t rightLength) const
 {
   const size_t length = leftLength < rightLength ? leftLength : rightLength;
-  if (isUTF8()) {
-    const int diff = length ? memcmp(left, right, length) : 0;
-    if (diff) return diff;
-  } else {
-    for (size_t i = 0; i < length; ++i) {
-      const int a = cclass[left[i]], b = cclass[right[i]];
-      if (a != b) return a-b;
-      if (!a) break;
-    }
-  }
+  // SIS-to-SIS comparisons operate on already-normalized stored keys.
+  // Both TermSort_SIMD (unsigned radix) and TermSort (strncmp) order those
+  // keys by bytes. Do not fold through cclass here: that table belongs to
+  // query-to-SIS comparison and can reorder mis-encoded 8-bit input.
+  const int diff = length ? memcmp(left, right, length) : 0;
+  if (diff) return diff;
   return (leftLength > rightLength) - (leftLength < rightLength);
 }
 
