@@ -133,6 +133,9 @@ IRESULT& IRESULT::operator=(const IRESULT& OtherIresult)
     } // else TermVector is not defined 
 
   HitTable = OtherIresult.HitTable;
+#ifdef VECTOR_INDEX
+  VectorEvidence = OtherIresult.VectorEvidence;
+#endif
 
   if (TermHitsVector != NULL)
     free(TermHitsVector);
@@ -214,7 +217,10 @@ IRESULT::IRESULT(IRESULT&& Other) noexcept
 #if USE_GEOSCORE
   gScore            = Other.gScore;
 #endif
-  HitTable          = std::move(Other.HitTable);   // assumes FCT has a cheap/move-capable assignment; see note below
+  HitTable          = std::move(Other.HitTable);
+#ifdef VECTOR_INDEX
+  VectorEvidence = std::move(Other.VectorEvidence);
+#endif   // assumes FCT has a cheap/move-capable assignment; see note below
   Mdt               = Other.Mdt;
 
   TermHitsVector    = Other.TermHitsVector;   // steal pointer, no alloc/copy
@@ -239,6 +245,9 @@ IRESULT& IRESULT::operator=(IRESULT&& Other) noexcept
   gScore    = Other.gScore;
 #endif
   HitTable  = std::move(Other.HitTable);
+#ifdef VECTOR_INDEX
+  VectorEvidence = std::move(Other.VectorEvidence);
+#endif
   Mdt       = Other.Mdt;
 
   if (TermHitsVector) free(TermHitsVector);   // drop our own buffer first
