@@ -37,6 +37,43 @@ static GPTYPE endpoint(FILE *fp)
   return getGPTYPE(buffer, 0);
 }
 
+// The default charset is the process environment's charset, not necessarily
+// the encoding of any particular input document.
+#ifndef _WIN32
+static void default_charset_environment()
+{
+  struct SavedEnv {
+    const char *name;
+    bool present;
+    std::string value;
+    explicit SavedEnv(const char *key) : name(key), present(std::getenv(key) != nullptr),
+      value(present ? std::getenv(key) : "") {}
+    ~SavedEnv() {
+      if (present) setenv(name, value.c_str(), 1);
+      else unsetenv(name);
+    }
+  };
+  SavedEnv saveAll("LC_ALL"), saveCtype("LC_CTYPE"), saveLang("LANG");
+
+  require(unsetenv("LC_ALL") == 0, "clear LC_ALL for charset test");
+  require(setenv("LANG", "", 1) == 0, "set empty LANG");
+  require(setenv("LC_CTYPE", "UTF-8", 1) == 0, "set UTF-8 LC_CTYPE");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == UTF8,
+          "empty LANG does not hide macOS UTF-8 LC_CTYPE");
+
+  require(setenv("LANG", "ISO-8859-1", 1) == 0, "set conflicting LANG");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == UTF8,
+          "LC_CTYPE takes precedence over LANG");
+
+  require(setenv("LC_ALL", "ISO-8859-2", 1) == 0, "set LC_ALL override");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == 2,
+          "LC_ALL takes precedence over LC_CTYPE");
+
+  require(Charset2Id("ISO-8859-5") == 5,
+          "explicit input charset overrides environment locale");
+}
+#endif
+
 static void comparisons()
 {
   require(SetGlobalCharset("UTF-8"), "set global UTF-8 directly");
@@ -856,6 +893,9 @@ int main(int argc, char **argv)
       return 0;
     }
     const std::string executable = std::filesystem::absolute(argv[0]).string();
+#ifndef _WIN32
+    default_charset_environment();
+#endif
     comparisons(); keys_and_lengths();
     Scratch scratch;
     writer();
