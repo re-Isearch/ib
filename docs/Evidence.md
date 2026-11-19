@@ -488,3 +488,44 @@ The links below pin the implementation described by this guide:
 - [IDB context wrapper and peer/container lookup](https://github.com/re-Isearch/ib/blob/183abca623e8eb46af47ec0534cfd7af0989c12b/src/idb.cxx)
 - [Indexed ancestor paths](https://github.com/re-Isearch/ib/blob/183abca623e8eb46af47ec0534cfd7af0989c12b/src/dfdt.cxx)
 - [Isearch options and evidence output](https://github.com/re-Isearch/ib/blob/183abca623e8eb46af47ec0534cfd7af0989c12b/src/isearch_main.cxx)
+
+
+## Vector evidence in `-show` (VECTOR_INDEX builds)
+
+Under `#ifdef VECTOR_INDEX`, a vector search records the field extent,
+original vector score, and ordinal among the candidates returned for that
+field/query. The bridge's existing field coordinates are used; no Schmate
+API or HNSW file-format change is required.
+
+The normal `Evidence:` selection remains unchanged (diversity, completeness
+and compactness). In addition, a result with vector provenance prints the
+highest-scoring vector passage in the record:
+
+```text
+Evidence: [PLAY\\ACT\\SCENE\\SPEECH\\LINE] To be, or not to be...
+Vector 2 of 9: [PLAY\\ACT\\SCENE] ...vector field content...
+```
+
+`2 of 9` means the vector candidate ranked second among the nine *returned*
+candidates for that vector query/field (not second among all indexed vectors,
+and not the record's final result-set rank).
+
+If the two display ranges overlap, the first implementation prints
+`Vector 2 of 9: (overlaps Evidence)` instead of repeating overlapping text.
+This is display deduplication, not yet an expanded union excerpt.
+
+A long vector field is truncated at the front using the normal display byte
+advice; `0` means no clipping. The excerpt is not claimed to be the most
+semantically relevant subspan, since the embedding model does not provide
+token-level attribution.
+
+This metadata is retained in memory through ordinary IRSET combination and
+RSET conversion, but is **not serialized** with legacy IRESULT/RESULT files.
+More specialized hit-table transformations (including some PEER/proximity
+paths) need verification to ensure provenance survives intact. Non-vector
+builds receive no new display behavior.
+
+**Verification needed on a vector-enabled macOS build:** a lexical-only query,
+a vector-only query, a lexical/vector OR with disjoint spans, overlapping spans,
+several vector candidates from one record, and a non-vector build. No local
+Schmate/macOS build was available when this implementation was written.
