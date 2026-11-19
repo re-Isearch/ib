@@ -945,6 +945,17 @@ PRSET atomicIRSET::Fill(size_t Start, size_t End, PRSET set) const
 	//Fct.ConvertHits(mdtrec);
 	result.SetHitTable (Fctable -= (mdtrec.GetGlobalFileStart() + 
                 mdtrec.GetLocalRecordStart())); // See index.cxx
+#ifdef VECTOR_INDEX
+        // Vector extents start as global source coordinates, like hit tables.
+        // Keep their original similarity and query-local rank, but make
+        // their extent record-relative for the presentation layer.
+        const GPTYPE recordOffset =
+            mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+        for (auto evidence : Table[x].GetVectorEvidence()) {
+          evidence.Extent -= recordOffset;
+          result.AddVectorEvidence(evidence);
+        }
+#endif
 	// Add the result to the set...
 	set->FastAddEntry(result); // Was AddEntry()
 	TotalHits += Table[x].GetHitCount ();
