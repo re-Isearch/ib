@@ -1030,9 +1030,9 @@ int main(int argc, char **argv)
 #ifndef _WIN32
     default_charset_environment();
 #endif
-    positioned_open_cache();
     comparisons(); keys_and_lengths();
     Scratch scratch;
+    positioned_open_cache();
     writer();
     differing_widths();
     indirect_and_dump();
