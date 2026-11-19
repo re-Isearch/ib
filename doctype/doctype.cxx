@@ -508,7 +508,9 @@ INT DOCTYPE::ReadFile(FILE *fp, STRING *StringPtr, off_t Offset, size_t Length) 
 INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length) const
 {
   STRINGINDEX   result = 0;
-  FILE         *fp = ffopen(Filename, "rb");
+  // The FILE* overload uses pfread with an explicit offset. Cached handles
+  // need not rewind here; keep ordinary ffopen semantics for sequential users.
+  FILE         *fp = ffopenPositioned(Filename, "rb");
   if (fp)
     {
       result = ReadFile(fp, Buffer, Offset, Length);
