@@ -321,7 +321,8 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   if (!Buffer) return 0;
   Buffer[0] = '\0';
   if (Offset < 0 || !Length) return 0;
-  FILE *fp = ffopen(Filename, "rb");
+  // Every recovery read supplies its own offset; avoid the cached-stream rewind.
+  FILE *fp = ffopenPositioned(Filename, "rb");
   if (!fp)
     {
       message_log (LOG_ERROR, "Failed to open \"%s\"", Filename.c_str());
