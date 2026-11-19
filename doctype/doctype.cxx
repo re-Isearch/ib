@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cerrno>
 #include <limits>
+#include <vector>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -554,6 +555,13 @@ bool useSourcePread() {
   }();
   return enabled;
 }
+bool compareSourceReads() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_COMPARE_SOURCE_READS");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
 
 #ifndef _WIN32
 size_t sourcePread(FILE *fp, CHR *buffer, size_t length, off_t offset) {
@@ -594,7 +602,36 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   if (fp)
     {
 #ifndef _WIN32
-      if (useSourcePread() && Buffer) {
+      if (compareSourceReads() && Buffer) {
+        // Compare the exact bytes returned by the two paths from the same
+        // descriptor. Diagnostic only: pfread is allowed to alter stdio state.
+        std::vector<CHR> buffered(Length + 1);
+        const size_t stdioCount = pfread(fp, buffered.data(), Length, Offset);
+        const size_t directCount = sourcePread(fp, Buffer, Length, Offset);
+        const size_t common = std::min(stdioCount, directCount);
+        const bool equal = stdioCount == directCount &&
+                           std::memcmp(buffered.data(), Buffer, common) == 0;
+        if (!equal) {
+          static std::atomic<unsigned> mismatches{0};
+          const unsigned count = mismatches.fetch_add(1, std::memory_order_relaxed);
+          if (count < 12) {
+            size_t first = 0;
+            while (first < common && buffered[first] == Buffer[first]) ++first;
+            std::fprintf(stderr,
+                "SOURCE_READ_MISMATCH offset=%lld requested=%zu "
+                "stdio=%zu pread=%zu first_diff=%zu "
+                "stdio_byte=%d pread_byte=%d\\n",
+                (long long)Offset, Length, stdioCount, directCount, first,
+                first < stdioCount ? (unsigned char)buffered[first] : -1,
+                first < directCount ? (unsigned char)Buffer[first] : -1);
+          }
+        }
+        if (!useSourcePread()) {
+          std::memcpy(Buffer, buffered.data(), stdioCount);
+          result = stdioCount;
+        } else result = directCount;
+        Buffer[result] = '\0';
+      } else if (useSourcePread() && Buffer) {
         result = sourcePread(fp, Buffer, Length, Offset);
         Buffer[result] = '\0';
       } else
