@@ -60,6 +60,7 @@ public:
   }
   ~FPT();
 private:
+  FILE *ffopenPositioned(const STRING& FileName, const CHR* Type, bool rewindRead);
   void   Init(size_t TableSize);
   size_t Lookup(const STRING& FileName) const;
   size_t Lookup(const FILE *FilePointer) const;
