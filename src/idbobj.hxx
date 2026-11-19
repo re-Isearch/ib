@@ -202,6 +202,8 @@ public:
 
   virtual void ffGC() {; }
   virtual PFILE ffopen(const STRING& Name, const CHR* Mode) { return fopen(Name, Mode); }
+  // The caller will seek before reading; default implementations still open afresh.
+  virtual PFILE ffopenPositioned(const STRING& Name, const CHR* Mode) { return ffopen(Name, Mode); }
   virtual INT ffclose(PFILE Fp){ return fclose(Fp); }
   virtual INT ffdispose(PFILE) { return 0; }
   virtual INT ffdispose(const STRING&) { return 0; }
