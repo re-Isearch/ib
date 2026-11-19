@@ -32,8 +32,8 @@ public:
   ~CSVDOC();
 
 protected:
-   void        setQuoteChar(char newVal) { if(newVal) quoteChar = newVal; };
-   char       *c_tokenize(char *s, char **last);
+   void        setQuoteChar(char newVal) { if(newVal) default_quoteChar = newVal; };
+   char       *c_tokenize(char *s, char **last, const char quoteChar);
 
 private:
    INT         UseFirstRecord;
@@ -44,7 +44,7 @@ private:
    MMAP        FileMap;
    BUFFER      Buffer;
 // char        IFS[8];
-   char        quoteChar;
+   char        default_quoteChar;
 };
 
 

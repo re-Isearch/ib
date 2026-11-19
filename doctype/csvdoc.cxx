@@ -49,12 +49,11 @@ CSVDOC::CSVDOC (PIDBOBJ DbParent, const STRING& Name):
   // Quote Character can only be " or '
   Value = Getoption ("QuoteChar", "\"");
   if (Value == "'")
-    quoteChar = '\'';
+    default_quoteChar = '\'';
   else
-    quoteChar = '"'; 
+    default_quoteChar = '"'; 
   Lineno = 0;
   Columns = 0;
-  quoteChar = '"';
   SetSepChar(',');
 }
 
@@ -322,8 +321,11 @@ cerr << "COMMA1 = " << commas1 << " and 2 " << commas2 << endl;
         }
     }
 #endif
+  char        quoteChar;
   // Is first character a ' ?
   if (*ptr == '\'') quoteChar = '\''; // if starts with 'xxx then use '
+  else if (*ptr == '\"') quoteChar = '\"';
+  else quoteChar = default_quoteChar;
 
   bool inQuote = false;
   while (Position < RecEnd)
@@ -368,7 +370,7 @@ cerr << "COMMA1 = " << commas1 << " and 2 " << commas2 << endl;
 
 // We pass a storage for the last value to be re-entrant rather
 // than like strtrok which use a static storage
-char * CSVDOC::c_tokenize(char *s, char **last)
+char * CSVDOC::c_tokenize(char *s, char **last, const char quoteChar)
 {
 	char *tok;
 
@@ -450,6 +452,7 @@ void CSVDOC::ParseFields (PRECORD NewRecord)
   memcpy(RecBuffer, FileMap.Ptr()+RecStart, RecLength);
   RecBuffer[RecLength] = '\0';
 
+   char        quoteChar = default_quoteChar;
   if (RecStart == 0)
     {
       Lineno = 1;
@@ -463,6 +466,7 @@ void CSVDOC::ParseFields (PRECORD NewRecord)
 	  char *fieldname = RecBuffer;
 	  // ; or . or \t ??
 	  if (*tcp == '\'') quoteChar = '\''; // if starts with 'xxx then use '
+	  else if (*tcp == '\"') quoteChar = '\"';
 	  while (*tcp && *tcp != '\r' && *tcp != '\n') {
 	    if (*tcp == quoteChar) {
 	      if (*(tcp + 1) == quoteChar) // "" is to include " inside "
@@ -539,7 +543,7 @@ void CSVDOC::ParseFields (PRECORD NewRecord)
     Lineno++;
 
   char  *last = NULL;
-  const char *tcp = c_tokenize(RecBuffer, &last);
+  const char *tcp = c_tokenize(RecBuffer, &last, quoteChar);
   DF df;
   PDFT pdft;
   pdft = new DFT ();
@@ -601,7 +605,7 @@ void CSVDOC::ParseFields (PRECORD NewRecord)
 
     // Handle the special fields (Key etc.)
     HandleSpecialFields(NewRecord, fieldName, tcp);
-  } while ((tcp = c_tokenize(NULL, &last)) != NULL); 
+  } while ((tcp = c_tokenize(NULL, &last, quoteChar)) != NULL); 
   NewRecord->SetDft (*pdft);
 
   delete pdft;
