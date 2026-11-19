@@ -601,42 +601,8 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   const auto opened = profiling ? Clock::now() : Clock::time_point{};
   if (fp)
     {
-#ifndef _WIN32
-      if (compareSourceReads() && Buffer) {
-        // Compare the exact bytes returned by the two paths from the same
-        // descriptor. Diagnostic only: pfread is allowed to alter stdio state.
-        std::vector<CHR> buffered(Length + 1);
-        const size_t stdioCount = pfread(fp, buffered.data(), Length, Offset);
-        const size_t directCount = sourcePread(fp, Buffer, Length, Offset);
-        const size_t common = std::min(stdioCount, directCount);
-        const bool equal = stdioCount == directCount &&
-                           std::memcmp(buffered.data(), Buffer, common) == 0;
-        if (!equal) {
-          static std::atomic<unsigned> mismatches{0};
-          const unsigned count = mismatches.fetch_add(1, std::memory_order_relaxed);
-          if (count < 12) {
-            size_t first = 0;
-            while (first < common && buffered[first] == Buffer[first]) ++first;
-            std::fprintf(stderr,
-                "SOURCE_READ_MISMATCH offset=%lld requested=%zu "
-                "stdio=%zu pread=%zu first_diff=%zu "
-                "stdio_byte=%d pread_byte=%d\n",
-                (long long)Offset, Length, stdioCount, directCount, first,
-                first < stdioCount ? (unsigned char)buffered[first] : -1,
-                first < directCount ? (unsigned char)Buffer[first] : -1);
-          }
-        }
-        if (!useSourcePread()) {
-          std::memcpy(Buffer, buffered.data(), stdioCount);
-          result = stdioCount;
-        } else result = directCount;
-        Buffer[result] = '\0';
-      } else if (useSourcePread() && Buffer) {
-        result = sourcePread(fp, Buffer, Length, Offset);
-        Buffer[result] = '\0';
-      } else
-#endif
-        result = ReadFile(fp, Buffer, Offset, Length);
+      // Preserve virtual dispatch to JSONDOC::ReadFile and other document handlers.
+      result = ReadFile(fp, Buffer, Offset, Length);
       const auto read = profiling ? Clock::now() : Clock::time_point{};
       ffclose(fp);
       if (profiling) {
@@ -660,12 +626,50 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
 
 INT DOCTYPE::ReadFile(FILE *fp, CHR *Buffer, off_t Offset, size_t Length) const
 {
-  size_t   result = 0;
-
-//cerr << "DOCTYPE:: ReadFile " << (long)fp << " called" << endl;
-
+  size_t result = 0;
   if (fp != NULL)
-    result = pfread(fp, Buffer, Length, Offset);
+    {
+#ifndef _WIN32
+      if (compareSourceReads() && Buffer)
+        {
+          // Compare *raw* source reads before the caller's virtual override
+          // applies document-specific normalization. Both paths return through
+          // that same override, preserving the existing semantics.
+          std::vector<CHR> buffered(Length + 1);
+          const size_t stdioCount = pfread(fp, buffered.data(), Length, Offset);
+          const size_t directCount = sourcePread(fp, Buffer, Length, Offset);
+          const size_t common = std::min(stdioCount, directCount);
+          if (stdioCount != directCount ||
+              std::memcmp(buffered.data(), Buffer, common) != 0)
+            {
+              static std::atomic<unsigned> mismatches{0};
+              if (mismatches.fetch_add(1, std::memory_order_relaxed) < 12)
+                {
+                  size_t first = 0;
+                  while (first < common && buffered[first] == Buffer[first]) ++first;
+                  std::fprintf(stderr,
+                      "SOURCE_READ_MISMATCH offset=%lld requested=%zu "
+                      "stdio=%zu pread=%zu first_diff=%zu "
+                      "stdio_byte=%d pread_byte=%d\n",
+                      (long long)Offset, Length, stdioCount, directCount, first,
+                      first < stdioCount ? (unsigned char)buffered[first] : -1,
+                      first < directCount ? (unsigned char)Buffer[first] : -1);
+                }
+            }
+          if (useSourcePread())
+            result = directCount;
+          else
+            {
+              std::memcpy(Buffer, buffered.data(), stdioCount);
+              result = stdioCount;
+            }
+        }
+      else if (useSourcePread() && Buffer)
+        result = sourcePread(fp, Buffer, Length, Offset);
+      else
+#endif
+        result = pfread(fp, Buffer, Length, Offset);
+    }
   Buffer[result] = '\0'; // ASCIIZ
   return (INT)result;
 }
