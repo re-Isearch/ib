@@ -92,6 +92,9 @@ RESULT& RESULT::operator=(const RESULT& OtherResult)
   AuxCount     = OtherResult.AuxCount;
   Category     = OtherResult.Category;
   HitTable     = OtherResult.HitTable;
+#ifdef VECTOR_INDEX
+  VectorEvidence = OtherResult.VectorEvidence;
+#endif
 // HitTable->SortByFc();
   return *this;
 }
