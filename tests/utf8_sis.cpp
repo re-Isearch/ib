@@ -5,6 +5,7 @@
 #include "lang-codes.hxx"
 #include "magic.hxx"
 #include "xml.hxx"
+#include "jsondoc.hxx"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -1041,6 +1042,21 @@ static void positioned_read_child(const std::string& mode)
       }
     }
   }
+  // Also exercise JSONDOC's virtual ReadFile override. This must produce
+  // exactly the same normalized GetTerm bytes with either I/O implementation.
+  JSONDOC json(nullptr, "JSON");
+  const std::string jsonFilename = "positioned-read-json.txt";
+  const size_t jsonSize = std::filesystem::file_size(jsonFilename);
+  for (size_t offset = 0; offset <= jsonSize; offset += 3) {
+    for (size_t wanted : {size_t(3), size_t(11), size_t(37), size_t(81)}) {
+      char buffer[82] = {};
+      const int got = json.GetTerm(STRING(jsonFilename.c_str()), buffer,
+                                   off_t(offset), wanted);
+      require(got >= 0 && size_t(got) <= wanted, "bounded JSON GetTerm retrieval");
+      output.write(reinterpret_cast<const char*>(&got), sizeof(got));
+      output.write(buffer, std::streamsize(got+1));
+    }
+  }
   output.close();
   require(bool(output), "write positioned read transcript");
 }
@@ -1051,6 +1067,11 @@ static void positioned_read_differential(const std::string& executable)
     std::ofstream source("positioned-read-source.bin",std::ios::binary);
     for (int i=0; i<1027; ++i) source.put(char((i*137+41)&255));
     require(bool(source), "write binary positioned read fixture");
+  }
+  {
+    std::ofstream source("positioned-read-json.txt",std::ios::binary);
+    source << R"({"name":"caf\\u00e9","mixed":"\\u00e9-\\u03bb-\\uD801\\uDC28","escaped":"a\\nb\\t\\u00fc"})";
+    require(bool(source), "write JSON escape differential fixture");
   }
   for (const std::string& mode : {"stdio", "pread"}) {
     const std::string command = "\"" + executable + "\" --positioned-read-child " + mode;
