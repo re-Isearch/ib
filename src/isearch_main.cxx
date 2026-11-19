@@ -2153,6 +2153,65 @@ again:
               if (ShowXML)
                 cout << "</HIT>";
               cout << endl;
+#ifdef VECTOR_INDEX
+              // A vector hit identifies an embedded field, not a lexical
+              // token or a weighted evidence window. Present its best match
+              // independently, with its rank among the returned candidates.
+              // XML/JSON output is deliberately unchanged here.
+              if (!ShowXML && !ShowJson) {
+                const VECTOR_EVIDENCE* vector = result.GetBestVectorEvidence();
+                if (vector && !vector->Extent.IsEmpty()) {
+                  const DISPLAY_EVIDENCE lexical =
+                      result.GetDisplayEvidence(maxAdvice, nullptr);
+                  const FC& a = lexical.DisplayExtent;
+                  const FC& b = vector->Extent;
+                  const bool overlap =
+                      !a.IsEmpty() &&
+                      a.GetFieldStart() <= b.GetFieldEnd() &&
+                      b.GetFieldStart() <= a.GetFieldEnd();
+
+                  cout << "Vector " << vector->Rank
+                       << " of " << vector->Returned << ": ";
+                  if (overlap) {
+                    // Do not repeat overlapping evidence. Preserve the
+                    // vector provenance even when only one passage is shown.
+                    cout << "(overlaps Evidence)" << endl;
+                  } else {
+                    STRING vectorPath;
+                    MDTREC mdtrec;
+                    if (pdb->GetMainMdt()->GetEntry(result.GetMdtIndex(), &mdtrec)) {
+                      const GPTYPE offset =
+                          mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+                      FC global(b);
+                      global += offset;
+                      pdb->GetPeerFc(global, &vectorPath);
+                    }
+
+                    FC excerpt(b);
+                    bool truncated = false;
+                    if (maxAdvice != 0 &&
+                        excerpt.GetLength() > maxAdvice) {
+                      excerpt.SetFieldEnd(
+                          excerpt.GetFieldStart() +
+                          static_cast<GPTYPE>(maxAdvice - 1));
+                      truncated = true;
+                    }
+
+                    STRING vectorText;
+                    result.PresentDisplay(
+                        excerpt, &vectorText,
+                        RESULT::GetDisplayMarkers(DisplayMarkerNone));
+                    cout << "[\\033[3m" << vectorPath << "\\033[23m] ";
+                    if (vectorText.IsEmpty())
+                      cout << "** Unavailable **";
+                    else
+                      cout << vectorText;
+                    if (truncated) cout << "...";
+                    cout << endl;
+                  }
+                }
+              }
+#endif // VECTOR_INDEX
             }
 	  if (ShowJson)
 	    {
