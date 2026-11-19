@@ -1,5 +1,6 @@
 #include "common.hxx"
 #include "index.hxx"
+#include "fpt.hxx"
 #include "idbobj.hxx"
 #include "lang-codes.hxx"
 #include "magic.hxx"
@@ -73,6 +74,32 @@ static void default_charset_environment()
           "explicit input charset overrides environment locale");
 }
 #endif
+
+// Cached positioned reads must not rewind; ordinary opens retain the
+// historical rewind-on-reuse contract for sequential consumers.
+static void positioned_open_cache()
+{
+  {
+    std::ofstream out("positioned-open.txt", std::ios::binary);
+    out << "0123456789";
+  }
+  FPT cache(10);
+  const STRING filename("positioned-open.txt");
+  FILE *fp = cache.ffopen(filename, "rb");
+  require(fp != nullptr, "open sequential cache fixture");
+  require(fseek(fp, 6, SEEK_SET) == 0, "position sequential fixture");
+  require(cache.ffclose(fp) == 0, "release sequential fixture");
+  FILE *positioned = cache.ffopenPositioned(filename, "rb");
+  require(positioned == fp && ftell(positioned) == 6,
+          "positioned cached reopen preserves the existing file offset");
+  require(fgetc(positioned) == '6', "positioned read begins at retained offset");
+  require(cache.ffclose(positioned) == 0, "release positioned fixture");
+  FILE *sequential = cache.ffopen(filename, "rb");
+  require(sequential == fp && ftell(sequential) == 0,
+          "ordinary cached reopen still resets sequential reads to zero");
+  require(fgetc(sequential) == '0', "sequential read begins at start");
+  require(cache.ffclose(sequential) == 0, "release final fixture");
+}
 
 static void comparisons()
 {
@@ -1003,6 +1030,7 @@ int main(int argc, char **argv)
 #ifndef _WIN32
     default_charset_environment();
 #endif
+    positioned_open_cache();
     comparisons(); keys_and_lengths();
     Scratch scratch;
     writer();
