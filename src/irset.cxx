@@ -2424,7 +2424,7 @@ OPOBJ *atomicIRSET::And (const OPOBJ& OtherIrset, size_t Limit)
 	  if (current != pos1) Table[current] = *IresultPtr;
 	  Table[current].IncAuxCount( OtherIresultPtr->GetAuxCount () );
 	  const UINT hits = Table[current].IncHitCount (OtherIresultPtr->GetHitCount ());
-	  Table[current].AddToHitTable (OtherIresultPtr->HitTable);
+	  Table[current].AddToHitTable (*OtherIresultPtr);
           Table[current].SetVectorTermHits ( hits );
 	  const DOUBLE score = Table[current++].IncScore (OtherIresultPtr->GetScore ());
 	  if (score < newMinScore) newMinScore = score;
@@ -2529,7 +2529,7 @@ OPOBJ *atomicIRSET::And (const OPOBJ& OtherIrset, size_t Limit)
 	  NewTable[current] = *IresultPtr;
 	  NewTable[current].IncAuxCount( OtherIresultPtr->GetAuxCount () );
 	  const UINT hits = NewTable[current].IncHitCount (OtherIresultPtr->GetHitCount ());
-	  NewTable[current].AddToHitTable (OtherIresultPtr->HitTable);
+	  NewTable[current].AddToHitTable (*OtherIresultPtr);
 	  NewTable[current].SetVectorTermHits ( hits );
 	  const DOUBLE score = NewTable[current++].IncScore (OtherIresultPtr->GetScore ());
 	  if (score < newMinScore) newMinScore = score;
