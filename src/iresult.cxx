@@ -353,6 +353,9 @@ bool IRESULT::Read(FILE *fp)
 #if USE_GEOSCORE
   ::Read(&gScore, fp);
 #endif
+#ifdef VECTOR_INDEX
+  VectorEvidence.clear(); // provenance is query-local, not in the legacy serialized form
+#endif
   Mdt = NULL;
   SortIndex = 0;
   return true; // TODO: Sanity check!
