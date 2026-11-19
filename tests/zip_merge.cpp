@@ -167,9 +167,21 @@ static void largeAndLatin1()
   a.insert(a.end(),b.begin(),b.end()); verify(output,{{"common",a}});
   const auto latinLeft=paths("latin-left"), latinRight=paths("latin-right"), latinOut=paths("latin-out");
   runFile(latinLeft,{{"a",{1}},{"b",{2}}},width,1);
-  runFile(latinRight,{{"A",{3}},{"z",{4}}},width,1);
-  require(merge.Zip({latinLeft,latinRight},latinOut,testMagic,1000,100), "merge single-byte charset");
+  runFile(latinRight,{{"a",{3}},{"z",{4}}},width,1);
+  require(merge.Zip({latinLeft,latinRight},latinOut,testMagic,1000,100), "merge normalized single-byte charset");
   verify(latinOut,{{"a",{1,3}},{"b",{2}},{"z",{4}}},width,1);
+
+  // Byte order must agree with the radix sorter even when UTF-8 was
+  // mistakenly supplied to an ISO-8859-1 index. cclass maps 0xc3 to
+  // 0xe3, which incorrectly reverses its order against 0xe0.
+  const auto oddLeft=paths("latin-misencoded-left"), oddRight=paths("latin-misencoded-right");
+  const auto oddOut=paths("latin-misencoded-out");
+  const std::string utf8Bytes("\\xc3\\xa9", 2), latinBytes("\\xe0\\xb1", 2);
+  runFile(oddLeft,{{utf8Bytes,{10}},{latinBytes,{11}}},width,1);
+  runFile(oddRight,{{utf8Bytes,{12}},{latinBytes,{13}}},width,1);
+  require(merge.Zip({oddLeft,oddRight},oddOut,testMagic,1000,100),
+          "Latin-1 SIS merge accepts byte-sorted misencoded UTF-8");
+  verify(oddOut,{{utf8Bytes,{10,12}},{latinBytes,{11,13}}},width,1);
   const auto prefix=paths("long-length"), prefixOut=paths("long-length-out");
   runFile(prefix,{{"abc",{7}}},3);
   patchByte(prefix.sis,2,200);
