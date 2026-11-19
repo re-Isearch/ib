@@ -4462,6 +4462,21 @@ PIRSET INDEX::Search (const QUERY& Query)
 		if (indexer->Ok()) { // HNSW index
 		   Method = HybridNormalization ; // Need to mix/match with Vectors!!  April 2026
                    NewIrset = indexer->search(FieldName, Term); // This is where we do the Vector Search
+                   // The bridge returns the whole indexed field extent, even
+                   // when the embedding input was chunked. Capture query-local
+                   // rank/score before hybrid normalization or set algebra
+                   // combines this vector result with lexical results.
+                   if (NewIrset) {
+                     const size_t returned = NewIrset->GetTotalEntries();
+                     for (size_t n = 0; n < returned; ++n) {
+                       IRESULT& hit = (*NewIrset)[n];
+                       const auto extents = hit.GetHitTable();
+                       for (const auto& extent : extents)
+                         hit.AddVectorEvidence(VECTOR_EVIDENCE(
+                             FC(extent.GetFieldStart(), extent.GetFieldEnd()),
+                             hit.GetScore(), n + 1, returned));
+                     }
+                   }
 		} else
 		   Parent->SetErrorCode( 3 ); // Temporarily not available
 #else
