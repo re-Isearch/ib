@@ -725,6 +725,58 @@ static void shared_ingestion_check()
 // Exercise the real tokenizer, bytewise sorter, SIS writer and multi-shard
 // zipper when UTF-8 bytes arrive under the wrong (Latin-1) charset. The
 // interpretation may be mojibake, but the index must remain structurally valid.
+// Read the on-disk SIS and every corresponding posting independently of
+// the zipper. Compare the result against the original shards, not against
+// expectations manufactured by the merge implementation.
+static Rows read_misencoded_sis(INDEX& index, const STRING& sisName,
+                                const STRING& indexName)
+{
+  FILE *sis = fopen(sisName, "rb");
+  FILE *inx = fopen(indexName, "rb");
+  require(sis && inx, "open misencoded SIS and INDEX pair");
+  require(getc(sis) == 20 && getc(sis) == Charset2Id("ISO-8859-1"),
+          "misencoded SIS retains Latin-1 charset and prefix width");
+  const int magic = getINT2(inx);
+  require(magic != EOF, "read misencoded INDEX magic");
+  Rows rows;
+  GPTYPE postingsRead = 0;
+  std::string previous;
+  bool havePrevious = false;
+  for (;;) {
+    const int length = getc(sis);
+    if (length == EOF) {
+      require(feof(sis) && !ferror(sis), "clean end of misencoded SIS");
+      break;
+    }
+    UCHR keyBytes[20];
+    require(fread(keyBytes, 1, sizeof(keyBytes), sis) == sizeof(keyBytes),
+            "read complete misencoded SIS prefix");
+    const size_t keyLength = std::min(size_t(length), sizeof(keyBytes));
+    const std::string key(reinterpret_cast<const char *>(keyBytes), keyLength);
+    if (havePrevious) {
+      require(std::lexicographical_compare(previous.begin(), previous.end(),
+                                          key.begin(), key.end(),
+                                          [](char a, char b) {
+                                            return UCHR(a) < UCHR(b);
+                                          }), "misencoded SIS keys are strictly byte-sorted");
+    }
+    previous = key; havePrevious = true;
+    const GPTYPE last = endpoint(sis);
+    require(last >= postingsRead, "misencoded SIS endpoints are monotonic");
+    auto& postings = rows[key];
+    while (postingsRead <= last) {
+      const GPTYPE gp = index.GpFread(inx);
+      require(!feof(inx) && !ferror(inx), "read every misencoded posting");
+      postings.push_back(gp);
+      ++postingsRead;
+    }
+  }
+  require(getc(inx) == EOF && feof(inx) && !ferror(inx),
+          "SIS endpoints account for every INDEX posting");
+  require(fclose(sis) == 0 && fclose(inx) == 0, "close misencoded SIS and INDEX pair");
+  return rows;
+}
+
 static void latin1_misencoded_ingestion_check()
 {
   TextIngestDatabase db("latin1-misencoded");
@@ -753,14 +805,23 @@ static void latin1_misencoded_ingestion_check()
   rewind(queue);
   require(index.AddRecordList(queue), "index misencoded source through production ingestion");
   fclose(queue);
-  require(db.mdt.GetIndexNum() > 1, "misencoded ingestion creates multiple real shards");
+  const INT shardCount = db.mdt.GetIndexNum();
+  require(shardCount > 1, "misencoded ingestion creates multiple real shards");
+  Rows expected;
+  for (INT i = 1; i <= shardCount; ++i) {
+    const STRING suffix = STRING().form(".%d",i);
+    const Rows part = read_misencoded_sis(index,db.ComposeDbFn(DbExtDict)+suffix,
+                                           db.stem+".inx"+suffix);
+    for (const auto& row : part) {
+      auto& postings = expected[row.first];
+      postings.insert(postings.end(),row.second.begin(),row.second.end());
+    }
+  }
+  require(!expected.empty(), "misencoded source produces actual SIS terms");
   require(index.MergeIndexFiles(), "merge real byte-sorted Latin-1 shards containing UTF-8 bytes");
   require(db.mdt.GetIndexNum() == 0, "misencoded shards published as a merged index");
-  FILE *sis = fopen(db.ComposeDbFn(DbExtDict), "rb");
-  require(sis != nullptr, "open merged misencoded SIS");
-  require(getc(sis) == 20 && getc(sis) == Charset2Id("ISO-8859-1"),
-          "merged misencoded SIS retains its original charset and width");
-  fclose(sis);
+  const Rows actual = read_misencoded_sis(index,db.ComposeDbFn(DbExtDict),db.stem+".inx");
+  require(actual == expected, "merged misencoded SIS retains every key and posting from its shards");
   // Restore the default used by the rest of the UTF-8 regression suite.
   require(SetGlobalCharset("UTF-8"), "restore UTF-8 after misencoded ingestion");
 }
