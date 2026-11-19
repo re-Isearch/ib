@@ -722,6 +722,49 @@ static void shared_ingestion_check()
           "stored numeric keys validate before and after merge despite longer recovered source text");
 }
 
+// Exercise the real tokenizer, bytewise sorter, SIS writer and multi-shard
+// zipper when UTF-8 bytes arrive under the wrong (Latin-1) charset. The
+// interpretation may be mojibake, but the index must remain structurally valid.
+static void latin1_misencoded_ingestion_check()
+{
+  TextIngestDatabase db("latin1-misencoded");
+  INDEX index(&db,db.stem+".inx");
+  index.SetMergeStatus(iNothing);
+  index.SetSisLimit(20);
+  require(SetGlobalCharset("ISO-8859-1"), "select intentionally incorrect Latin-1 charset");
+  FILE *queue = fopen("latin1-misencoded.queue","w+b");
+  require(queue != nullptr, "create misencoded ingestion queue");
+  for (size_t i = 0; i < 4; ++i) {
+    const STRING filename = db.stem+STRING().form("-%u.txt",unsigned(i));
+    std::string source = u8"alpha café école über ñandú 日本語 Ελληνικά zulu ";
+    source += u8"À È É Ð Ñ Ö Ø Þ à è é ð ñ ö ø þ ";
+    for (size_t j = 0; j < 100; ++j) source += u8"café élan zulu ";
+    source.resize(8192,' ');
+    std::ofstream file(filename.c_str(),std::ios::binary);
+    file.write(source.data(),std::streamsize(source.size()));
+    file.close();
+    require(bool(file),"write UTF-8 bytes for Latin-1 ingestion");
+    RECORD record(filename);
+    record.SetDocumentType("TEXT");
+    record.SetRecordEnd(source.size()-1);
+    record.SetKey(STRING().form("misencoded-%u",unsigned(i)));
+    putc('#',queue); record.Write(queue);
+  }
+  rewind(queue);
+  require(index.AddRecordList(queue), "index misencoded source through production ingestion");
+  fclose(queue);
+  require(db.mdt.GetIndexNum() > 1, "misencoded ingestion creates multiple real shards");
+  require(index.MergeIndexFiles(), "merge real byte-sorted Latin-1 shards containing UTF-8 bytes");
+  require(db.mdt.GetIndexNum() == 0, "misencoded shards published as a merged index");
+  FILE *sis = fopen(db.ComposeDbFn(DbExtDict), "rb");
+  require(sis != nullptr, "open merged misencoded SIS");
+  require(getc(sis) == 20 && getc(sis) == Charset2Id("ISO-8859-1"),
+          "merged misencoded SIS retains its original charset and width");
+  fclose(sis);
+  // Restore the default used by the rest of the UTF-8 regression suite.
+  require(SetGlobalCharset("UTF-8"), "restore UTF-8 after misencoded ingestion");
+}
+
 static void selected_region_check()
 {
   TextIngestDatabase db("selected-region");
@@ -910,6 +953,7 @@ int main(int argc, char **argv)
     literal_phrase_source_verification();
     literal_phrase_common_anchor();
     shared_ingestion_check();
+    latin1_misencoded_ingestion_check();
     selected_region_check();
     dictionary_integrity_checks();
     collapse(32, "whole");
