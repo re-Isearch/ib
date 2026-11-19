@@ -1019,9 +1019,65 @@ static void sgml_getterm_differential(const std::string& executable)
           "combined SGML GetTerm matches legacy byte-for-byte across offsets and EOF");
 }
 
+#ifndef _WIN32
+static void positioned_read_child(const std::string& mode)
+{
+  require(setenv("IB_SOURCE_PREAD", mode == "pread" ? "1" : "0", 1) == 0,
+          "set diagnostic source read mode");
+  DOCTYPE reader(nullptr, "TEXT");
+  std::ofstream output("positioned-read-"+mode+".bin", std::ios::binary);
+  require(bool(output), "create positioned read transcript");
+  const std::string filename = "positioned-read-source.bin";
+  const size_t sourceSize = std::filesystem::file_size(filename);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t offset = 0; offset <= sourceSize+3; offset += 17) {
+      for (size_t wanted : {size_t(1), size_t(7), size_t(81), size_t(257)}) {
+        char buffer[258] = {};
+        const int got = reader.GetTerm(STRING(filename.c_str()), buffer,
+                                       off_t(offset), wanted);
+        require(got >= 0 && size_t(got) <= wanted, "bounded positioned source read");
+        output.write(reinterpret_cast<const char*>(&got), sizeof(got));
+        output.write(buffer, std::streamsize(got+1));
+      }
+    }
+  }
+  output.close();
+  require(bool(output), "write positioned read transcript");
+}
+
+static void positioned_read_differential(const std::string& executable)
+{
+  {
+    std::ofstream source("positioned-read-source.bin",std::ios::binary);
+    for (int i=0; i<1027; ++i) source.put(char((i*137+41)&255));
+    require(bool(source), "write binary positioned read fixture");
+  }
+  for (const std::string& mode : {"stdio", "pread"}) {
+    const std::string command = "\"" + executable + "\" --positioned-read-child " + mode;
+    require(std::system(command.c_str()) == 0, "positioned source read child completes");
+  }
+  const auto load = [](const char *filename) {
+    std::ifstream input(filename,std::ios::binary);
+    require(bool(input),"read positioned source transcript");
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string stdio = load("positioned-read-stdio.bin");
+  const std::string direct = load("positioned-read-pread.bin");
+  require(!stdio.empty() && stdio == direct,
+          "pread and pfread recover identical bytes and terminators across offsets and EOF");
+}
+#endif
+
 int main(int argc, char **argv)
 {
   try {
+#ifndef _WIN32
+    if (argc == 3 && std::string(argv[1]) == "--positioned-read-child") {
+      positioned_read_child(argv[2]);
+      return 0;
+    }
+#endif
     if (argc == 3 && std::string(argv[1]) == "--sgml-diff-child") {
       sgml_getterm_differential_child(argv[2]);
       return 0;
@@ -1033,6 +1089,9 @@ int main(int argc, char **argv)
     comparisons(); keys_and_lengths();
     Scratch scratch;
     positioned_open_cache();
+#ifndef _WIN32
+    positioned_read_differential(executable);
+#endif
     writer();
     differing_widths();
     indirect_and_dump();
