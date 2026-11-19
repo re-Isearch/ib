@@ -58,11 +58,11 @@ static void default_charset_environment()
   require(unsetenv("LC_ALL") == 0, "clear LC_ALL for charset test");
   require(setenv("LANG", "", 1) == 0, "set empty LANG");
   require(setenv("LC_CTYPE", "UTF-8", 1) == 0, "set UTF-8 LC_CTYPE");
-  require(Charset2Id(static_cast<const char *>(nullptr)) == UTF8,
+  require(Charset2Id(static_cast<const char *>(nullptr)) == Charset2Id("UTF-8"),
           "empty LANG does not hide macOS UTF-8 LC_CTYPE");
 
   require(setenv("LANG", "ISO-8859-1", 1) == 0, "set conflicting LANG");
-  require(Charset2Id(static_cast<const char *>(nullptr)) == UTF8,
+  require(Charset2Id(static_cast<const char *>(nullptr)) == Charset2Id("UTF-8"),
           "LC_CTYPE takes precedence over LANG");
 
   require(setenv("LC_ALL", "ISO-8859-2", 1) == 0, "set LC_ALL override");
