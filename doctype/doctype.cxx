@@ -14,6 +14,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
+#include <limits>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include "doctype.hxx"
 #include "floatfield.hxx"
 #include "common.hxx"
@@ -539,6 +544,34 @@ PositionedReadProfile& positionedReadTotals() {
   static PositionedReadProfile totals;
   return totals;
 }
+// Diagnostic A/B: opt in to unbuffered positioned source reads, while
+// retaining pfread as the normal production path. No seek or stdio read is
+// performed on this FILE* when the diagnostic is enabled.
+bool useSourcePread() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_SOURCE_PREAD");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+
+#ifndef _WIN32
+size_t sourcePread(FILE *fp, CHR *buffer, size_t length, off_t offset) {
+  const int fd = fileno(fp);
+  if (fd < 0 || offset < 0) return 0;
+  size_t done = 0;
+  while (done < length) {
+    const size_t want = std::min(length - done,
+                                 size_t(std::numeric_limits<ssize_t>::max()));
+    const ssize_t got = ::pread(fd, buffer + done, want, offset + off_t(done));
+    if (got > 0) done += size_t(got);
+    else if (got == 0) break;
+    else if (errno != EINTR) break;
+  }
+  return done;
+}
+#endif
+
 bool profilePositionedReads() {
   static const bool enabled = [] {
     const char *flag = std::getenv("IB_PROFILE_JSONTERM");
@@ -560,7 +593,13 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   const auto opened = profiling ? Clock::now() : Clock::time_point{};
   if (fp)
     {
-      result = ReadFile(fp, Buffer, Offset, Length);
+#ifndef _WIN32
+      if (useSourcePread() && Buffer) {
+        result = sourcePread(fp, Buffer, Length, Offset);
+        Buffer[result] = '\\0';
+      } else
+#endif
+        result = ReadFile(fp, Buffer, Offset, Length);
       const auto read = profiling ? Clock::now() : Clock::time_point{};
       ffclose(fp);
       if (profiling) {
