@@ -1070,7 +1070,7 @@ static void positioned_read_differential(const std::string& executable)
   }
   {
     std::ofstream source("positioned-read-json.txt",std::ios::binary);
-    source << R"({"name":"caf\\u00e9","mixed":"\\u00e9-\\u03bb-\\uD801\\uDC28","escaped":"a\\nb\\t\\u00fc"})";
+    source << R"({"name":"caf\u00e9","mixed":"\u00e9-\u03bb-\uD801\uDC28","escaped":"a\nb\t\u00fc"})";
     require(bool(source), "write JSON escape differential fixture");
   }
   for (const std::string& mode : {"stdio", "pread"}) {
