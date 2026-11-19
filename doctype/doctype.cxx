@@ -525,7 +525,7 @@ struct PositionedReadProfile {
     const auto millis = [](long long ns) { return double(ns) / 1000000.0; };
     std::fprintf(stderr,
       "POSITIONED_READ_PROFILE calls=%zu failures=%zu open_ms=%.3f "
-      "read_ms=%.3f close_ms=%.3f total_ms=%.3f\\n",
+      "read_ms=%.3f close_ms=%.3f total_ms=%.3f\n",
       count, failures.load(std::memory_order_relaxed),
       millis(openNs.load(std::memory_order_relaxed)),
       millis(readNs.load(std::memory_order_relaxed)),
