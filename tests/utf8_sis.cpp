@@ -104,7 +104,10 @@ static void comparisons()
   require(_ib_SisCompare(bytes("a next"), bytes("a"), 6) == 0, "cleaned whitespace terminates a merge key");
   CHARSET latin1("ISO-8859-1");
   const UCHR upper[1] = {'A'}, lower[1] = {'a'};
-  require(latin1.CompareSIS(upper, 1, lower, 1) == 0, "bounded single-byte charset comparison retained");
+  require(latin1.CompareSIS(upper, 1, lower, 1) < 0,
+          "stored SIS comparison is bytewise, even for 8-bit charsets");
+  // Search comparison remains case-insensitive and uses the charset table.
+  require(latin1.SisKeys() != nullptr, "single-byte query comparator retained");
   require(SetGlobalCharset("ISO-8859-1"), "restore single-byte global charset");
   require(_ib_SisCompare(bytes("A"), bytes("a"), 1) == 0, "global charset switches out of UTF-8 mode");
 }
