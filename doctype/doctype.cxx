@@ -16,7 +16,6 @@
 #include <cstring>
 #include <cerrno>
 #include <limits>
-#include <vector>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -545,24 +544,6 @@ PositionedReadProfile& positionedReadTotals() {
   static PositionedReadProfile totals;
   return totals;
 }
-// Diagnostic A/B: opt in to unbuffered positioned source reads, while
-// retaining pfread as the normal production path. No seek or stdio read is
-// performed on this FILE* when the diagnostic is enabled.
-bool useSourcePread() {
-  static const bool enabled = [] {
-    const char *flag = std::getenv("IB_SOURCE_PREAD");
-    return flag && *flag && std::strcmp(flag, "0") != 0;
-  }();
-  return enabled;
-}
-bool compareSourceReads() {
-  static const bool enabled = [] {
-    const char *flag = std::getenv("IB_COMPARE_SOURCE_READS");
-    return flag && *flag && std::strcmp(flag, "0") != 0;
-  }();
-  return enabled;
-}
-
 #ifndef _WIN32
 size_t sourcePread(FILE *fp, CHR *buffer, size_t length, off_t offset) {
   const int fd = fileno(fp);
@@ -595,8 +576,8 @@ INT DOCTYPE::ReadFile(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
   using Clock = PositionedReadProfile::Clock;
   const auto start = profiling ? Clock::now() : Clock::time_point{};
   STRINGINDEX result = 0;
-  // The FILE* overload uses pfread with an explicit offset. Cached handles
-  // need not rewind here; keep ordinary ffopen semantics for sequential users.
+  // The FILE* overload reads at an explicit offset. Cached handles need
+  // not rewind here; ordinary ffopen still supports sequential users.
   FILE *fp = ffopenPositioned(Filename, "rb");
   const auto opened = profiling ? Clock::now() : Clock::time_point{};
   if (fp)
@@ -630,45 +611,11 @@ INT DOCTYPE::ReadFile(FILE *fp, CHR *Buffer, off_t Offset, size_t Length) const
   if (fp != NULL)
     {
 #ifndef _WIN32
-      if (compareSourceReads() && Buffer)
-        {
-          // Compare *raw* source reads before the caller's virtual override
-          // applies document-specific normalization. Both paths return through
-          // that same override, preserving the existing semantics.
-          std::vector<CHR> buffered(Length + 1);
-          const size_t stdioCount = pfread(fp, buffered.data(), Length, Offset);
-          const size_t directCount = sourcePread(fp, Buffer, Length, Offset);
-          const size_t common = std::min(stdioCount, directCount);
-          if (stdioCount != directCount ||
-              std::memcmp(buffered.data(), Buffer, common) != 0)
-            {
-              static std::atomic<unsigned> mismatches{0};
-              if (mismatches.fetch_add(1, std::memory_order_relaxed) < 12)
-                {
-                  size_t first = 0;
-                  while (first < common && buffered[first] == Buffer[first]) ++first;
-                  std::fprintf(stderr,
-                      "SOURCE_READ_MISMATCH offset=%lld requested=%zu "
-                      "stdio=%zu pread=%zu first_diff=%zu "
-                      "stdio_byte=%d pread_byte=%d\n",
-                      (long long)Offset, Length, stdioCount, directCount, first,
-                      first < stdioCount ? (unsigned char)buffered[first] : -1,
-                      first < directCount ? (unsigned char)Buffer[first] : -1);
-                }
-            }
-          if (useSourcePread())
-            result = directCount;
-          else
-            {
-              std::memcpy(Buffer, buffered.data(), stdioCount);
-              result = stdioCount;
-            }
-        }
-      else if (useSourcePread() && Buffer)
-        result = sourcePread(fp, Buffer, Length, Offset);
-      else
+      // Read at the source offset without disturbing the cached FILE* position.
+      result = sourcePread(fp, Buffer, Length, Offset);
+#else
+      result = pfread(fp, Buffer, Length, Offset);
 #endif
-        result = pfread(fp, Buffer, Length, Offset);
     }
   Buffer[result] = '\0'; // ASCIIZ
   return (INT)result;
