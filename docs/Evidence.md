@@ -510,9 +510,27 @@ Vector 2 of 9: [PLAY\\ACT\\SCENE] ...vector field content...
 candidates for that vector query/field (not second among all indexed vectors,
 and not the record's final result-set rank).
 
-If the two display ranges overlap, the first implementation prints
-`Vector 2 of 9: (overlaps Evidence)` instead of repeating overlapping text.
-This is display deduplication, not yet an expanded union excerpt.
+The display compares the selected source evidence cover (not its
+context-expanded display envelope) with the vector field span. When the
+intervals intersect it prints one of:
+
+- `(same span as Evidence)` for equal coordinates;
+- `(contains Evidence)` when the vector span encloses the selected evidence;
+- `(within Evidence)` when the vector span lies inside the selected evidence;
+- `(overlaps Evidence)` for intersection without containment.
+
+The intersecting source text is not printed a second time. These labels
+describe byte-coordinate relationships, not semantic alignment.
+
+For disjoint spans within `-evidence-near N` source bytes (default `256`,
+`0` disables), the vector line begins with
+`near Evidence (84 bytes; common: DOC\\SECTION)` before its separate excerpt.
+The gap counts bytes strictly between the inclusive intervals. The optional
+common path is printed only when the database's existing `GetPeerFc()` lookup
+verifies a field instance containing the entire combined interval. If no
+common container can be established, the `common:` part is omitted.
+The container conveys structural context, not a semantic association.
+More distant spans get an ordinary independent vector excerpt.
 
 A long vector field is truncated at the front using the normal display byte
 advice; `0` means no clipping. The excerpt is not claimed to be the most
