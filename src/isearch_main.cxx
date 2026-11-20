@@ -3426,7 +3426,7 @@ namespace
     },
     {
       "searchterm@",
-      "Interpret the term as an embeddings address using a dense vector."
+      "Interpret the term as an embeddings address for feedback using a dense vector (Experimental)."
     },
     {
       "searchterm:weight",
