@@ -526,8 +526,10 @@ For disjoint spans within `-evidence-near N` source bytes (default `256`,
 `0` disables), the vector line begins with
 `near Evidence (84 bytes; common: DOC\\SECTION)` before its separate excerpt.
 The gap counts bytes strictly between the inclusive intervals. The optional
-common path is printed only when the database's existing `GetPeerFc()` lookup
-verifies a field instance containing the entire combined interval. If no
+common path is printed only when the database's existing field-path ancestor
+lookup verifies a field instance containing the entire combined interval.
+The vector field's indexed ancestor chain is used rather than an unconstrained
+peer lookup; unresolved field names are never displayed as common containers. If no
 common container can be established, the `common:` part is omitted.
 The container conveys structural context, not a semantic association.
 More distant spans get an ordinary independent vector excerpt.
