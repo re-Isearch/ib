@@ -4474,7 +4474,7 @@ PIRSET INDEX::Search (const QUERY& Query)
                        for (const auto& extent : extents)
                          hit.AddVectorEvidence(VECTOR_EVIDENCE(
                              FC(extent.GetFieldStart(), extent.GetFieldEnd()),
-                             hit.GetScore(), n + 1, returned));
+                             FieldName, hit.GetScore(), n + 1, returned));
                      }
                    }
 		} else
