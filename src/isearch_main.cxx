@@ -31,6 +31,9 @@ Description:	Command-line search utility
 #include <vector>
 #include <algorithm>
 #include <utility>
+#include <cerrno>
+#include <cstdlib>
+#include <limits>
   
 using std::cout;
 using std::endl;
@@ -807,7 +810,7 @@ int _Isearch_main (int argc, char **argv)
               errno = 0;
               const unsigned long parsed = strtoul(value, &end, 10);
               if (!value[0] || value[0] == '-' || !end || *end || errno == ERANGE ||
-                  parsed > static_cast<unsigned long>(SIZE_MAX)) {
+                  parsed > static_cast<unsigned long>(std::numeric_limits<size_t>::max())) {
                 message_log(LOG_FATAL, "Usage: %s requires a nonnegative byte count.", Flag.c_str());
                 return 0;
               }
