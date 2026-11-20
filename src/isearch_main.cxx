@@ -2311,10 +2311,24 @@ again:
                             a.GetFieldEnd() > b.GetFieldEnd()
                                 ? a.GetFieldEnd() : b.GetFieldEnd());
                         unionExtent += offset;
-                        STRING commonPath;
-                        const FC container = pdb->GetPeerFc(unionExtent, &commonPath);
-                        if (!commonPath.IsEmpty() && container.Contains(unionExtent))
-                          cout << "; common: " << commonPath;
+                        // A generic peer lookup can return the unresolved
+                        // placeholder "???". Use the vector field's known
+                        // ancestor chain, as ordinary evidence selection does,
+                        // and verify the enclosing field instance.
+                        DFDT *dfdt = pdb->GetDfdt();
+                        if (dfdt) {
+                          const FIELD_PATH path =
+                              dfdt->GetFieldPath(vector->FieldName);
+                          if (path.size() > 2) {
+                            const FIELD_PATH ancestors(path.begin() + 1, path.end());
+                            STRING commonPath;
+                            const FC container =
+                                pdb->GetPeerFc(unionExtent, ancestors, &commonPath);
+                            if (!commonPath.IsEmpty() && commonPath != "???" &&
+                                container.Contains(unionExtent))
+                              cout << "; common: " << commonPath;
+                          }
+                        }
                       }
                       cout << ") ";
                     }
