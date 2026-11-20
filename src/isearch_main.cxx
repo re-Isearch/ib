@@ -421,8 +421,9 @@ static void HelpUsage(const char *progname)
 	"                   // Append = for exact (case dependent) search." << endl <<
 	"                   // Append > for exact right truncated search (=*)." << endl <<
 	"                   // Append . for \"exact-term\" (e.g. \"auto\" won't match \"auto-mobile\")" << endl << 
-	"                   // Append $ for freeform encoded address (sparse vector)." << endl <<
-	"                   // Append @ for embeddings address (dense vector)." << endl <<
+	"                   // Append $ for encoded address (sparse vector) for freeform feedback." << endl <<
+	"                   // Append @ for embedding's encoded address for feedback (Experimental)."
+
 	"                   // Append :n for term weighting (default=1)." << endl <<
 	"                   //   (Use negative values to lower rank.)" << endl <<
 	"                   // Use \"literal phrase\" for literal search" << endl <<
