@@ -5,6 +5,7 @@
 
 #ifdef VECTOR_INDEX
 #include "fc.hxx"
+#include "string.hxx"
 #include <cstddef>
 #include <vector>
 
@@ -13,13 +14,15 @@
 // This is not a lexical token weight or a record's combined ranking score.
 struct VECTOR_EVIDENCE {
   FC Extent;
+  STRING FieldName;
   DOUBLE Score = 0;
   size_t Rank = 0;
   size_t Returned = 0;
 
   VECTOR_EVIDENCE() = default;
-  VECTOR_EVIDENCE(const FC& extent, DOUBLE score, size_t rank, size_t returned)
-    : Extent(extent), Score(score), Rank(rank), Returned(returned) {}
+  VECTOR_EVIDENCE(const FC& extent, const STRING& fieldName, DOUBLE score,
+                  size_t rank, size_t returned)
+    : Extent(extent), FieldName(fieldName), Score(score), Rank(rank), Returned(returned) {}
 };
 
 using VECTOR_EVIDENCES = std::vector<VECTOR_EVIDENCE>;
