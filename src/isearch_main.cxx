@@ -333,6 +333,9 @@ static void HelpUsage(const char *progname)
 	"  -no_norm         // Don't calculate scores or normalize." << endl <<
 	"  -sort B[entley]|S[edgewick]|D[ualPivot]|T[im]|N[ative] // Which variation of QuickSort to use" << endl <<
 	"  -show            // Show 'best' hit neighborhood." << endl <<
+#ifdef VECTOR_INDEX
+        "  -evidence-near N // Near-evidence byte gap (default 256; 0 disables)." << endl <<
+#endif
 //	"  -showall         // Show all hits neighborhoods." << endl <<
 	"  -summary         // Show summary/description." << endl <<
 	"  -XML             // Present Results in XML-like structure." << endl <<
@@ -628,6 +631,9 @@ int _Isearch_main (int argc, char **argv)
   STRING string, tstring;
   const char *Pager = NULL;
   size_t maxAdvice = 130;
+#ifdef VECTOR_INDEX
+  size_t evidenceNearBytes = 256; // Byte gap only, not a semantic distance.
+#endif
 
   if (argv0 == NULL) argv0 = "Isearch";
 
@@ -789,6 +795,26 @@ int _Isearch_main (int argc, char **argv)
               PriorityFactor = atof(argv[x]);
               LastUsed = x;
             }
+#ifdef VECTOR_INDEX
+          else if (Flag.Equals("-evidence-near"))
+            {
+              if (++x >= argc) {
+                message_log(LOG_FATAL, "Usage: missing byte threshold after %s.", Flag.c_str());
+                return 0;
+              }
+              const char *value = argv[x];
+              char *end = NULL;
+              errno = 0;
+              const unsigned long parsed = strtoul(value, &end, 10);
+              if (!value[0] || value[0] == '-' || !end || *end || errno == ERANGE ||
+                  parsed > static_cast<unsigned long>(SIZE_MAX)) {
+                message_log(LOG_FATAL, "Usage: %s requires a nonnegative byte count.", Flag.c_str());
+                return 0;
+              }
+              evidenceNearBytes = static_cast<size_t>(parsed);
+              LastUsed = x;
+            }
+#endif
 	  else if (Flag.Equals("-advice"))
 	    {
 	      if (++x >= argc)
@@ -2233,20 +2259,62 @@ again:
                 if (vector && !vector->Extent.IsEmpty()) {
                   const DISPLAY_EVIDENCE lexical =
                       result.GetDisplayEvidence(maxAdvice, nullptr);
-                  const FC& a = lexical.DisplayExtent;
+                  // Use selected evidence, not its presentation envelope.
+                  const FC& a = lexical.Cover.extent;
                   const FC& b = vector->Extent;
-                  const bool overlap =
-                      !a.IsEmpty() &&
+                  const bool valid = !a.IsEmpty();
+                  const bool intersects = valid &&
                       a.GetFieldStart() <= b.GetFieldEnd() &&
                       b.GetFieldStart() <= a.GetFieldEnd();
+                  const bool contains = intersects &&
+                      b.GetFieldStart() <= a.GetFieldStart() &&
+                      a.GetFieldEnd() <= b.GetFieldEnd();
+                  const bool within = intersects &&
+                      a.GetFieldStart() <= b.GetFieldStart() &&
+                      b.GetFieldEnd() <= a.GetFieldEnd();
+                  // FC ends are inclusive; adjacent spans have gap zero.
+                  GPTYPE gap = 0;
+                  if (valid && !intersects) {
+                    if (a.GetFieldEnd() < b.GetFieldStart())
+                      gap = b.GetFieldStart() - a.GetFieldEnd() - 1;
+                    else
+                      gap = a.GetFieldStart() - b.GetFieldEnd() - 1;
+                  }
+                  const bool near = valid && !intersects &&
+                      evidenceNearBytes != 0 && gap <= evidenceNearBytes;
 
                   cout << "Vector " << vector->Rank
                        << " of " << vector->Returned << ": ";
-                  if (overlap) {
-                    // Do not repeat overlapping evidence. Preserve the
-                    // vector provenance even when only one passage is shown.
-                    cout << "(overlaps Evidence)" << endl;
+                  if (intersects) {
+                    if (contains && within)
+                      cout << "(same span as Evidence)" << endl;
+                    else if (contains)
+                      cout << "(contains Evidence)" << endl;
+                    else if (within)
+                      cout << "(within Evidence)" << endl;
+                    else
+                      cout << "(overlaps Evidence)" << endl;
                   } else {
+                    if (near) {
+                      cout << "near Evidence (" << gap << " bytes";
+                      // Query the real shared containing field instance.
+                      MDTREC mdtrec;
+                      if (pdb->GetMainMdt()->GetEntry(result.GetMdtIndex(), &mdtrec)) {
+                        const GPTYPE offset =
+                            mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+                        FC unionExtent(
+                            a.GetFieldStart() < b.GetFieldStart()
+                                ? a.GetFieldStart() : b.GetFieldStart(),
+                            a.GetFieldEnd() > b.GetFieldEnd()
+                                ? a.GetFieldEnd() : b.GetFieldEnd());
+                        unionExtent += offset;
+                        STRING commonPath;
+                        const FC container = pdb->GetPeerFc(unionExtent, &commonPath);
+                        if (!commonPath.IsEmpty() && container.Contains(unionExtent))
+                          cout << "; common: " << commonPath;
+                      }
+                      cout << ") ";
+                    }
                     // Preserve the exact HNSW field identity from the search.
                     // A generic peer lookup need not recognize an entire field span.
                     const STRING& vectorPath = vector->FieldName;
