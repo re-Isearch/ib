@@ -27,6 +27,9 @@ Description:	Class RESULT - Search Result
 #include <map>
 #include <set>
 #include <vector>
+#ifdef VECTOR_INDEX
+#include "vectorevidence.hxx"
+#endif
 
 
 class DOCTYPE;
@@ -200,6 +203,19 @@ public:
   UINT       GetAuxCount() const                      { return AuxCount;     }
 
   size_t     GetHitTotal() const        { return HitTable.GetTotalEntries(); }
+#ifdef VECTOR_INDEX
+  void AddVectorEvidence(const VECTOR_EVIDENCE& evidence) { VectorEvidence.push_back(evidence); }
+  const VECTOR_EVIDENCES& GetVectorEvidence() const { return VectorEvidence; }
+  const VECTOR_EVIDENCE* GetBestVectorEvidence() const {
+    const VECTOR_EVIDENCE* best = nullptr;
+    for (const auto& candidate : VectorEvidence) {
+      if (!best || candidate.Score > best->Score ||
+          (candidate.Score == best->Score && candidate.Rank < best->Rank))
+        best = &candidate;
+    }
+    return best;
+  }
+#endif
 #if _USE_HITTABLE
   void   SetHitTable(const HITTABLE& NewHitTable)    { (HitTable = NewHitTable).SortByFc(); }
 #else
@@ -338,6 +354,9 @@ private:
   DOUBLE         Score;
   UINT           AuxCount;
   _ib_category_t Category;
+#ifdef VECTOR_INDEX
+  VECTOR_EVIDENCES VectorEvidence; // query-local, not part of persisted RESULT format
+#endif
 #if _USE_HITTABLE
   HITTABLE       HitTable;
 #else

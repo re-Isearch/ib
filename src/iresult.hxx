@@ -15,6 +15,9 @@ Description:	Class IRESULT - Internal Search Result
 #include "mdt.hxx"
 
 #include <cmath>
+#ifdef VECTOR_INDEX
+#include "vectorevidence.hxx"
+#endif
 
 //extern "C" { double  pow(double, double); };
 
@@ -152,8 +155,16 @@ public:
 # endif
 #endif
 
-  void Clear()                             { ClearHitTable(); Score = 0; }
-  void ClearHitTable()                     { HitTable.Clear();           }
+  void Clear()                             { ClearHitTable(); Score = 0;
+#ifdef VECTOR_INDEX
+    VectorEvidence.clear();
+#endif
+  }
+  void ClearHitTable()                     { HitTable.Clear();
+#ifdef VECTOR_INDEX
+    VectorEvidence.clear();
+#endif
+  }
 
   bool HitTableIsSorted() const                 { return HitTable.IsSorted();       }
 
@@ -178,13 +189,22 @@ public:
   void SetHitTable(const FCT& newHitTable)      { HitTable = newHitTable;           }
 
 
-  void AddToHitTable(const IRESULT& ResultRecord) { HitTable.AddEntry( ResultRecord.HitTable ); }
+  void AddToHitTable(const IRESULT& ResultRecord) { HitTable.AddEntry( ResultRecord.HitTable );
+#ifdef VECTOR_INDEX
+    VectorEvidence.insert(VectorEvidence.end(), ResultRecord.VectorEvidence.begin(), ResultRecord.VectorEvidence.end());
+#endif
+  }
   void AddToHitTable(const hit_type& Fc)          { HitTable.AddEntry(Fc);                      }
 
   void SetAuxCount(const UINT newAuxCount) { AuxCount = newAuxCount;     }
   UINT IncAuxCount()                       { return ++AuxCount;          }
   UINT IncAuxCount(const UINT AddCount)    { return AuxCount += AddCount;}
   UINT GetAuxCount() const                 { return AuxCount;            }
+
+#ifdef VECTOR_INDEX
+  void AddVectorEvidence(const VECTOR_EVIDENCE& evidence) { VectorEvidence.push_back(evidence); }
+  const VECTOR_EVIDENCES& GetVectorEvidence() const { return VectorEvidence; }
+#endif
 
   bool  SetVectorTermHits (const UINT count);
 
@@ -212,6 +232,9 @@ private:
   HITTABLE      HitTable;
 #else
   FCT           HitTable;
+#endif
+#ifdef VECTOR_INDEX
+  VECTOR_EVIDENCES VectorEvidence;
 #endif
   const MDT    *Mdt;
 };

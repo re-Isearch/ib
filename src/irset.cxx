@@ -945,6 +945,17 @@ PRSET atomicIRSET::Fill(size_t Start, size_t End, PRSET set) const
 	//Fct.ConvertHits(mdtrec);
 	result.SetHitTable (Fctable -= (mdtrec.GetGlobalFileStart() + 
                 mdtrec.GetLocalRecordStart())); // See index.cxx
+#ifdef VECTOR_INDEX
+        // Vector extents start as global source coordinates, like hit tables.
+        // Keep their original similarity and query-local rank, but make
+        // their extent record-relative for the presentation layer.
+        const GPTYPE recordOffset =
+            mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+        for (auto evidence : Table[x].GetVectorEvidence()) {
+          evidence.Extent -= recordOffset;
+          result.AddVectorEvidence(evidence);
+        }
+#endif
 	// Add the result to the set...
 	set->FastAddEntry(result); // Was AddEntry()
 	TotalHits += Table[x].GetHitCount ();
@@ -2413,7 +2424,7 @@ OPOBJ *atomicIRSET::And (const OPOBJ& OtherIrset, size_t Limit)
 	  if (current != pos1) Table[current] = *IresultPtr;
 	  Table[current].IncAuxCount( OtherIresultPtr->GetAuxCount () );
 	  const UINT hits = Table[current].IncHitCount (OtherIresultPtr->GetHitCount ());
-	  Table[current].AddToHitTable (OtherIresultPtr->HitTable);
+	  Table[current].AddToHitTable (*OtherIresultPtr);
           Table[current].SetVectorTermHits ( hits );
 	  const DOUBLE score = Table[current++].IncScore (OtherIresultPtr->GetScore ());
 	  if (score < newMinScore) newMinScore = score;
@@ -2518,7 +2529,7 @@ OPOBJ *atomicIRSET::And (const OPOBJ& OtherIrset, size_t Limit)
 	  NewTable[current] = *IresultPtr;
 	  NewTable[current].IncAuxCount( OtherIresultPtr->GetAuxCount () );
 	  const UINT hits = NewTable[current].IncHitCount (OtherIresultPtr->GetHitCount ());
-	  NewTable[current].AddToHitTable (OtherIresultPtr->HitTable);
+	  NewTable[current].AddToHitTable (*OtherIresultPtr);
 	  NewTable[current].SetVectorTermHits ( hits );
 	  const DOUBLE score = NewTable[current++].IncScore (OtherIresultPtr->GetScore ());
 	  if (score < newMinScore) newMinScore = score;

@@ -39,6 +39,10 @@
 #include <ctype.h>
 #include <string.h>
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
 #include <limits>
 #include "common.hxx"
 #include "doctype.hxx"
@@ -193,81 +197,269 @@ INT SGMLNORM::GetRecordData(FILE *Fp, CHR *Buffer, off_t Offset, size_t Length) 
 }
 
 
+// Opt-in, per-thread source retrieval profile. Each invocation is accounted for
+// exactly once, including early returns. Report at thread/process exit so a
+// full Isearch query produces one line, rather than thousands of log entries.
+namespace {
+enum SGMLTermStage { sgmlOpen, sgmlBoundary, sgmlAllocate, sgmlRead,
+                     sgmlNormalize, sgmlOutput, sgmlDone, sgmlStages };
+
+struct SGMLTermTotals {
+  size_t calls = 0, boundaryReads = 0, boundaryBytes = 0;
+  size_t mainReads = 0, mainBytes = 0, failures = 0;
+  size_t combinedAttempts = 0, combinedHits = 0, combinedFallbacks = 0;
+  size_t combinedBytes = 0;
+  size_t boundaryScans = 0, boundaryExtraReads = 0, boundaryFound = 0;
+  size_t boundaryReadSlow50us = 0, boundaryReadSlow100us = 0, boundaryReadSlow1ms = 0;
+  std::chrono::nanoseconds boundaryReadTime{0}, boundaryScanTime{0};
+  std::chrono::nanoseconds boundaryReadMax{0};
+  std::chrono::nanoseconds elapsed[sgmlStages] = {};
+  ~SGMLTermTotals() {
+    if (!calls) return;
+    const auto ms = [this](SGMLTermStage stage) {
+      return std::chrono::duration<double, std::milli>(elapsed[stage]).count();
+    };
+    const double total = ms(sgmlOpen)+ms(sgmlBoundary)+ms(sgmlAllocate)+
+                         ms(sgmlRead)+ms(sgmlNormalize)+ms(sgmlOutput);
+    std::fprintf(stderr,
+      "SGMLTERM_PROFILE calls=%zu failures=%zu boundary_reads=%zu boundary_bytes=%zu "
+      "main_reads=%zu main_bytes=%zu total_ms=%.3f open_ms=%.3f "
+      "boundary_ms=%.3f allocate_ms=%.3f read_close_ms=%.3f "
+      "normalize_ms=%.3f output_ms=%.3f "
+      "boundary_read_ms=%.3f boundary_scan_ms=%.3f boundary_read_max_us=%.1f "
+      "boundary_scans=%zu boundary_extra_reads=%zu boundary_found=%zu "
+      "boundary_read_ge50us=%zu boundary_read_ge100us=%zu boundary_read_ge1ms=%zu "
+      "combined_attempts=%zu combined_hits=%zu combined_fallbacks=%zu combined_bytes=%zu\n",
+      calls, failures, boundaryReads, boundaryBytes, mainReads, mainBytes,
+      total, ms(sgmlOpen), ms(sgmlBoundary), ms(sgmlAllocate), ms(sgmlRead),
+      ms(sgmlNormalize), ms(sgmlOutput),
+      std::chrono::duration<double, std::milli>(boundaryReadTime).count(),
+      std::chrono::duration<double, std::milli>(boundaryScanTime).count(),
+      std::chrono::duration<double, std::micro>(boundaryReadMax).count(),
+      boundaryScans, boundaryExtraReads, boundaryFound,
+      boundaryReadSlow50us, boundaryReadSlow100us, boundaryReadSlow1ms,
+      combinedAttempts, combinedHits, combinedFallbacks, combinedBytes);
+  }
+};
+
+struct SGMLTermTimer {
+  using Clock = std::chrono::steady_clock;
+  SGMLTermTotals *totals;
+  Clock::time_point last;
+  SGMLTermStage stage = sgmlOpen;
+  bool completed = false;
+  explicit SGMLTermTimer(bool enabled)
+    : totals(enabled ? &getTotals() : nullptr),
+      last(enabled ? Clock::now() : Clock::time_point{}) {}
+  static SGMLTermTotals& getTotals() {
+    static thread_local SGMLTermTotals totals;
+    return totals;
+  }
+  void next(SGMLTermStage nextStage) {
+    if (!totals) return;
+    const auto now = Clock::now();
+    totals->elapsed[stage] += now-last;
+    last = now;
+    stage = nextStage;
+  }
+  void boundaryRead(size_t bytes, std::chrono::nanoseconds readTime,
+                    bool extraBlock) {
+    if (!totals) return;
+    ++totals->boundaryReads;
+    totals->boundaryBytes += bytes;
+    totals->boundaryReadTime += readTime;
+    if (readTime > totals->boundaryReadMax) totals->boundaryReadMax = readTime;
+    if (readTime >= std::chrono::microseconds(50)) ++totals->boundaryReadSlow50us;
+    if (readTime >= std::chrono::microseconds(100)) ++totals->boundaryReadSlow100us;
+    if (readTime >= std::chrono::milliseconds(1)) ++totals->boundaryReadSlow1ms;
+    if (extraBlock) ++totals->boundaryExtraReads;
+  }
+  void boundaryScan(std::chrono::nanoseconds scanTime, bool found) {
+    if (!totals) return;
+    totals->boundaryScanTime += scanTime;
+    if (found) ++totals->boundaryFound;
+  }
+  void mainRead(int bytes) {
+    if (totals) {
+      ++totals->mainReads;
+      if (bytes > 0) totals->mainBytes += size_t(bytes);
+    }
+  }
+  void success() { completed = true; }
+  ~SGMLTermTimer() {
+    if (!totals) return;
+    next(sgmlDone);
+    ++totals->calls;
+    if (!completed) ++totals->failures;
+  }
+};
+
+// Combined lookbehind + source reads are the normal retrieval path.
+// Retain an explicit diagnostic opt-out for byte-for-byte differential tests
+// and investigating source-recovery regressions.
+bool legacySGMLTermRead() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_LEGACY_SGMLTERM_READ");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+
+bool profileSGMLTerm() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_PROFILE_SGMLTERM");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+} // namespace
+
 // Recover the same entity-normalized bytes used to assign posting GPs.
 INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length)
 {
+  SGMLTermTimer profile(profileSGMLTerm());
   if (!Buffer) return 0;
   Buffer[0] = '\0';
   if (Offset < 0 || !Length) return 0;
-  FILE *fp = ffopen(Filename, "rb");
+  // Every recovery read supplies its own offset; avoid the cached-stream rewind.
+  FILE *fp = ffopenPositioned(Filename, "rb");
   if (!fp)
     {
       message_log (LOG_ERROR, "Failed to open \"%s\"", Filename.c_str());
       return 0;
     }
 
-  // Entity contraction defers padding until the next word boundary. A GP
-  // can therefore land inside the original entity spelling: &amp;c. is
-  // indexed as c at the source byte 'a'. Normalize from a preceding safe
-  // boundary, then apply the GP offset. A fixed lookbehind is insufficient
-  // for a run of entities such as &amp;&amp;...word.
-  off_t begin = Offset;
-  char context[65];
-  bool boundary = false;
-  while (begin > 0 && !boundary)
-    {
-      const size_t span = size_t(std::min<off_t>(begin, sizeof(context)-1));
-      const off_t from = begin - span;
-      if (DOCTYPE::ReadFile(fp, context, from, span) != INT(span))
-        {
-          ffclose(fp);
-          return 0;
-        }
-      for (size_t i = span; i > 0;)
-        {
-          const unsigned char ch = context[--i];
-          if ((ch < 0x80 && isspace(ch)) || ch == '<' || ch == '>' || ch == '"' || ch == '\'')
-            {
-              begin = from + i + 1;
-              boundary = true;
-              break;
-            }
-        }
-      if (!boundary) begin = from;
-    }
-
-  // An entity contains at most ten name bytes plus '&' and ';'. Include
-  // enough raw text for the normalized prefix, Length decoded bytes and
-  // an entity at the limit, including contractions before the posting GP.
+  // By default one positioned read contains backward context and forward
+  // verification text. Normalize exactly the window the original boundary
+  // algorithm selects. Keep that scanner as a fallback for long runs without
+  // a safe delimiter, and as a diagnostic opt-out.
   const size_t maxRead = std::numeric_limits<INT>::max();
   const size_t maxDecoded = (maxRead-12)/12;
-  if (Offset-begin > off_t(maxDecoded))
-    {
+  off_t begin = Offset;
+  char *tmp = nullptr;
+  INT read = 0;
+  bool prefetched = false;
+  const size_t lookbehind = size_t(std::min<off_t>(Offset, 64));
+
+  if (!legacySGMLTermRead() && Length <= maxDecoded-lookbehind) {
+    if (profile.totals) ++profile.totals->combinedAttempts;
+    const size_t prefetchWant = (lookbehind+Length)*12 + 12;
+    profile.next(sgmlAllocate);
+    tmp = (char *)tmpBuffer2.Want(prefetchWant+1);
+    if (tmp) {
+      const off_t from = Offset - off_t(lookbehind);
+      profile.next(sgmlRead);
+      const INT got = DOCTYPE::ReadFile(fp, tmp, from, prefetchWant);
+      if (profile.totals && got > 0) profile.totals->combinedBytes += size_t(got);
+      if (got > INT(lookbehind)) {
+        profile.next(sgmlBoundary);
+        bool found = lookbehind == 0;
+        size_t prefix = lookbehind;
+        while (prefix > 0) {
+          const unsigned char ch = (unsigned char)tmp[--prefix];
+          if ((ch < 0x80 && isspace(ch)) || ch == '<' || ch == '>' ||
+              ch == '"' || ch == '\'') {
+            begin = from + off_t(prefix) + 1;
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          const size_t skip = size_t(begin-from);
+          const size_t segment = size_t(Offset-begin);
+          const size_t originalWant = (segment+Length)*12 + 12;
+          // The prefetch is larger than the original window. Do not feed
+          // its extra prefix or suffix into deferred entity normalization.
+          tmp += skip;
+          read = INT(std::min<size_t>(size_t(got)-skip, originalWant));
+          prefetched = true;
+          if (profile.totals) {
+            ++profile.totals->combinedHits;
+            profile.mainRead(read);
+          }
+        }
+      }
+    }
+    if (!prefetched && profile.totals) ++profile.totals->combinedFallbacks;
+  }
+
+  if (!prefetched) {
+    profile.next(sgmlBoundary);
+    // The original backward scan handles entity runs exceeding 64 bytes.
+    char context[65];
+    bool boundary = false;
+    size_t boundaryBlocks = 0;
+    while (begin > 0 && !boundary)
+      {
+        const size_t span = size_t(std::min<off_t>(begin, sizeof(context)-1));
+        const off_t from = begin - span;
+        // Isolate positioned-read latency from delimiter scanning. No change
+        // to the boundary algorithm or bytes returned to the caller.
+        const auto readStarted = profile.totals ? SGMLTermTimer::Clock::now()
+            : SGMLTermTimer::Clock::time_point{};
+        const INT got = DOCTYPE::ReadFile(fp, context, from, span);
+        if (profile.totals)
+          profile.boundaryRead(span,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+              SGMLTermTimer::Clock::now() - readStarted), boundaryBlocks > 0);
+        ++boundaryBlocks;
+        if (got != INT(span))
+          {
+            ffclose(fp);
+            return 0;
+          }
+        const auto scanStarted = profile.totals ? SGMLTermTimer::Clock::now()
+            : SGMLTermTimer::Clock::time_point{};
+        for (size_t i = span; i > 0;)
+          {
+            const unsigned char ch = context[--i];
+            if ((ch < 0x80 && isspace(ch)) || ch == '<' || ch == '>' || ch == '"' || ch == '\'')
+              {
+                begin = from + i + 1;
+                boundary = true;
+                break;
+              }
+          }
+        if (profile.totals)
+          profile.boundaryScan(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+              SGMLTermTimer::Clock::now() - scanStarted), boundary);
+        if (!boundary) begin = from;
+      }
+    if (profile.totals) ++profile.totals->boundaryScans;
+
+    profile.next(sgmlAllocate);
+    if (Offset-begin > off_t(maxDecoded)) {
       ffclose(fp);
       return 0;
     }
-  const size_t segment = size_t(Offset-begin);
-  if (Length > maxDecoded-segment)
-    {
+    const size_t segment = size_t(Offset-begin);
+    if (Length > maxDecoded-segment) {
       ffclose(fp);
       return 0;
     }
-  const size_t want = (segment+Length)*12 + 12;
-  char *tmp = (char *)tmpBuffer2.Want(want+1);
-  if (!tmp)
-    {
+    const size_t want = (segment+Length)*12 + 12;
+    tmp = (char *)tmpBuffer2.Want(want+1);
+    if (!tmp) {
       ffclose(fp);
-      message_log (LOG_PANIC|LOG_ERRNO, "%s GetTerm buffer exhausted, wanted %lu bytes",
-                   Doctype.c_str(), (unsigned long)want);
+      message_log(LOG_PANIC|LOG_ERRNO, "%s GetTerm buffer exhausted, wanted %lu bytes",
+                  Doctype.c_str(), (unsigned long)want);
       return 0;
     }
-  const INT read = DOCTYPE::ReadFile(fp, tmp, begin, want);
+    profile.next(sgmlRead);
+    read = DOCTYPE::ReadFile(fp, tmp, begin, want);
+    profile.mainRead(read);
+  }
+
   ffclose(fp);
+  const size_t segment = size_t(Offset-begin);
   if (read <= 0 || size_t(read) <= segment) return 0;
 
   // Match ingestion's padding policy. Presentation normalization can move
   // the decoded characters to different byte offsets.
+  profile.next(sgmlNormalize);
   Entities.normalize(tmp, size_t(read));
+  profile.next(sgmlOutput);
   tmp += segment;
   const size_t count = size_t(read)-segment;
   size_t i = 0, j = 0;
@@ -279,6 +471,7 @@ INT SGMLNORM::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t 
         while (j < count && tmp[j] == ' ') ++j;
     }
   Buffer[i] = '\0';
+  profile.success();
   return INT(i);
 }
 

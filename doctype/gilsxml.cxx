@@ -730,8 +730,13 @@ void XMLBASE::ParseFields (PRECORD NewRecord)
 	//     (not for SGML... perhaps for SGMLNORM)
 
 
+	// Historical SGML compatibility: ignore explicit </p> end tags.
+	// This can falsely nest sibling paragraphs under DOC\P\P...
+	// Define to retain the legacy behavior when needed.
+#ifdef GILSXML_LEGACY_IGNORE_P_ENDTAG
 	if ((*tags_ptr)[1] == 'p' && (*tags_ptr)[2] == '\0')
-	    continue; // See IP: Ignore paragraphs below
+	    continue;
+#endif
 
 	if(NestLevel) {
 	  NestLevel--;

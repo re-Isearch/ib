@@ -103,6 +103,7 @@ extern bool _is_globalUTF8;
 #include <sys/stat.h>
 #include "common.hxx"
 #include "index.hxx"
+#include "source_match.hxx"
 #include "irset.hxx"
 #include "soundex.hxx"
 #include "metaphone.hxx"
@@ -110,6 +111,9 @@ extern bool _is_globalUTF8;
 #include <assert.h>
 #include <algorithm>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include "lock.hxx"
 //#include "dfdt.hxx"
 #include <iomanip>
@@ -4458,6 +4462,21 @@ PIRSET INDEX::Search (const QUERY& Query)
 		if (indexer->Ok()) { // HNSW index
 		   Method = HybridNormalization ; // Need to mix/match with Vectors!!  April 2026
                    NewIrset = indexer->search(FieldName, Term); // This is where we do the Vector Search
+                   // The bridge returns the whole indexed field extent, even
+                   // when the embedding input was chunked. Capture query-local
+                   // rank/score before hybrid normalization or set algebra
+                   // combines this vector result with lexical results.
+                   if (NewIrset) {
+                     const size_t returned = NewIrset->GetTotalEntries();
+                     for (size_t n = 0; n < returned; ++n) {
+                       IRESULT& hit = (*NewIrset)[n];
+                       const auto extents = hit.GetHitTable();
+                       for (const auto& extent : extents)
+                         hit.AddVectorEvidence(VECTOR_EVIDENCE(
+                             FC(extent.GetFieldStart(), extent.GetFieldEnd()),
+                             FieldName, hit.GetScore(), n + 1, returned));
+                     }
+                   }
 		} else
 		   Parent->SetErrorCode( 3 ); // Temporarily not available
 #else
@@ -4781,18 +4800,22 @@ error:
 
   TempStack >> NewIrset;
 
-  if (!StopEvaluation) {
-    if (!Stack.IsEmpty())
-      {
-        message_log (LOG_INFO, "Query stack was not empty. Malformed query.");
-        Parent->SetErrorCode(108); // "Malformed query";
-      }
-    if (!TempStack.IsEmpty())
-      {
-        message_log (LOG_INFO, "Search stack was not empty. Malformed RPN.");
-        Parent->SetErrorCode(108); // "Malformed query";
-      }
-   } else if (NewIrset == nullptr) return  new IRSET (Parent);
+  if (!StopEvaluation)
+    {
+      // A malformed RPN expression must not return the last partial operand.
+      // Otherwise the caller may present unrelated hits as a valid answer.
+      if (NewIrset == NULL || !Stack.IsEmpty() || !TempStack.IsEmpty())
+        {
+          message_log(LOG_INFO, "Malformed RPN: expression did not reduce to one result.");
+          Parent->SetErrorCode(108);
+          delete NewIrset;
+          DiscardOpStack(Stack);
+          DiscardOpStack(TempStack);
+          return ERROR_SET;
+        }
+    }
+  else if (NewIrset == nullptr)
+    return new IRSET (Parent);
 
   // Do we want to clip the set?
   if (!Query.isUnlimited())
@@ -4857,6 +4880,35 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
   }
 
 
+// Optional per-thread timing for indirect source reads. TermSearch reports
+// deltas, so unrelated calls before a query do not affect its totals.
+struct IndirectReadTiming {
+  using Clock = std::chrono::steady_clock;
+  using Duration = std::chrono::nanoseconds;
+  size_t calls = 0, delegated = 0, direct = 0;
+  Duration total{0}, mdt{0}, path{0}, delegate{0}, open{0}, read{0}, close{0};
+};
+static thread_local IndirectReadTiming indirectReadTiming;
+static const bool profileIndirectReads = [] {
+  const char *flag = std::getenv("IB_PROFILE_TERMSEARCH");
+  return flag && *flag && std::strcmp(flag, "0") != 0;
+}();
+
+struct IndirectReadScope {
+  bool enabled;
+  IndirectReadTiming::Clock::time_point begin;
+  explicit IndirectReadScope(bool on) : enabled(on),
+    begin(on ? IndirectReadTiming::Clock::now()
+             : IndirectReadTiming::Clock::time_point{}) {
+    if (on) ++indirectReadTiming.calls;
+  }
+  ~IndirectReadScope() {
+    if (enabled) indirectReadTiming.total +=
+        std::chrono::duration_cast<IndirectReadTiming::Duration>(
+            IndirectReadTiming::Clock::now() - begin);
+  }
+};
+
 //private
 // Default Off = 0, Length = StringCompLength
 //
@@ -4865,6 +4917,7 @@ PFILE INDEX:: GetFilePointer (const GPTYPE gp, const INT Off) const
 //
 INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) const
 {
+    IndirectReadScope timing(profileIndirectReads);
     if (!Dest) return -1;
     Dest[0] = '\0';
     if (Length <= 0) return 0;
@@ -4877,7 +4930,15 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
 #endif
 
 
-    if (Parent && Parent->GetMainMdt ()->GetMdtRecord (gp, &Mdtrec))
+    const auto mdtStarted = timing.enabled
+        ? IndirectReadTiming::Clock::now()
+        : IndirectReadTiming::Clock::time_point{};
+    const bool hasRecord = Parent &&
+        Parent->GetMainMdt()->GetMdtRecord(gp, &Mdtrec);
+    if (timing.enabled)
+      indirectReadTiming.mdt += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+          IndirectReadTiming::Clock::now() - mdtStarted);
+    if (hasRecord)
       {
         int x = 0;
         // Added edz : 3 Sept 1999 : Don't bother with deleted records!!
@@ -4905,23 +4966,56 @@ INT INDEX::GetIndirectBuffer (const GPTYPE gp, PUCHR Dest, INT Off, INT Length) 
             const GPTYPE available = Mdtrec.GetLocalRecordEnd() - GPTYPE(Offset) + 1;
             if (GPTYPE(Length) > available) Length = INT(available);
 
+            const auto pathStarted = timing.enabled
+                ? IndirectReadTiming::Clock::now()
+                : IndirectReadTiming::Clock::time_point{};
             DOCTYPE     *DoctypePtr = Parent->GetDocTypePtr ( Mdtrec.GetDocumentType() );
             const STRING filename (  Parent->ResolvePathname(Mdtrec.GetFullFileName()) );
+            if (timing.enabled)
+              indirectReadTiming.path += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                  IndirectReadTiming::Clock::now() - pathStarted);
             if (DoctypePtr)
               {
                 if (DebugMode)
                   message_log (LOG_INFO, "Getting indirect term via %s::GetTerm(%s,%lu,%d)",
                         DoctypePtr->Name().c_str(), filename.c_str(), (unsigned long)Offset, (int)Length );
+                const auto started = timing.enabled
+                    ? IndirectReadTiming::Clock::now()
+                    : IndirectReadTiming::Clock::time_point{};
                 x = DoctypePtr->GetTerm(filename, (char *)Buffer, Offset, Length);
+                if (timing.enabled) {
+                  ++indirectReadTiming.delegated;
+                  indirectReadTiming.delegate += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                      IndirectReadTiming::Clock::now() - started);
+                }
                 if (DebugMode && x < Length) message_log (LOG_INFO, "Got %d Bytes", x);
               }
             else
               {
+                if (timing.enabled) ++indirectReadTiming.direct;
+                const auto openStarted = timing.enabled
+                    ? IndirectReadTiming::Clock::now()
+                    : IndirectReadTiming::Clock::time_point{};
                 FILE *fp = ffopen (filename, "rb");
+                if (timing.enabled)
+                  indirectReadTiming.open += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                      IndirectReadTiming::Clock::now() - openStarted);
                 if (fp != NULL)
                   {
+                    const auto readStarted = timing.enabled
+                        ? IndirectReadTiming::Clock::now()
+                        : IndirectReadTiming::Clock::time_point{};
                     x = pfread(fp, Buffer, Length, Offset);
+                    if (timing.enabled)
+                      indirectReadTiming.read += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                          IndirectReadTiming::Clock::now() - readStarted);
+                    const auto closeStarted = timing.enabled
+                        ? IndirectReadTiming::Clock::now()
+                        : IndirectReadTiming::Clock::time_point{};
                     ffclose(fp); // Close
+                    if (timing.enabled)
+                      indirectReadTiming.close += std::chrono::duration_cast<IndirectReadTiming::Duration>(
+                          IndirectReadTiming::Clock::now() - closeStarted);
                   }
               }
           }
@@ -6063,10 +6157,32 @@ PIRSET INDEX::GlobSearch(const STRING& QueryTerm, const STRING& fieldName, bool 
 }
 
 
+// Fold the source through the same length-preserving normalization used by
+// the SIS writer. The result retains ordering for binary-search callers.
+static inline source_match::OrderedResult CompareSourceUTF8(
+    const UCHR *term, const UCHR *ptr, size_t n)
+{
+  const size_t sourceBytes = strlen((const char *)ptr);
+  // The hot posting scan can reuse scratch space without allocating for
+  // every binary-search probe. Each search thread owns its own buffer.
+  static thread_local std::vector<UCHR> candidate;
+  candidate.assign(ptr, ptr+sourceBytes);
+  candidate.push_back(0);
+  BufferClean(candidate.data(), sourceBytes, true);
+  // TermSearch already folded the query into SearchTerm.
+  return source_match::compare_folded(term, n, candidate.data(), sourceBytes);
+}
+
 // Right Truncated match
 static inline INT LeftTermCompare(const UCHR *term, const UCHR *ptr, const size_t n,
                                   size_t *length = NULL)
 {
+  if (_is_globalUTF8)
+    {
+      const auto match = CompareSourceUTF8(term, ptr, n);
+      if (!match.order && length) *length = match.bytes ? match.bytes - 1 : 0;
+      return match.order;
+    }
   return _strncasecmp(term, ptr, n, NULL, length);
 }
 
@@ -6098,6 +6214,17 @@ static inline INT TermCompareSpecial(const UCHR *term, const UCHR *ptr, const si
 static inline INT TermCompare(const UCHR *term, const UCHR *ptr, const size_t n,
                               size_t *length = NULL)
 {
+  if (_is_globalUTF8)
+    {
+      const auto match = CompareSourceUTF8(term, ptr, n);
+      if (match.order) return match.order;
+      // A bounded prefix may end in the middle of a multi-byte character.
+      // Never interpret a continuation byte as an exact word boundary.
+      if (((ptr[match.bytes] & 0xc0) == 0x80) ||
+          IsTermChr(ptr+match.bytes)) return -1;
+      if (length) *length = match.bytes ? match.bytes - 1 : 0;
+      return 0;
+    }
   bool x;
   INT diff = _strncasecmp(term, ptr, n, &x, length);
   if (diff == 0 && x)
@@ -6811,6 +6938,112 @@ PIRSET          INDEX::TermSearch ( const STRING& QueryTerm, const STRING& field
 
   clock_t         startClock = clock();
 
+  // Opt-in source-verification profiling. All timers and counters are inactive
+  // unless IB_PROFILE_TERMSEARCH=1 (or another nonzero value) is set.
+  static const bool profileTermSearch = [] {
+    const char *flag = std::getenv("IB_PROFILE_TERMSEARCH");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+
+  struct TermSearchProfile {
+    using Clock = std::chrono::steady_clock;
+    const STRING& query;
+    const bool enabled;
+    const Clock::time_point started;
+    size_t shards = 0;
+    size_t candidates = 0;
+    size_t visited = 0;
+    size_t fieldRejected = 0;
+    size_t sourceChecks = 0;
+    size_t accepted = 0;
+    size_t sourceReads = 0;
+    size_t probeReads = 0;
+    size_t sourceBytes = 0;
+    size_t probeBytes = 0;
+    size_t compares = 0;
+    size_t sourceFolds = 0;
+    size_t gpAdjacentDescents = 0;
+    size_t gpAdjacentPairs = 0;
+    const IndirectReadTiming indirectBegin;
+    bool delegated = false;
+    std::chrono::nanoseconds sourceTime{0};
+    std::chrono::nanoseconds probeTime{0};
+    std::chrono::nanoseconds compareTime{0};
+    std::chrono::nanoseconds foldTime{0};
+
+    TermSearchProfile(const STRING& q, bool on)
+      : query(q), enabled(on),
+        started(on ? Clock::now() : Clock::time_point{}),
+        indirectBegin(on ? indirectReadTiming : IndirectReadTiming{}) {}
+    ~TermSearchProfile() {
+      if (!enabled) return;
+      const auto elapsed = Clock::now() - started;
+      const auto millis = [](std::chrono::nanoseconds ns) {
+        return std::chrono::duration<double, std::milli>(ns).count();
+      };
+      message_log(LOG_INFO,
+        "TERM_PROFILE query=\"%s\" shards=%zu candidates=%zu visited=%zu "
+        "field_rejected=%zu source_checks=%zu accepted=%zu "
+        "source_reads=%zu source_bytes=%zu source_ms=%.3f "
+        "probe_reads=%zu probe_bytes=%zu probe_ms=%.3f "
+        "compares=%zu compare_ms=%.3f folds=%zu fold_ms=%.3f "
+        "elapsed_ms=%.3f delegated=%d "
+        "gp_pairs=%zu gp_descents=%zu",
+        query.c_str(), shards, candidates, visited, fieldRejected,
+        sourceChecks, accepted, sourceReads, sourceBytes, millis(sourceTime),
+        probeReads, probeBytes, millis(probeTime),
+        compares, millis(compareTime), sourceFolds, millis(foldTime),
+        std::chrono::duration<double, std::milli>(elapsed).count(),
+        int(delegated), gpAdjacentPairs, gpAdjacentDescents);
+      const auto& reads = indirectReadTiming;
+      message_log(LOG_INFO,
+        "INDIRECT_PROFILE query=\"%s\" calls=%zu direct=%zu delegated=%zu "
+        "total_ms=%.3f mdt_ms=%.3f path_ms=%.3f delegate_ms=%.3f "
+        "open_ms=%.3f read_ms=%.3f close_ms=%.3f",
+        query.c_str(),
+        reads.calls - indirectBegin.calls,
+        reads.direct - indirectBegin.direct,
+        reads.delegated - indirectBegin.delegated,
+        millis(reads.total - indirectBegin.total),
+        millis(reads.mdt - indirectBegin.mdt),
+        millis(reads.path - indirectBegin.path),
+        millis(reads.delegate - indirectBegin.delegate),
+        millis(reads.open - indirectBegin.open),
+        millis(reads.read - indirectBegin.read),
+        millis(reads.close - indirectBegin.close));
+    }
+  } profile(QueryTerm, profileTermSearch);
+
+  const auto readIndirect = [&](GPTYPE posting, PUCHR dest, INT off,
+                                INT len, bool verifying) -> INT {
+    if (!profile.enabled)
+      return GetIndirectBuffer(posting, dest, off, len);
+    const auto begin = TermSearchProfile::Clock::now();
+    const INT got = GetIndirectBuffer(posting, dest, off, len);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        TermSearchProfile::Clock::now() - begin);
+    if (verifying) {
+      ++profile.sourceReads;
+      if (got > 0) profile.sourceBytes += size_t(got);
+      profile.sourceTime += elapsed;
+    } else {
+      ++profile.probeReads;
+      if (got > 0) profile.probeBytes += size_t(got);
+      profile.probeTime += elapsed;
+    }
+    return got;
+  };
+  const auto compareIndirect = [&](const UCHR *term, const UCHR *source,
+                                   size_t bytes, size_t *matched) -> INT {
+    if (!profile.enabled) return Compare(term, source, bytes, matched);
+    const auto begin = TermSearchProfile::Clock::now();
+    const INT result = Compare(term, source, bytes, matched);
+    profile.compareTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        TermSearchProfile::Clock::now() - begin);
+    ++profile.compares;
+    return result;
+  };
+
   STRING          RealTerm ( FullTerm, x );	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   STRING          SearchTerm ( TermClean ( RealTerm, true ) );
@@ -7070,6 +7303,7 @@ for (size_t i = 0; i < x; )
           }
         if ( fpi == NULL )
           continue;		// Next
+        if (profile.enabled) ++profile.shards;
 
         int fpi_d = IndexFd(fpi); // get file number 
 
@@ -7110,11 +7344,14 @@ for (size_t i = 0; i < x; )
                   {
                     int             new_length = 0;
                     // Skip over while space
-                    while ( *tp && !IsTermChr ( tp ) )
-                      tp++;
-                    // Find out length..
-                    while ( IsTermChr ( tp+new_length ) )
-                      new_length++;
+                    while (*tp && !IsTermChr(tp))
+                      ++tp;
+                    // Find out length in bytes, advancing over whole codepoints.
+                    if (_is_globalUTF8)
+                      new_length = (int)_ib_UTF8TermLength(tp, strlen((const char *)tp));
+                    else
+                      while (IsTermChr(tp+new_length))
+                        ++new_length;
                     if ( new_length > 1 && !IsStopWord ( tp, new_length ) )
                       {
                         off_t          alt_first;
@@ -7160,6 +7397,7 @@ for (size_t i = 0; i < x; )
                         if (*FullTerm == '\0')
                           {
                             ffclose(fpi);
+                            if (profile.enabled) profile.delegated = true;
                             return TermSearch(newTerm, FieldName, Typ);
                           }
                       }
@@ -7167,7 +7405,15 @@ for (size_t i = 0; i < x; )
                   }
 
                 // Do we have a bunch of *very* common terms?
-                if (ip >= PhraseWaterlimit) // Used PhraseWaterlimit instead of CommonWords.. 23 March 2004 edz@nonmonotonic.com
+                // A literal phrase is not equivalent to a proximity chain:
+                // #< permits four bytes between terms (e.g. "solid it is"
+                // matches "solid" "is" #<), and the rewrite loses the '='
+                // qualifier for AlwaysMatches. Verify literal phrases from
+                // source even when every SIS anchor exceeds PhraseWaterlimit.
+                // Explicit positional queries still use CharProx.
+                if (ip >= PhraseWaterlimit &&
+                    Typ != Exact && Typ != AlwaysMatches &&
+                    Typ != LeftAlwaysMatches)
                   {
                     if (!heuristic)
                       {
@@ -7187,6 +7433,7 @@ for (size_t i = 0; i < x; )
                             message_log (LOG_INFO, "Phrase \"%s\" uses all common words (%ld > %ld : %ld) [%d]. " 
                                   "Using alternative search heuristic: %s",
                                   FullTerm, (long)ip,  (long)PhraseWaterlimit, (long)CommonWordsThreshold, jj, S.c_str());
+                            if (profile.enabled) profile.delegated = true;
                             return Search(query);
                           }
                         else
@@ -7219,11 +7466,11 @@ for (size_t i = 0; i < x; )
               {
                 oip = ip;
 
-                if ( ( gp = GpFread ( ip, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( ip, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
                     if ( ( z = first_char - ( UCHR ) _ib_tolower ( Buffer[0] ) ) == 0 &&
-                         ( z = Compare ( Term, Buffer, Term_length, NULL) ) == 0 )
+                         ( z = compareIndirect(Term, Buffer, Term_length, NULL) ) == 0 )
                       {
                         hit = true;	// Got a match
 
@@ -7263,10 +7510,10 @@ for (size_t i = 0; i < x; )
             nomatch = 0;
             do
               {
-                if ( ( gp = GpFread ( first, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
                 else
                   {
@@ -7296,10 +7543,10 @@ for (size_t i = 0; i < x; )
               {
                 if ( first > 0 )
                   first--;
-                if ( ( gp = GpFread ( first, fpi_d ) ) != ((GPTYPE)-1) && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( first, fpi_d ) ) != ((GPTYPE)-1) && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL);
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
               }
             while ( ( z == 0 ) && ( first > 0 ) );
@@ -7317,10 +7564,10 @@ for (size_t i = 0; i < x; )
             nomatch = maxip;
             do
               {
-                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
                 else
                   {
@@ -7354,10 +7601,10 @@ for (size_t i = 0; i < x; )
               {
                 if ( last < maxip )
                   last++;
-                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && GetIndirectBuffer ( gp, Buffer ) > 0)
+                if ( ( gp = GpFread ( last, fpi_d ) ) != (GPTYPE)-1 && readIndirect(gp, Buffer, 0, StringCompLength, false) > 0)
                   {
                     // Do we match?
-                    z = Compare ( Term, Buffer, Term_length, NULL );
+                    z = compareIndirect(Term, Buffer, Term_length, NULL);
                   }
               }
             while ( ( z == 0 ) && ( last < maxip ) );
@@ -7432,18 +7679,30 @@ for (size_t i = 0; i < x; )
             Parent->SetErrorCode ( 2 );
             continue;
           }
+        if (profile.enabled) {
+          profile.candidates += size_t(x);
+          message_log(LOG_INFO,
+            "TERM_PROFILE anchor query=\"%s\" shard=%d term=\"%.*s\" "
+            "offset=%d candidates=%zu overflow=%d",
+            QueryTerm.c_str(), int(jj), int(Term_length),
+            (const char *)Term, Offset, size_t(x), int(overflow));
+        }
         if ( CheckField && FirstTime )
           {
             FieldCache->SetFieldName ( FieldName ); // Note: Here we can adise we Disk
             FirstTime = false;
           }
-        // sort gplist
-// clock_t xx = clock();
-        // sort gplist
-        if ( x > 1 && (Typ == LeftMatch || Typ == LeftAlwaysMatches) ) /* See XXXX Below */
-          QSORT_GP ( gplist, x, sizeof ( GPTYPE ), gpcomp ); // Speed up looking
-// xx = clock() - xx;
-// cerr << "Clock = " << xx << endl;
+        // GP sorting does not help Exact/literal phrases on the measured
+        // SIS ranges: bird, rna, virus, and vaccines had zero GP descents.
+        // Keep the historical left-match sort only. Record disorder when
+        // profiling in case another index has different posting order.
+        if (profile.enabled && x > 1) {
+          profile.gpAdjacentPairs += size_t(x - 1);
+          for (INT k = 1; k < x; ++k)
+            if (gplist[k] < gplist[k - 1]) ++profile.gpAdjacentDescents;
+        }
+        if (x > 1 && (Typ == LeftMatch || Typ == LeftAlwaysMatches))
+          QSORT_GP(gplist, x, sizeof(GPTYPE), gpcomp);
 
         for ( ip = 0; ip < (off_t)x ; ip++ )
           {
@@ -7455,10 +7714,12 @@ for (size_t i = 0; i < x; )
 		    break; // Timeout
 		  }
 	      }
+            if (profile.enabled) ++profile.visited;
             gp = gplist[ip];
             if ( CheckField && !FieldCache->ValidateInField ( gp ) )
               {
 //cerr << "Address " << ip << " not found/valid in field" << endl;
+                if (profile.enabled) ++profile.fieldRejected;
                 continue; // Not in field...
               }
 
@@ -7469,7 +7730,8 @@ for (size_t i = 0; i < x; )
               {
                 // Exact match
                 Cost = 0.8;
-                if (GetIndirectBuffer ( gp, Buffer, Offset, FullTerm_length ) <= 0 ||
+                if (profile.enabled) ++profile.sourceChecks;
+                if (readIndirect(gp, Buffer, Offset, FullTerm_length, true) <= 0 ||
                     RealTerm.Compare ( ( const char * ) Buffer, FullTerm_length ) != 0 )
                   {
 //cerr << "GetIndirect/Compare failed: " << &Buffer[1] << endl;
@@ -7483,8 +7745,11 @@ for (size_t i = 0; i < x; )
               {
                 // Exact Term match
                 Cost += 0.8;
-                if (GetIndirectBuffer ( gp, Buffer, Offset+1, FullTerm_length+3 ) <= 0 ||
-                    Compare ( ( const UCHR * ) RealTerm.c_str (), &Buffer[1], FullTerm_length, NULL ) != 0)
+                if (profile.enabled) ++profile.sourceChecks;
+                if (readIndirect(gp, Buffer, Offset+1, FullTerm_length+3, true) <= 0 ||
+                    compareIndirect ( _is_globalUTF8 ? (const UCHR *)SearchTerm.c_str()
+                       : (const UCHR *)RealTerm.c_str(),
+                       &Buffer[1], FullTerm_length, NULL ) != 0)
                   {
 //cerr << "GetIndirect/Compare failed: " << &Buffer[1] << endl;
                     continue; // No match...
@@ -7504,29 +7769,149 @@ for (size_t i = 0; i < x; )
                 // 5 characters per word so max white space...
                 // if Offset == 0 then we don't need to read backwards
                 size_t      start = Offset > 0 ? (maxTermLength/5 + StringCompLength/4) : 0;
+                if (_is_globalUTF8 && Offset > 0) {
+                  // The chosen SIS word may be near the start of its record.
+                  // A fixed lookbehind would otherwise ask GetIndirectBuffer
+                  // to read outside that record and lose an exact phrase.
+                  MDTREC record;
+                  if (!Parent->GetMainMdt()->GetMdtRecord(gp, &record)) continue;
+                  const GPTYPE recordBegin =
+                      record.GetGlobalFileStart() + record.GetLocalRecordStart();
+                  const GPTYPE before = gp >= recordBegin ? gp - recordBegin : 0;
+                  const size_t safe = before >= (GPTYPE)Offset
+                      ? (size_t)(before - (GPTYPE)Offset) : 0;
+                  start = std::min(start, safe);
+                }
 
                 Cost += 0.1; // Overflows can get expensive
-                if (GetIndirectBuffer ( gp, Buffer, Offset + start, maxTermLength+start ) <= 0)
-                  continue; // No such string
-
-                if (start > 0)
-                  {
-                    if (IsTermChar(Buffer[start]))
-                      {
-                        while (start > 0 && IsTermChar(Buffer[start-1]))
-                          start--, gp--;
-                      }
-                    else
-                      {
-                        while (start < Buffer_Len && Buffer[start] && ! IsTermChar(Buffer[start]))
-			  {
-                            start++, gp++;
-			  }
-                      }
-                  }
-                if (Compare ( RealTerm, Buffer+start, FullTerm_length, &myLength ) != 0 )
+                if (profile.enabled) ++profile.sourceChecks;
+                const INT readBytes = readIndirect(gp, Buffer, Offset + start, maxTermLength+start, true);
+                if (readBytes <= 0 || start >= (size_t)readBytes)
                   continue;
+
+                if (_is_globalUTF8)
+                  {
+                    // Buffer[anchor] is the SIS term's posting GP, not
+                    // necessarily the start of the complete source phrase.
+                    const size_t anchor = start + (size_t)Offset;
+                    if (anchor >= (size_t)readBytes) continue;
+                    // Normalize once per fetched source span, rather than
+                    // normalizing each candidate suffix. Keep Buffer intact
+                    // for original-byte offsets and word-boundary checks.
+                    const size_t sourceBytes = (size_t)(
+                        std::find(Buffer, Buffer + (size_t)readBytes, UCHR(0)) - Buffer);
+                    std::vector<UCHR> folded;
+                    if (!Special) {
+                      folded.assign(Buffer, Buffer + sourceBytes);
+                      folded.push_back(0);
+                      const auto foldStarted = profile.enabled
+                          ? TermSearchProfile::Clock::now()
+                          : TermSearchProfile::Clock::time_point{};
+                      BufferClean(folded.data(), sourceBytes, true);
+                      if (profile.enabled) {
+                        ++profile.sourceFolds;
+                        profile.foldTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            TermSearchProfile::Clock::now() - foldStarted);
+                      }
+                    }
+                    size_t matchAt = (size_t)readBytes;
+                    size_t matchLength = 0;
+                    const auto tryMatch = [&](size_t at) {
+                      if (at > anchor || at >= sourceBytes) return false;
+                      size_t consumed = 0;
+                      if (Special) {
+                        if (compareIndirect((const UCHR *)SearchTerm.c_str(),
+                                            Buffer+at, FullTerm_length,
+                                            &consumed) != 0)
+                          return false;
+                      } else {
+                        const auto comparedAt = profile.enabled
+                            ? TermSearchProfile::Clock::now()
+                            : TermSearchProfile::Clock::time_point{};
+                        const auto match = source_match::compare_folded(
+                            (const UCHR *)SearchTerm.c_str(), FullTerm_length,
+                            folded.data()+at, sourceBytes-at);
+                        if (profile.enabled) {
+                          ++profile.compares;
+                          profile.compareTime += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              TermSearchProfile::Clock::now() - comparedAt);
+                        }
+                        if (match.order) return false;
+                        const size_t endAt = at + match.bytes;
+                        // Use TermCompare's exact-word policy on original bytes.
+                        if (endAt < sourceBytes &&
+                            (((Buffer[endAt] & 0xc0) == 0x80) ||
+                              IsTermChr(Buffer+endAt)))
+                          return false;
+                        consumed = match.bytes ? match.bytes - 1 : 0;
+                      }
+                      // Require the matched phrase to cover the selected SIS
+                      // word, otherwise this is an unrelated occurrence.
+                      if (at + consumed + 1 <= anchor) return false;
+                      matchAt = at;
+                      matchLength = consumed;
+                      return true;
+                    };
+                    const size_t aligned = source_match::align_start(
+                      Buffer, (size_t)readBytes, start, true,
+                      [](const UCHR *p) { return IsTermChr(p) != 0; });
+                    if (aligned >= (size_t)readBytes || !tryMatch(aligned))
+                      {
+                        // Extra source whitespace can shift the first word
+                        // relative to the query's byte-based Offset. Look for
+                        // an earlier whole-word start that covers the anchor.
+                        bool previousWord = false;
+                        for (size_t at = 0; at <= anchor; )
+                          {
+                            const bool word = IsTermChr(Buffer+at) != 0;
+                            if (word && !previousWord && tryMatch(at)) break;
+                            previousWord = word;
+                            const size_t step = _ib_UTF8CharBytes(
+                                Buffer+at, (size_t)readBytes-at);
+                            if (!step) break;
+                            at += step;
+                          }
+                      }
+                    if (matchAt >= (size_t)readBytes) continue;
+                    myLength = matchLength;
+                    // HITLIST::Fc(n, Offset) subtracts the query's anchor
+                    // offset when building the final evidence coordinate.
+                    // Preserve that convention here: only correct the gap
+                    // between the recovered source start and the expected
+                    // phrase start (Buffer[start]). Subtracting Offset here
+                    // would shift every hit left by the anchor offset twice.
+                    if (matchAt < start) {
+                      const size_t back = start - matchAt;
+                      if (gp < back) continue;
+                      gp -= back;
+                    } else {
+                      gp += matchAt - start;
+                    }
+                  }
+                else
+                  {
+                    // Keep the historical single-byte source logic unchanged.
+                    if (start > 0)
+                      {
+                        if (IsTermChar(Buffer[start]))
+                          {
+                            while (start > 0 && IsTermChar(Buffer[start-1]))
+                              start--, gp--;
+                          }
+                        else
+                          {
+                            while (start < Buffer_Len && Buffer[start] &&
+                                   !IsTermChar(Buffer[start]))
+                              {
+                                start++, gp++;
+                              }
+                          }
+                      }
+                    if (compareIndirect(RealTerm, Buffer+start, FullTerm_length, &myLength) != 0)
+                      continue;
+                  }
               }
+            if (profile.enabled) ++profile.accepted;
             HitList.Add (gp, myLength);
           }	// Walk through
         delete[] gplist;

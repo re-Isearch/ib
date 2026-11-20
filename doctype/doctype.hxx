@@ -225,6 +225,9 @@ protected:
   FILE       *ffopen(const STRING& Filename, const char *mode) const {
 	return Db ? Db->ffopen(Filename, mode) : fopen(Filename, mode);
   }
+  FILE       *ffopenPositioned(const STRING& Filename, const char *mode) const {
+	return Db ? Db->ffopenPositioned(Filename, mode) : fopen(Filename, mode);
+  }
   INT         ffclose(FILE *Fp) const { return Db ? Db->ffclose(Fp) : fclose(Fp); }
 
  GPTYPE      ParseWordsUTF8(UCHR* DataBuffer, GPTYPE DataLength,
