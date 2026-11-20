@@ -2246,15 +2246,9 @@ again:
                     // vector provenance even when only one passage is shown.
                     cout << "(overlaps Evidence)" << endl;
                   } else {
-                    STRING vectorPath;
-                    MDTREC mdtrec;
-                    if (pdb->GetMainMdt()->GetEntry(result.GetMdtIndex(), &mdtrec)) {
-                      const GPTYPE offset =
-                          mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
-                      FC global(b);
-                      global += offset;
-                      pdb->GetPeerFc(global, &vectorPath);
-                    }
+                    // Preserve the exact HNSW field identity from the search.
+                    // A generic peer lookup need not recognize an entire field span.
+                    const STRING& vectorPath = vector->FieldName;
 
                     FC excerpt(b);
                     bool truncated = false;
@@ -2270,7 +2264,7 @@ again:
                     result.PresentDisplay(
                         excerpt, &vectorText,
                         RESULT::GetDisplayMarkers(DisplayMarkerNone));
-                    cout << "[\\033[3m" << vectorPath << "\\033[23m] ";
+                    cout << "[\033[3m" << vectorPath << "\033[23m] ";
                     if (vectorText.IsEmpty())
                       cout << "** Unavailable **";
                     else
