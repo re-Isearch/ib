@@ -2301,31 +2301,34 @@ again:
                     if (near) {
                       cout << "near Evidence (" << gap << " bytes";
                       // Query the real shared containing field instance.
-                      MDTREC mdtrec;
-                      if (pdb->GetMainMdt()->GetEntry(result.GetMdtIndex(), &mdtrec)) {
-                        const GPTYPE offset =
-                            mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
-                        FC unionExtent(
-                            a.GetFieldStart() < b.GetFieldStart()
-                                ? a.GetFieldStart() : b.GetFieldStart(),
-                            a.GetFieldEnd() > b.GetFieldEnd()
-                                ? a.GetFieldEnd() : b.GetFieldEnd());
-                        unionExtent += offset;
-                        // A generic peer lookup can return the unresolved
-                        // placeholder "???". Use the vector field's known
-                        // ancestor chain, as ordinary evidence selection does,
-                        // and verify the enclosing field instance.
-                        DFDT *dfdt = pdb->GetDfdt();
-                        if (dfdt) {
+                      // Isearch runs through VIDB, whose default peer
+                      // overload does not resolve structural containers.
+                      // Resolve through the owning IDB, not the facade.
+                      IDBOBJ *sourceDb = pdb->GetIDB(result);
+                      if (!sourceDb && pdb->GetIDBCount() == 1)
+                        sourceDb = pdb->GetIDB(1);
+                      if (sourceDb) {
+                        MDTREC mdtrec;
+                        PMDT mdt = sourceDb->GetMainMdt();
+                        DFDT *dfdt = sourceDb->GetDfdt();
+                        if (mdt && dfdt &&
+                            mdt->GetEntry(result.GetMdtIndex(), &mdtrec)) {
+                          const GPTYPE offset =
+                              mdtrec.GetGlobalFileStart() + mdtrec.GetLocalRecordStart();
+                          FC unionExtent(
+                              a.GetFieldStart() < b.GetFieldStart()
+                                  ? a.GetFieldStart() : b.GetFieldStart(),
+                              a.GetFieldEnd() > b.GetFieldEnd()
+                                  ? a.GetFieldEnd() : b.GetFieldEnd());
+                          unionExtent += offset;
                           const FIELD_PATH path =
                               dfdt->GetFieldPath(vector->FieldName);
                           if (path.size() > 2) {
                             const FIELD_PATH ancestors(path.begin() + 1, path.end());
                             STRING commonPath;
                             const FC container =
-                                pdb->GetPeerFc(unionExtent, ancestors, &commonPath);
-                            if (!commonPath.IsEmpty() && commonPath != "???" &&
-                                container.Contains(unionExtent))
+                                sourceDb->GetPeerFc(unionExtent, ancestors, &commonPath);
+                            if (!commonPath.IsEmpty() && container.Contains(unionExtent))
                               cout << "; common: " << commonPath;
                           }
                         }
