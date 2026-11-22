@@ -3967,7 +3967,7 @@ PIRSET INDEX::Search (const QUERY& Query)
   bool  gotRelation;
   FIELDTYPE    FieldType;
   FIELDTYPE    aFieldType; // Advised Field Type
-  INT          TermWeight;
+  FLOAT        TermWeight;
   POPOBJ       Op1, Op2;
   t_Operator op_t;
   clock_t      startClock = clock();
