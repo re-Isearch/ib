@@ -85,6 +85,31 @@ Comparing `3 * 0.40` to `0.5 * 0.80` is **not** a valid substitute for calibrati
 
 Nor should the engine compare uncalibrated scores across fields/queries as if they necessarily had the same distribution. The actual calibration depends on the embedding model, field, and scoring scale; query difficulty can also vary.
 
+## Why vector evidence cannot be compacted like Boolean hits
+
+For lexical and the other typed search operands, **the match decision is Boolean**: a term, range, date, or other predicate either matches a record or it does not. There may be multiple hit locations and sophisticated *record-level* ranking, but an individual hit does not carry a separate, continuous estimate of semantic similarity beyond the query's weighting and the ordinary scoring rules. Thus the hit locations can be collected together without losing a distinct per-hit fuzzy score.
+
+A vector hit has a different meaning. Each retrieved span carries its own native, model-dependent similarity. After calibration, that similarity becomes a **fuzzy evidence value** rather than a simple yes/no match. Two spans in the same document can have different strengths, even for the same vector operand; spans from different vector operands can also have different fields, query texts, calibration contexts, and explicit weights.
+
+For example, suppose one document is found by three vector operands:
+
+| Vector operand | Calibrated evidence | Query weight | Span count |
+| --- | ---: | ---: | ---: |
+| ABSTRACT query | 0.8 | 3.0 | 4 |
+| CLAIMS query | 0.4 | 1.0 | 2 |
+| BIBLIOGRAPHY query | 0.0 | 0.5 | 1 |
+
+Flattening all seven spans into one undifferentiated hit table would lose **which query operand matched which span**, **how strong the evidence was**, and **which explicit weight applies**. Those facts are necessary to explain the result and to respect the searcher's query algebra. Even the zero-evidence bibliography hit may remain useful as a recorded candidate location; it must not be mistaken for a positive contribution.
+
+The intended representation therefore has two levels:
+
+- **One document result**, regardless of how many vector spans retrieve it.
+- **One vector evidence group per matching query operand**, with its field/query identity, calibrated contribution, and all corresponding span coordinates (and native scores where retained).
+
+Within a single group, the proposed **dominant-passage** rule uses the maximum calibrated passage evidence for scoring; its other spans remain location evidence. Across groups, do not silently apply that rule again: they are independently specified operands whose combination belongs to the query algebra.
+
+**Compaction must remove duplicate document identities, not erase graded evidence or operand identities.** This distinction is conceptual and applies even if an implementation chooses to store evidence in a single underlying table with sufficient per-entry metadata. It does not require a particular user-interface layout; a UI may show three separately labeled blocks or a compact summary with expandable groups.
+
 ## Field semantics belong to the query
 
 Consider two documents:
