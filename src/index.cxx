@@ -6542,14 +6542,9 @@ index collapse/merge. Loaded IRSETs from an earlier layout should therefore
 not be combined with live IRSETs using source-aware E3/E4 normalization.  */
 static inline FCSOURCE MakeSourceId(const INT slot, const GPTYPE sisSlot)
 {
-  const FCSOURCE id = (FCSOURCE)sisSlot + 1;
-  if (sisSlot == 0) return 0;
-
-  // Low 56 bits belong to the SIS slot.
-  if (id > 0x00FFFFFFFFFFFFFFULL)
-    return 0;
-
-  return ((FCSOURCE)(BYTE)slot << 56) | id;
+  // findIt() supplies a 1-based SIS entry ordinal, or zero if not found.
+  // Preserve that sentinel and the SIS shard in the 8/48/8 source layout.
+  return MakeSISSourceId((BYTE)slot, (FCSOURCE)sisSlot);
 }
 
 INT INDEX::find(const STRING& SisFn, const INT Slot, const STRING& Word, bool Truncate,
