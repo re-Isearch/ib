@@ -29,6 +29,54 @@ using FCSOURCE = UINT8;
 
 static constexpr FCSOURCE FCSOURCE_NONE = 0;
 
+// Evidence provenance, version 1:
+//   [63..56] SIS shard, [55..8] 1-based SIS entry ordinal, [7..0] datatype.
+// Lexical sources have datatype 0 (FIELDTYPE::any), by convention; their
+// nonzero SIS identity distinguishes terms. Typed sources have no SIS identity.
+// SourceId 0 means unspecified provenance, not a lexical match.
+// The enum values live in FIELDTYPE; keep this header independent of it.
+static constexpr FCSOURCE FCSOURCE_TYPE_MASK = 0xFFULL;
+static constexpr FCSOURCE FCSOURCE_SIS_MASK  = 0x0000FFFFFFFFFFFFULL;
+
+inline constexpr FCSOURCE MakeSISSourceId(unsigned shard, FCSOURCE sisIdentity) noexcept
+{
+  return shard <= 0xFF && sisIdentity != 0 && sisIdentity <= FCSOURCE_SIS_MASK
+    ? (FCSOURCE(shard) << 56) | (sisIdentity << 8)
+    : FCSOURCE_NONE;
+}
+
+inline constexpr FCSOURCE MakeTypedSourceId(unsigned datatype) noexcept
+{
+  // Zero is unspecified; lexical SIS identities use MakeSISSourceId().
+  return datatype <= 0xFF ? FCSOURCE(datatype) : FCSOURCE_NONE;
+}
+
+inline constexpr unsigned SourceType(FCSOURCE source) noexcept
+{
+  return unsigned(source & FCSOURCE_TYPE_MASK);
+}
+
+inline constexpr FCSOURCE SourceIdentity(FCSOURCE source) noexcept
+{
+  return (source >> 8) & FCSOURCE_SIS_MASK;
+}
+
+inline constexpr unsigned SourceShard(FCSOURCE source) noexcept
+{
+  return unsigned(source >> 56);
+}
+
+inline constexpr bool IsLexicalSource(FCSOURCE source) noexcept
+{
+  return SourceIdentity(source) != 0 && SourceType(source) == 0;
+}
+
+inline constexpr bool IsTypedSource(FCSOURCE source) noexcept
+{
+  return SourceIdentity(source) == 0 && SourceType(source) != 0;
+}
+
+
 struct FcLess
 {
   bool operator()(const FC& a, const FC& b) const
