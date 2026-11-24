@@ -4907,7 +4907,7 @@ OPOBJ *atomicIRSET::ComputeScoresE2Normalization(const float TermWeight)
                           // Same query term cannot provide
                           // proximity evidence with itself.
                           //
-                          if (sa == sb || sa == 0 || sb == 0)
+                          if (sa == sb || !IsLexicalSource(sa) || !IsLexicalSource(sb))
                             continue;
 
                           if (sa > sb)
