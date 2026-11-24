@@ -438,7 +438,7 @@ bool RESULT::PresentDisplay(const FC& Range, STRING *StringBuffer,
         continue;
 
 #if _TRACK_TERM_IDENTITY
-      const bool lexical = hit.GetSourceId() != 0;
+      const bool lexical = IsLexicalSource(hit.GetSourceId());
 #else
       const bool lexical = true;
 #endif
@@ -2012,7 +2012,7 @@ FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
           //
           // Prefer a lexical point inside the winning evidence.
           //
-          // SourceId==0 evidence may itself be a broad Date,
+          // Nonlexical evidence may itself be a broad Date,
           // Numeric, HNSW, etc. interval.
           //
           GPTYPE anchor =
@@ -2021,7 +2021,7 @@ FC RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *DoctypePtr) const
 #if _TRACK_TERM_IDENTITY
           for (const auto& hit : HitTable)
             {
-              if (hit.GetSourceId() != 0 &&
+              if (IsLexicalSource(hit.GetSourceId()) &&
                   best.Contains(hit))
                 {
                   anchor =
@@ -2825,7 +2825,7 @@ DISPLAY_EVIDENCE RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *Doct
           //
           // Prefer a lexical anchor inside the winning evidence.
           //
-          // SourceId==0 evidence can represent a broad Date,
+          // Nonlexical evidence can represent a broad Date,
           // Numeric, HNSW, etc. region, so a lexical point is
           // normally the better structural probe.
           //
@@ -2835,7 +2835,7 @@ DISPLAY_EVIDENCE RESULT::GetDisplayEvidence(size_t MaxBytesAdvice, DOCTYPE *Doct
 #if _TRACK_TERM_IDENTITY
           for (const auto& hit : HitTable)
             {
-              if (hit.GetSourceId() != 0 &&
+              if (IsLexicalSource(hit.GetSourceId()) &&
                   evidenceExtent.Contains(hit))
                 {
                   anchor =
