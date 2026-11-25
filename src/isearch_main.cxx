@@ -345,7 +345,7 @@ static void HelpUsage(const char *progname)
         "  -e file          // As -log, but only error messages." << endl <<
         "  -syslog facility // Set syslog facility (e.g. LOG_LOCAL2, LOG_DAEMON)." << endl <<
         "  -XML             // Present Results in XML-like structure." << endl <<
-	"  -Json            // Present Result in Json structure." << endl <<
+//	"  -Json            // Present Result in Json structure." << endl <<
 	"  -H[TML]          // Use HTML Record Presentation." << endl <<
 	"  -q[uiet]         // Print results and exit immediately." << endl <<
 	"  -t[erse]         // Print terse results." << endl <<
@@ -3028,12 +3028,15 @@ namespace
       NULL,
       "Present results using an XML-like structure."
     },
+    // JSON output is not yet supported.
+    /*
     {
       "presentation",
       "-Json",
       NULL,
       "Present search results using JSON."
     },
+    */
     {
       "presentation",
       "-H[TML]",
