@@ -341,7 +341,10 @@ static void HelpUsage(const char *progname)
 #endif
 //	"  -showall         // Show all hits neighborhoods." << endl <<
 	"  -summary         // Show summary/description." << endl <<
-	"  -XML             // Present Results in XML-like structure." << endl <<
+	"  -log file        // Route log messages to file; '-' for stderr, <stdout>, <syslog[N]>." << endl <<
+        "  -e file          // As -log, but only error messages." << endl <<
+        "  -syslog facility // Set syslog facility (e.g. LOG_LOCAL2, LOG_DAEMON)." << endl <<
+        "  -XML             // Present Results in XML-like structure." << endl <<
 	"  -Json            // Present Result in Json structure." << endl <<
 	"  -H[TML]          // Use HTML Record Presentation." << endl <<
 	"  -q[uiet]         // Print results and exit immediately." << endl <<
@@ -650,7 +653,34 @@ int _Isearch_main (int argc, char **argv)
 	  // process --opt as -opt
 	  Flag = argv[x][1] == '-' ? argv[x] + 1 : argv[x];
 
-          if (Flag.Equals ("-api"))
+          if (Flag.Equals ("-log") || Flag.Equals("-e"))
+            {
+              if (Flag.Equals("-e"))
+                log_init(LOG_PANIC|LOG_FATAL|LOG_ERROR|LOG_ERRNO);
+              if (++x >= argc)
+                {
+                  message_log(LOG_FATAL, "Usage: No log file specified after %s.", Flag.c_str());
+                  return 2;
+                }
+              if (strcmp(argv[x], "-") == 0)
+                log_init(stderr);
+              else
+                log_init("", argv[x]);
+              LastUsed = x;
+            }
+          else if (Flag.Equals("-syslog"))
+            {
+              if (++x >= argc)
+                {
+                  message_log(LOG_FATAL, "Usage: No facility specified after %s.", Flag.c_str());
+                  return 2;
+                }
+              if (!set_syslog(argv[x]))
+                message_log(LOG_ERROR, "Unknown syslog facility '%s' specified (-%s).",
+                            argv[x], Flag.c_str());
+              LastUsed = x;
+            }
+          else if (Flag.Equals ("-api"))
             {
               cout << "API " << __IB_Version << "/" << (DoctypeDefVersion & 0xFFF)
                 << "  built with: " << __CompilerUsed  << " (" <<  __HostPlatform << ")" << endl;
