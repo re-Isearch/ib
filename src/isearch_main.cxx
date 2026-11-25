@@ -2281,6 +2281,13 @@ again:
 	      else
 		pdb->Context(result, &string, RESULT::GetDisplayMarkers(DisplayMarkerVT100), &tstring, maxAdvice);
 
+              // Tab output is record-oriented: keep the evidence on one line.
+              if (TabFormat && !ShowXML)
+                {
+                  string.Pack();
+                  tstring.Pack();
+                }
+
               if (ShowXML)
                 cout << "<HIT TERM=\"" << tstring << "\">";
               else
