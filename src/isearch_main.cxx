@@ -2718,6 +2718,7 @@ again:
 		{
 		  if (!ShowXML) cout << "<!-- ";
 		  ShowXML = PresentHtml = 1; 
+                  TabFormat = false;
 		}
 	      else if (strncasecmp(tcp, "anc", 3) == 0 || strncasecmp(tcp, "pres", 3) == 0)
 	      {
