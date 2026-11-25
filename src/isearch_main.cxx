@@ -2487,6 +2487,10 @@ again:
 	    {
 	      break;
 	    }
+	  // In the IRSET shell, an empty line should not redisplay the current window.
+	  // Preserve the existing second-empty-line exit behavior above.
+	  if (ShellFlag && *Selection == '\0')
+	    goto newline;
 	  // @element is shorthand for element/element
 	  //
 	  if (strncmp(Selection, "hel", 3) == 0 || *Selection == '?')
