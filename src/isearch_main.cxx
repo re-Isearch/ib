@@ -1427,6 +1427,8 @@ int _Isearch_main (int argc, char **argv)
       else
         log_init("", LogDestination);
     }
+  else if (ShowXML)
+    log_init(stderr); // Keep diagnostics out of XML on stdout.
 
   clock_t start = clock();
 
@@ -2719,6 +2721,8 @@ again:
 		  if (!ShowXML) cout << "<!-- ";
 		  ShowXML = PresentHtml = 1; 
                   TabFormat = false;
+                  if (!LogDestination)
+                    log_init(stderr); // Do not mix diagnostics with XML.
 		}
 	      else if (strncasecmp(tcp, "anc", 3) == 0 || strncasecmp(tcp, "pres", 3) == 0)
 	      {
