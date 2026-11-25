@@ -251,12 +251,13 @@ PIRSET INDEX::LexiHashSearch(const STRING& Term, const STRING& FieldName, INT4 R
 template <class Enumerator>
 static void PopulateTypedResultSet(PIDBOBJ parent,
                                    const DATERANGE& dateRange,
-                                   PIRSET pirset,
+                                   PIRSET pirset, FCSOURCE sourceId,
                                    Enumerator&& enumerate);
 
 template <class Enumerator, class HitRange>
 static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
-                                  PIRSET result, Enumerator&& enumerate, HitRange&& hitRange);
+                                  PIRSET result, FCSOURCE sourceId,
+                                  Enumerator&& enumerate, HitRange&& hitRange);
 
 
 static void MonetaryWholeUnitBounds(INT16 key, INT16 *low, INT16 *high)
@@ -388,6 +389,7 @@ PIRSET INDEX::MonetarySearch(const MONETARYOBJ& Price,
       Parent,
       DateRange,
       pirset,
+      MakeTypedSourceId(FIELDTYPE::currency),
       [&](auto&& visitor)
       {
         // "12" denotes the whole-unit bucket; "12.00" is exact.
@@ -523,6 +525,7 @@ PIRSET INDEX::MonetarySearchRange(const MONETARYRANGE& Range,
       Parent,
       DateRange,
       pirset,
+      MakeTypedSourceId(FIELDTYPE::currency),
       [&](auto&& visitor)
       {
         return List.VisitMappedRange(
@@ -619,7 +622,8 @@ PIRSET INDEX::Float64Search(DOUBLE key, const STRING& FieldName, INT4 Relation)
     return true;
   };
   PopulateTypedResultSet(Parent, DateRange, result,
-    [&](auto&& visitor) {
+      MakeTypedSourceId(FIELDTYPE::float64),
+      [&](auto&& visitor) {
       const bool ok = values.VisitMappedMatches(filename, key, ZRelation_t(Relation),
                                                Float64ColumnMaps, keepRunning, visitor);
       if (!ok && keepRunning()) Parent->SetErrorCode(113);
@@ -666,7 +670,8 @@ PIRSET INDEX::NumericSearch(const NUMERICOBJ& key, const STRING& FieldName, INT4
     return true;
   };
   PopulateTypedResultSet(Parent, DateRange, result,
-    [&](auto&& visitor) {
+      MakeTypedSourceId((INT)type),
+      [&](auto&& visitor) {
       const bool ok = values.VisitMappedMatches(filename, key.GetTicks(), ZRelation_t(Relation),
                                                NumericColumnMaps, keepRunning, visitor);
       if (!ok && keepRunning()) Parent->SetErrorCode(113);
@@ -742,7 +747,8 @@ size_t INDEX::NumericalScan(SCANLIST *output, const STRING& field, size_t start,
 
 template <class Enumerator, class HitRange>
 static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
-                                  PIRSET pirset, Enumerator&& enumerate, HitRange&& hitRange)
+                                  PIRSET pirset, FCSOURCE sourceId,
+                                  Enumerator&& enumerate, HitRange&& hitRange)
 {
   if (parent == NULL || pirset == NULL)
     return;
@@ -817,7 +823,7 @@ static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
           }
 
         iresult.SetMdtIndex(current_w);
-        iresult.SetHitTable(FCHIT(hitRange(gp, span)));
+        iresult.SetHitTable(FCHIT(hitRange(gp, span), sourceId));
 
         pirset->FastAddEntry(std::move(iresult));
 
@@ -834,9 +840,10 @@ static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
 
 template <class Enumerator>
 static void PopulateTypedResultSet(PIDBOBJ parent, const DATERANGE& dateRange,
-                                  PIRSET result, Enumerator&& enumerate)
+                                  PIRSET result, FCSOURCE sourceId,
+                                  Enumerator&& enumerate)
 {
-  PopulateTypedResultSet(parent, dateRange, result, enumerate,
+  PopulateTypedResultSet(parent, dateRange, result, sourceId, enumerate,
                         [](GPTYPE gp, UINT2 span) { return FC(gp, gp+span); });
 }
 
@@ -938,6 +945,7 @@ PIRSET INDEX::IntegerSearch(const INT16 Key, const STRING& FieldName, INT4 Relat
       Parent,
       DateRange,
       pirset,
+      MakeTypedSourceId(FIELDTYPE::integer),
       [&](auto&& visitor)
       {
         return List.VisitMappedMatches(
@@ -1059,6 +1067,7 @@ PIRSET INDEX::IntegerSearchRange(const INTEGERRANGE& Range,
       Parent,
       DateRange,
       pirset,
+      MakeTypedSourceId(FIELDTYPE::integer),
       [&](auto&& visitor)
       {
         return List.VisitMappedRange(

@@ -1423,7 +1423,7 @@ size_t SQUERY::SetInfixTerm (const STRING& NewTerm)
   if (Parser->InputParsedOK())
     status = SetRpnTerm( TempString );
   else if (!Parser->GetErrorMessage(&ErrorMessage))
-    ErrorMessage.form("Unable to parse infix query: %s", NewTerm.c_str());
+    ErrorMessage.form("Unable to parse infix query: %s. Check for missing operands, operators, or mismatched parentheses; quote reserved words when searching for them literally.", NewTerm.c_str());
   delete Parser;
 
   return status;

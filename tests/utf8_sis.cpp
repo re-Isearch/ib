@@ -1,15 +1,22 @@
 #include "common.hxx"
 #include "index.hxx"
+#include "fpt.hxx"
 #include "idbobj.hxx"
 #include "lang-codes.hxx"
 #include "magic.hxx"
 #include "xml.hxx"
+#include "jsondoc.hxx"
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
+#include <cstdint>
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -30,6 +37,69 @@ static GPTYPE endpoint(FILE *fp)
   UCHR buffer[sizeof(GPTYPE)];
   require(fread(buffer, 1, sizeof(buffer), fp) == sizeof(buffer), "read SIS posting endpoint");
   return getGPTYPE(buffer, 0);
+}
+
+// The default charset is the process environment's charset, not necessarily
+// the encoding of any particular input document.
+#ifndef _WIN32
+static void default_charset_environment()
+{
+  struct SavedEnv {
+    const char *name;
+    bool present;
+    std::string value;
+    explicit SavedEnv(const char *key) : name(key), present(std::getenv(key) != nullptr),
+      value(present ? std::getenv(key) : "") {}
+    ~SavedEnv() {
+      if (present) setenv(name, value.c_str(), 1);
+      else unsetenv(name);
+    }
+  };
+  SavedEnv saveAll("LC_ALL"), saveCtype("LC_CTYPE"), saveLang("LANG");
+
+  require(unsetenv("LC_ALL") == 0, "clear LC_ALL for charset test");
+  require(setenv("LANG", "", 1) == 0, "set empty LANG");
+  require(setenv("LC_CTYPE", "UTF-8", 1) == 0, "set UTF-8 LC_CTYPE");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == Charset2Id("UTF-8"),
+          "empty LANG does not hide macOS UTF-8 LC_CTYPE");
+
+  require(setenv("LANG", "ISO-8859-1", 1) == 0, "set conflicting LANG");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == Charset2Id("UTF-8"),
+          "LC_CTYPE takes precedence over LANG");
+
+  require(setenv("LC_ALL", "ISO-8859-2", 1) == 0, "set LC_ALL override");
+  require(Charset2Id(static_cast<const char *>(nullptr)) == 2,
+          "LC_ALL takes precedence over LC_CTYPE");
+
+  require(Charset2Id("ISO-8859-5") == 5,
+          "explicit input charset overrides environment locale");
+}
+#endif
+
+// Cached positioned reads must not rewind; ordinary opens retain the
+// historical rewind-on-reuse contract for sequential consumers.
+static void positioned_open_cache()
+{
+  {
+    std::ofstream out("positioned-open.txt", std::ios::binary);
+    out << "0123456789";
+  }
+  FPT cache(10);
+  const STRING filename("positioned-open.txt");
+  FILE *fp = cache.ffopen(filename, "rb");
+  require(fp != nullptr, "open sequential cache fixture");
+  require(fseek(fp, 6, SEEK_SET) == 0, "position sequential fixture");
+  require(cache.ffclose(fp) == 0, "release sequential fixture");
+  FILE *positioned = cache.ffopenPositioned(filename, "rb");
+  require(positioned == fp && ftell(positioned) == 6,
+          "positioned cached reopen preserves the existing file offset");
+  require(fgetc(positioned) == '6', "positioned read begins at retained offset");
+  require(cache.ffclose(positioned) == 0, "release positioned fixture");
+  FILE *sequential = cache.ffopen(filename, "rb");
+  require(sequential == fp && ftell(sequential) == 0,
+          "ordinary cached reopen still resets sequential reads to zero");
+  require(fgetc(sequential) == '0', "sequential read begins at start");
+  require(cache.ffclose(sequential) == 0, "release final fixture");
 }
 
 static void comparisons()
@@ -62,7 +132,10 @@ static void comparisons()
   require(_ib_SisCompare(bytes("a next"), bytes("a"), 6) == 0, "cleaned whitespace terminates a merge key");
   CHARSET latin1("ISO-8859-1");
   const UCHR upper[1] = {'A'}, lower[1] = {'a'};
-  require(latin1.CompareSIS(upper, 1, lower, 1) == 0, "bounded single-byte charset comparison retained");
+  require(latin1.CompareSIS(upper, 1, lower, 1) < 0,
+          "stored SIS comparison is bytewise, even for 8-bit charsets");
+  // Search comparison remains case-insensitive and uses the charset table.
+  require(latin1.SisKeys() != nullptr, "single-byte query comparator retained");
   require(SetGlobalCharset("ISO-8859-1"), "restore single-byte global charset");
   require(_ib_SisCompare(bytes("A"), bytes("a"), 1) == 0, "global charset switches out of UTF-8 mode");
 }
@@ -426,6 +499,15 @@ static void xml_indirect_and_dump()
         UCHR recovered[StringCompLength*2+5] = {};
         const int length = xml.GetTerm(record.GetFullFileName(),reinterpret_cast<char *>(recovered),
                                        positions[i],StringCompLength+4);
+        // Compare the untouched GetTerm buffers before ParseWords tokenizes and
+        // modifies recovered in place. This verifies cached-handle repeatability.
+        UCHR again[StringCompLength*2+5] = {};
+        const int secondLength = xml.GetTerm(record.GetFullFileName(),
+                                             reinterpret_cast<char *>(again),
+                                             positions[i],StringCompLength+4);
+        require(secondLength == length && secondLength >= 0 &&
+                std::memcmp(again,recovered,size_t(secondLength)+1) == 0,
+                "repeated XML GetTerm on the same handle preserves normalized source bytes");
         GPTYPE recoveredPositions[StringCompLength+5];
         const size_t recoveredCount = length > 0 ? xml.DOCTYPE::ParseWords(recovered,length,0,
             recoveredPositions,StringCompLength+5) : 0;
@@ -459,6 +541,111 @@ static void xml_indirect_and_dump()
     fixture.db.doctype = nullptr;
   }
   SetGlobalCharset("UTF-8");
+}
+
+
+static void literal_phrase_source_verification()
+{
+  // Exercise SIS -> posting -> actual source verification, including a short
+  // SIS prefix, case variants, expanded whitespace and evidence coordinates.
+  SetGlobalCharset("UTF-8");
+  SourceIndex fixture("literal-phrase-utf8", 3);
+  const std::vector<std::string> text = {
+    u8"LA DÉFENSE", u8"La Défense", u8"La   Défense", u8"La défonse"
+  };
+  std::vector<GPTYPE> starts;
+  std::map<GPTYPE, GPTYPE> expectedEnds;
+  for (const auto& source : text) {
+    const GPTYPE base = fixture.store(source);
+    starts.push_back(base);
+    expectedEnds.emplace(base, base + (GPTYPE)source.size() - 1);
+    fixture.rows["la"].push_back(base);
+    const std::size_t second = source.find_first_not_of(' ', source.find(' '));
+    require(second != std::string::npos, "phrase fixture has second word");
+    const std::string remainder = source.substr(second);
+    STRING folded;
+    folded.SetTermLower(bytes(remainder), remainder.size());
+    const std::string key = folded.toStdString();
+    fixture.rows[key.substr(0, fixture.width)].push_back(base + second);
+  }
+  fixture.publish();
+  auto check = [&](const char *phrase, const std::vector<GPTYPE>& expected) {
+    std::unique_ptr<IRSET> hits(fixture.index.TermSearch(phrase, NulString, INDEX::Exact));
+    require(hits && hits->GetTotalEntries() == expected.size(),
+            "literal UTF-8 phrase returns exactly the expected records");
+    std::set<GPTYPE> actualStarts;
+    for (size_t row = 1; row <= hits->GetTotalEntries(); ++row)
+      for (const auto& hit : hits->GetEntry(row).GetHitTable()) {
+        actualStarts.insert(hit.GetFieldStart());
+        const auto found = expectedEnds.find(hit.GetFieldStart());
+        require(found != expectedEnds.end() &&
+                hit.GetFieldEnd() == found->second,
+                "literal phrase highlights the exact original byte span");
+      }
+    require(actualStarts == std::set<GPTYPE>(expected.begin(), expected.end()),
+            "literal phrase hit coordinates start at the first source word");
+  };
+  check(u8"La Défense", {starts[0], starts[1], starts[2]});
+  check(u8"LA DÉFENSE", {starts[0], starts[1], starts[2]});
+  check(u8"La défonse", {starts[3]});
+  check(u8"La Défencé", {});
+
+  // '=' must remain original-byte exact, with no UTF-8 source folding.
+  const auto checkCaseSensitive = [&](const char *phrase, GPTYPE expected) {
+    std::unique_ptr<IRSET> hits(
+        fixture.index.TermSearch(phrase, NulString, INDEX::AlwaysMatches));
+    require(hits && hits->GetTotalEntries() == 1,
+            "case-sensitive literal returns only the byte-identical record");
+    bool found = false;
+    for (const auto& hit : hits->GetEntry(1).GetHitTable())
+      found = found || hit.GetFieldStart() == expected;
+    require(found, "case-sensitive literal retains original coordinates");
+  };
+  checkCaseSensitive(u8"La Défense", starts[1]);
+  checkCaseSensitive(u8"LA DÉFENSE", starts[0]);
+}
+
+// A common phrase anchor must not produce false hits or incorrect evidence.
+// The words all occur in each decoy, but not as one contiguous phrase.
+static void literal_phrase_common_anchor()
+{
+  require(SetGlobalCharset("UTF-8"), "select UTF-8 for common-anchor phrases");
+  SourceIndex fixture("literal-common-anchor", 3);
+  const std::string prefix = "The Winter's ";
+  const std::string decoy = "The Winter's Garden Tale";
+  for (size_t i = 0; i < 68; ++i) {
+    const GPTYPE base = fixture.store(decoy);
+    fixture.rows["the"].push_back(base);
+    fixture.rows["win"].push_back(base + 4);
+    fixture.rows["gar"].push_back(base + prefix.size());
+    fixture.rows["tal"].push_back(base + decoy.rfind("Tale"));
+  }
+  const GPTYPE exact = fixture.store("The Winter's Tale");
+  const GPTYPE upper = fixture.store("THE WINTER'S TALE");
+  for (const GPTYPE base : {exact, upper}) {
+    fixture.rows["the"].push_back(base);
+    fixture.rows["win"].push_back(base + 4);
+    fixture.rows["tal"].push_back(base + prefix.size());
+  }
+  fixture.publish();
+  const auto check = [&](const char *phrase, INDEX::MATCH typ,
+                         const std::set<GPTYPE>& expected) {
+    std::unique_ptr<IRSET> hits(fixture.index.TermSearch(phrase, NulString, typ));
+    require(hits && hits->GetTotalEntries() == expected.size(),
+            "common-anchor phrase matches only expected records");
+    std::set<GPTYPE> starts;
+    for (size_t row = 1; row <= hits->GetTotalEntries(); ++row)
+      for (const auto& hit : hits->GetEntry(row).GetHitTable()) {
+        starts.insert(hit.GetFieldStart());
+        require(hit.GetFieldEnd() == hit.GetFieldStart() + prefix.size() + 3,
+                "common-anchor evidence covers the entire original phrase");
+      }
+    require(starts == expected, "common-anchor phrase coordinates match source bytes");
+  };
+  check("The Winter's Tale", INDEX::Exact, {exact, upper});
+  check("The Winter's Tale", INDEX::AlwaysMatches, {exact});
+  check("THE WINTER'S TALE", INDEX::AlwaysMatches, {upper});
+  check("The Winter's Tales", INDEX::Exact, {});
 }
 
 static void numeric_punctuation_after_merge()
@@ -563,6 +750,110 @@ static void shared_ingestion_check()
           "stored numeric keys validate before and after merge despite longer recovered source text");
 }
 
+// Exercise the real tokenizer, bytewise sorter, SIS writer and multi-shard
+// zipper when UTF-8 bytes arrive under the wrong (Latin-1) charset. The
+// interpretation may be mojibake, but the index must remain structurally valid.
+// Read the on-disk SIS and every corresponding posting independently of
+// the zipper. Compare the result against the original shards, not against
+// expectations manufactured by the merge implementation.
+static Rows read_misencoded_sis(INDEX& index, const STRING& sisName,
+                                const STRING& indexName)
+{
+  FILE *sis = fopen(sisName, "rb");
+  FILE *inx = fopen(indexName, "rb");
+  require(sis && inx, "open misencoded SIS and INDEX pair");
+  require(getc(sis) == 20 && getc(sis) == Charset2Id("ISO-8859-1"),
+          "misencoded SIS retains Latin-1 charset and prefix width");
+  const int magic = getINT2(inx);
+  require(magic != EOF, "read misencoded INDEX magic");
+  Rows rows;
+  GPTYPE postingsRead = 0;
+  std::string previous;
+  bool havePrevious = false;
+  for (;;) {
+    const int length = getc(sis);
+    if (length == EOF) {
+      require(feof(sis) && !ferror(sis), "clean end of misencoded SIS");
+      break;
+    }
+    UCHR keyBytes[20];
+    require(fread(keyBytes, 1, sizeof(keyBytes), sis) == sizeof(keyBytes),
+            "read complete misencoded SIS prefix");
+    const size_t keyLength = std::min(size_t(length), sizeof(keyBytes));
+    const std::string key(reinterpret_cast<const char *>(keyBytes), keyLength);
+    if (havePrevious) {
+      require(std::lexicographical_compare(previous.begin(), previous.end(),
+                                          key.begin(), key.end(),
+                                          [](char a, char b) {
+                                            return UCHR(a) < UCHR(b);
+                                          }), "misencoded SIS keys are strictly byte-sorted");
+    }
+    previous = key; havePrevious = true;
+    const GPTYPE last = endpoint(sis);
+    require(last >= postingsRead, "misencoded SIS endpoints are monotonic");
+    auto& postings = rows[key];
+    while (postingsRead <= last) {
+      const GPTYPE gp = index.GpFread(inx);
+      require(!feof(inx) && !ferror(inx), "read every misencoded posting");
+      postings.push_back(gp);
+      ++postingsRead;
+    }
+  }
+  require(getc(inx) == EOF && feof(inx) && !ferror(inx),
+          "SIS endpoints account for every INDEX posting");
+  require(fclose(sis) == 0 && fclose(inx) == 0, "close misencoded SIS and INDEX pair");
+  return rows;
+}
+
+static void latin1_misencoded_ingestion_check()
+{
+  TextIngestDatabase db("latin1-misencoded");
+  INDEX index(&db,db.stem+".inx");
+  index.SetMergeStatus(iNothing);
+  index.SetSisLimit(20);
+  require(SetGlobalCharset("ISO-8859-1"), "select intentionally incorrect Latin-1 charset");
+  FILE *queue = fopen("latin1-misencoded.queue","w+b");
+  require(queue != nullptr, "create misencoded ingestion queue");
+  for (size_t i = 0; i < 4; ++i) {
+    const STRING filename = db.stem+STRING().form("-%u.txt",unsigned(i));
+    std::string source = u8"alpha café école über ñandú 日本語 Ελληνικά zulu ";
+    source += u8"À È É Ð Ñ Ö Ø Þ à è é ð ñ ö ø þ ";
+    for (size_t j = 0; j < 100; ++j) source += u8"café élan zulu ";
+    source.resize(8192,' ');
+    std::ofstream file(filename.c_str(),std::ios::binary);
+    file.write(source.data(),std::streamsize(source.size()));
+    file.close();
+    require(bool(file),"write UTF-8 bytes for Latin-1 ingestion");
+    RECORD record(filename);
+    record.SetDocumentType("TEXT");
+    record.SetRecordEnd(source.size()-1);
+    record.SetKey(STRING().form("misencoded-%u",unsigned(i)));
+    putc('#',queue); record.Write(queue);
+  }
+  rewind(queue);
+  require(index.AddRecordList(queue), "index misencoded source through production ingestion");
+  fclose(queue);
+  const INT shardCount = db.mdt.GetIndexNum();
+  require(shardCount > 1, "misencoded ingestion creates multiple real shards");
+  Rows expected;
+  for (INT i = 1; i <= shardCount; ++i) {
+    const STRING suffix = STRING().form(".%d",i);
+    const Rows part = read_misencoded_sis(index,db.ComposeDbFn(DbExtDict)+suffix,
+                                           db.stem+".inx"+suffix);
+    for (const auto& row : part) {
+      auto& postings = expected[row.first];
+      postings.insert(postings.end(),row.second.begin(),row.second.end());
+    }
+  }
+  require(!expected.empty(), "misencoded source produces actual SIS terms");
+  require(index.MergeIndexFiles(), "merge real byte-sorted Latin-1 shards containing UTF-8 bytes");
+  require(db.mdt.GetIndexNum() == 0, "misencoded shards published as a merged index");
+  const Rows actual = read_misencoded_sis(index,db.ComposeDbFn(DbExtDict),db.stem+".inx");
+  require(actual == expected, "merged misencoded SIS retains every key and posting from its shards");
+  // Restore the default used by the rest of the UTF-8 regression suite.
+  require(SetGlobalCharset("UTF-8"), "restore UTF-8 after misencoded ingestion");
+}
+
 static void selected_region_check()
 {
   TextIngestDatabase db("selected-region");
@@ -638,17 +929,175 @@ static void dictionary_integrity_checks()
   require(emptyIndex.Dump(0,emptyErrors,true) == 0, "an empty dictionary and posting stream validate");
 }
 
-int main()
+
+static void sgml_getterm_differential_fixtures()
+{
+  // These files are shared by two fresh child processes so both the
+  // default combined path and explicit legacy diagnostic path are exercised.
+  const std::vector<std::string> samples = {
+    "<LINE>Attenuated herpesviruses and vaccines</LINE>",
+    "<LINE>&amp;c. &amp;foobar foo&amp;bar &amp;&amp;word</LINE>",
+    "<LINE>&#38;foobar foo&#46;bar alpha&#32;beta &#233;COLE</LINE>",
+    u8"<LINE>CAFÉ café ЖИЗНЬ 中文 𐐨 a\u0301 e\u0301</LINE>",
+    "<LINE>A&moon B&bogus; C&quot;quoted&quot; Z</LINE>",
+    "<LINE>" + std::string(250, 'z') + "word</LINE>",
+    "<LINE>" + std::string(160, 'x') + "&amp;word</LINE>",
+    "<LINE>" + std::string(170, 'x') + std::string(180, ' ') + "word</LINE>",
+    "<LINE>" + std::string(160, 'x') + "&#38;&#38;&#38;word</LINE>",
+    "<LINE>" + [] { std::string run; for (int i=0;i<180;++i) run += "&amp;"; return run; }() + "word</LINE>",
+    std::string("<LINE>") + "abc &amp; def",
+    std::string("<LINE>") + "abc &amp;",
+    std::string("<LINE>") + u8"é",
+    std::string("<LINE>") + "a",
+    "&amp;",
+    "a",
+    "",
+  };
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const std::string filename = "sgml-diff-"+std::to_string(i)+".xml";
+    std::ofstream file(filename,std::ios::binary);
+    file.write(samples[i].data(),std::streamsize(samples[i].size()));
+    file.close();
+    require(bool(file),"write SGML differential source");
+  }
+}
+
+static void sgml_getterm_differential_child(const std::string& mode)
+{
+#ifdef _WIN32
+  require(_putenv_s("IB_LEGACY_SGMLTERM_READ",mode == "legacy" ? "1" : "0") == 0,
+          "select SGML differential child mode");
+#else
+  require(setenv("IB_LEGACY_SGMLTERM_READ",mode == "legacy" ? "1" : "0",1) == 0,
+          "select SGML differential child mode");
+#endif
+  SetGlobalCharset("UTF-8");
+  // GetTerm reads the supplied source path directly; it needs no IDB or
+  // persistent MDT. Avoid seeding a second database inside test children.
+  XML xml(nullptr,"XML");
+  std::ofstream output("sgml-diff-"+mode+".bin",std::ios::binary);
+  require(bool(output),"open SGML differential transcript");
+  for (size_t fileNumber = 0; fileNumber < 17; ++fileNumber) {
+    const std::string filename = "sgml-diff-"+std::to_string(fileNumber)+".xml";
+    const std::uintmax_t size = std::filesystem::file_size(filename);
+    for (size_t pos = 0; pos <= size; ++pos) {
+      // Probe every byte near source start and end, plus representative
+      // positions through long entity runs and delimiter-free regions.
+      if (pos > 96 && pos + 96 < size && pos % 11 != 0) continue;
+      for (const size_t length : {size_t(1),size_t(2),size_t(9),size_t(37),size_t(101)}) {
+        char buffer[128] = {};
+        const int got = xml.GetTerm(STRING(filename.c_str()),buffer,off_t(pos),length);
+        require(got >= 0 && got <= int(length),"SGML differential GetTerm byte count");
+        // Length prefix and returned bytes (including trailing NUL) make the
+        // transcript unambiguous even if source text contains invalid UTF-8.
+        output.write(reinterpret_cast<const char *>(&got),sizeof(got));
+        output.write(buffer,std::streamsize(got+1));
+      }
+    }
+  }
+  output.close();
+  require(bool(output),"write SGML differential transcript");
+}
+
+static void sgml_getterm_differential(const std::string& executable)
+{
+  sgml_getterm_differential_fixtures();
+  // The environment selection is static per process; run each implementation
+  // in its own fresh instance instead of toggling a production hot-path flag.
+  for (const std::string mode : {"legacy","combined"}) {
+    const std::string command = "\"" + executable + "\" --sgml-diff-child " + mode;
+    require(std::system(command.c_str()) == 0,"SGML differential child succeeds");
+  }
+  const auto load = [](const char *name) {
+    std::ifstream input(name,std::ios::binary);
+    require(bool(input),"read SGML differential transcript");
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string legacy = load("sgml-diff-legacy.bin");
+  const std::string combined = load("sgml-diff-combined.bin");
+  require(!legacy.empty() && legacy == combined,
+          "combined SGML GetTerm matches legacy byte-for-byte across offsets and EOF");
+}
+
+static void positioned_read_regression()
+{
+  const std::string filename = "positioned-read-source.bin";
+  {
+    std::ofstream source(filename, std::ios::binary);
+    for (int i = 0; i < 1027; ++i)
+      source.put(char((i * 137 + 41) & 255));
+    require(bool(source), "write positioned read fixture");
+  }
+  DOCTYPE reader(nullptr, "TEXT");
+  const size_t sourceSize = std::filesystem::file_size(filename);
+  for (size_t iteration = 0; iteration < 3; ++iteration) {
+    for (size_t offset = 0; offset <= sourceSize + 3; offset += 17) {
+      for (size_t wanted : {size_t(1), size_t(7), size_t(81), size_t(257)}) {
+        char actual[258] = {};
+        const int got = reader.GetTerm(STRING(filename.c_str()), actual,
+                                       off_t(offset), wanted);
+        const size_t expectedCount = offset < sourceSize
+            ? std::min(wanted, sourceSize - offset) : 0;
+        require(got == int(expectedCount), "positioned read byte count");
+        require(actual[expectedCount] == '\0', "positioned read terminator");
+        std::ifstream source(filename, std::ios::binary);
+        source.seekg(std::streamoff(offset));
+        std::string expected(expectedCount, '\0');
+        source.read(expected.data(), std::streamsize(expectedCount));
+        require(size_t(source.gcount()) == expectedCount,
+                "independent fixture read");
+        require(std::memcmp(actual, expected.data(), expectedCount) == 0,
+                "positioned source bytes match independently read fixture");
+      }
+    }
+  }
+
+  // JSON source escapes must still be normalized via virtual ReadFile.
+  const std::string jsonFilename = "positioned-read-json.txt";
+  {
+    std::ofstream source(jsonFilename, std::ios::binary);
+    source << R"({"name":"caf\u00e9","mixed":"\u00e9-\u03bb-\uD801\uDC28","escaped":"a\nb\t\u00fc"})";
+    require(bool(source), "write JSON escape fixture");
+  }
+  JSONDOC json(nullptr, "JSON");
+  const size_t jsonSize = std::filesystem::file_size(jsonFilename);
+  for (size_t offset = 0; offset <= jsonSize; offset += 3) {
+    for (size_t wanted : {size_t(3), size_t(11), size_t(37), size_t(81)}) {
+      char buffer[82] = {};
+      const int got = json.GetTerm(STRING(jsonFilename.c_str()), buffer,
+                                   off_t(offset), wanted);
+      require(got >= 0 && size_t(got) <= wanted, "bounded JSON GetTerm");
+      require(buffer[got] == '\0', "JSON GetTerm terminator");
+    }
+  }
+}
+
+int main(int argc, char **argv)
 {
   try {
+    if (argc == 3 && std::string(argv[1]) == "--sgml-diff-child") {
+      sgml_getterm_differential_child(argv[2]);
+      return 0;
+    }
+    const std::string executable = std::filesystem::absolute(argv[0]).string();
+#ifndef _WIN32
+    default_charset_environment();
+#endif
     comparisons(); keys_and_lengths();
     Scratch scratch;
+    positioned_open_cache();
+    positioned_read_regression();
     writer();
     differing_widths();
     indirect_and_dump();
     xml_indirect_and_dump();
+    sgml_getterm_differential(executable);
     numeric_punctuation_after_merge();
+    literal_phrase_source_verification();
+    literal_phrase_common_anchor();
     shared_ingestion_check();
+    latin1_misencoded_ingestion_check();
     selected_region_check();
     dictionary_integrity_checks();
     collapse(32, "whole");

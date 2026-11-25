@@ -23,6 +23,11 @@ COLONDOC does for the text following a colon tag.
 #include "jsondoc.hxx"
 #include "common.hxx"
 #include "doc_conf.hxx"
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
 
 
 
@@ -1731,10 +1736,57 @@ GPTYPE JSONDOC::ParseWords(UCHR* DataBuffer, GPTYPE DataLength,
 }
 
 
+namespace {
+struct JSONTermProfile {
+  using Clock = std::chrono::steady_clock;
+  std::atomic<size_t> calls{0}, failures{0}, inputBytes{0}, outputBytes{0};
+  std::atomic<long long> rawNs{0}, escapeNs{0}, compactNs{0};
+
+  ~JSONTermProfile() {
+    const size_t count = calls.load(std::memory_order_relaxed);
+    if (!count) return;
+    const auto millis = [](long long nanos) { return double(nanos) / 1000000.0; };
+    std::fprintf(stderr,
+      "JSONTERM_PROFILE calls=%zu failures=%zu input_bytes=%zu output_bytes=%zu "
+      "raw_ms=%.3f escape_ms=%.3f compact_ms=%.3f total_stages_ms=%.3f\n",
+      count, failures.load(std::memory_order_relaxed),
+      inputBytes.load(std::memory_order_relaxed),
+      outputBytes.load(std::memory_order_relaxed),
+      millis(rawNs.load(std::memory_order_relaxed)),
+      millis(escapeNs.load(std::memory_order_relaxed)),
+      millis(compactNs.load(std::memory_order_relaxed)),
+      millis(rawNs.load(std::memory_order_relaxed) +
+             escapeNs.load(std::memory_order_relaxed) +
+             compactNs.load(std::memory_order_relaxed)));
+  }
+};
+
+bool profileJSONTerm() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_PROFILE_JSONTERM");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  return enabled;
+}
+JSONTermProfile& jsonTermTotals() {
+  static JSONTermProfile profile;
+  return profile;
+}
+} // namespace
+
 INT JSONDOC::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t Length)
 {
-  if (!Buffer || Length == 0)
+  const bool profiling = profileJSONTerm();
+  JSONTermProfile *totals = profiling ? &jsonTermTotals() : nullptr;
+  using Clock = JSONTermProfile::Clock;
+  const auto rawStart = profiling ? Clock::now() : Clock::time_point{};
+  if (!Buffer || Length == 0) {
+    if (totals) {
+      totals->calls.fetch_add(1, std::memory_order_relaxed);
+      totals->failures.fetch_add(1, std::memory_order_relaxed);
+    }
     return 0;
+  }
 
   /*
    * Read the original bytes exactly as stored in the JSON document.
@@ -1742,6 +1794,17 @@ INT JSONDOC::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t L
    * same one.
    */
   INT n = DOCTYPE::GetTerm(Filename, Buffer, Offset, Length);
+  const auto rawEnd = profiling ? Clock::now() : Clock::time_point{};
+  if (totals) {
+    totals->calls.fetch_add(1, std::memory_order_relaxed);
+    totals->rawNs.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(rawEnd - rawStart).count(),
+      std::memory_order_relaxed);
+    if (n > 0)
+      totals->inputBytes.fetch_add(size_t(n), std::memory_order_relaxed);
+    else
+      totals->failures.fetch_add(1, std::memory_order_relaxed);
+  }
 
   if (n <= 0)
     return n;
@@ -1763,6 +1826,11 @@ INT JSONDOC::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t L
       reinterpret_cast<UCHR *>(Buffer),
       (GPTYPE)n,
       JSON_PAD);
+  const auto escapeEnd = profiling ? Clock::now() : Clock::time_point{};
+  if (totals)
+    totals->escapeNs.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(escapeEnd - rawEnd).count(),
+      std::memory_order_relaxed);
 
   /*
    * GetTerm() returns presentation/type-conversion text, so remove
@@ -1785,8 +1853,14 @@ INT JSONDOC::GetTerm(const STRING& Filename, CHR *Buffer, off_t Offset, size_t L
    * expected by the existing GetTerm() implementations.
    */
   *dst = '\0';
-
-  return (INT)(dst - Buffer);
+  const INT result = INT(dst - Buffer);
+  if (totals) {
+    totals->outputBytes.fetch_add(size_t(result), std::memory_order_relaxed);
+    totals->compactNs.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - escapeEnd).count(),
+      std::memory_order_relaxed);
+  }
+  return result;
 }
 
 

@@ -667,6 +667,8 @@ public:
   void  ffGC() { MainFpt.Sync(); }
   PFILE ffopen(const STRING& FileName, const CHR* Type) {
 	return MainFpt.ffopen (FileName, Type); }
+  PFILE ffopenPositioned(const STRING& FileName, const CHR* Type) override {
+	return MainFpt.ffopenPositioned(FileName, Type); }
   INT ffclose(PFILE FilePointer) {
 	return MainFpt.ffclose (FilePointer); }
   INT ffclose(const STRING& Filename) {

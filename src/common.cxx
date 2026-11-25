@@ -61,6 +61,8 @@ Description:	Common functions
 #if defined(__APPLE__)
 # include <sys/types.h>
 # include <sys/sysctl.h>
+# include <mach/mach.h>
+# include <mach/mach_host.h>
 #endif
 
 
@@ -2773,7 +2775,7 @@ bool _IB_GetPlatformName(char *buf, int maxSize)
 		strncpy(buf, sysname, maxSize);
 		//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		//WARNING:
-		//Shouldn´t this be buf[maxSize-1] = '\0'; ???????????? 
+		//ShouldnÂ´t this be buf[maxSize-1] = '\0'; ???????????? 
 		//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		buf[maxSize] = '\0';
 		return true;
@@ -2815,7 +2817,7 @@ bool _IB_GetPlatformName(char *buf, int maxSize)
 
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	//WARNING:
-	//Shouldn´t this be buf[maxSize-1] = '\0'; ???????????? 
+	//ShouldnÂ´t this be buf[maxSize-1] = '\0'; ???????????? 
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	buf[maxSize] = '\0';
 
@@ -2836,7 +2838,7 @@ bool _IB_GetHostName(char *buf, int maxSize)
   else												strncpy(buf, sysname, maxSize);
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   //WARNING:
-  //Shouldn´t this be buf[maxSize-1] = '\0'; ???????????? 
+  //ShouldnÂ´t this be buf[maxSize-1] = '\0'; ???????????? 
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   buf[maxSize] = '\0';
   return *buf ? true : false;
@@ -2861,7 +2863,7 @@ bool _IB_GetUserId(char *buf, int maxSize)
   else											strncpy(buf, username, maxSize);
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   //WARNING:
-  //Shouldn´t this be buf[maxSize-1] = '\0'; ???????????? 
+  //ShouldnÂ´t this be buf[maxSize-1] = '\0'; ???????????? 
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   buf[maxSize] = '\0';
   return buf && *buf ? true : false;
@@ -2876,7 +2878,7 @@ bool _IB_GetUserName(char *buf, int maxSize)
 long  _IB_Hostid()
 {
   /* Note:
-   * We could do better, but don´t see any need for it here.
+   * We could do better, but donÂ´t see any need for it here.
   */
   return 0xFF;
 }
@@ -3211,15 +3213,21 @@ bool _IB_GetmyMail (PSTRING Name, PSTRING Address)
 rlim_t _IB_GetFreeMemory()
 {
 #if defined(__APPLE__)
-  // macOS Unified Cache Approach: Fall back to a calculated estimate
-  // because inactive pages can be reclaimed instantly by the kernel.
-  int64_t physical_memory = 0;
-  size_t length = sizeof(physical_memory);
-  int mib[2] = { CTL_HW, HW_MEMSIZE };
-  if (sysctl(mib, 2, &physical_memory, &length, NULL, 0) == 0) {
-    return (rlim_t)(physical_memory / 2); // Sane estimate for index sizing
+  // Estimate live available memory from free and reclaimable inactive pages.
+  mach_port_t host = mach_host_self();
+  vm_size_t page_size = 0;
+  mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+  vm_statistics64_data_t vm{};
+
+  if (host_page_size(host, &page_size) == KERN_SUCCESS &&
+      host_statistics64(host, HOST_VM_INFO64,
+                        reinterpret_cast<host_info64_t>(&vm),
+                        &count) == KERN_SUCCESS) {
+    return static_cast<rlim_t>(
+        (static_cast<uint64_t>(vm.free_count) +
+         static_cast<uint64_t>(vm.inactive_count)) * page_size);
   }
-  return (rlim_t)4096L * (1ULL << 20); // 4GB baseline fallback
+  return static_cast<rlim_t>(-1);
 
 #elif defined(_SC_AVPHYS_PAGES)
 # if defined(SOLARIS) || defined(BSD)

@@ -329,7 +329,8 @@ bool MessageLogger::Init (FILE *fp)
 	}
     }
 #endif
-  else if (l_file && l_file != fp && l_file != syslog_stream)
+  else if (l_file && l_file != fp && l_file != syslog_stream &&
+           l_file != stdin && l_file != stdout && l_file != stderr)
     fclose (l_file);
   if ((l_file = fp) != syslog_stream)
     {

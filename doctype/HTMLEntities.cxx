@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <cstdlib>
+#include <cstring>
 #include <memory.h>
 
 #include "common.hxx"
@@ -612,12 +614,52 @@ int HTMLEntities::translate(size_t *offset, char **entityStart) const
 }
 
 
+// Separate opt-in counters for the normalization hot path. Counting is
+// deliberately not part of the default execution path; the destructor reports
+// once per thread at exit (including searches containing many GetTerm calls).
+namespace {
+struct EntityNormalizeCounts {
+  size_t calls = 0, inputBytes = 0, processedBytes = 0;
+  size_t ordinaryASCIIBytes = 0, utf8Sequences = 0, utf8Bytes = 0;
+  size_t invalidUTF8 = 0, nulStops = 0;
+  size_t ampersands = 0, entityCandidates = 0;
+  size_t namedLookups = 0, numericAttempts = 0, translated = 0;
+  size_t unknownEntities = 0, paddingEvents = 0, paddingBytes = 0;
+  ~EntityNormalizeCounts() {
+    if (!calls) return;
+    std::fprintf(stderr,
+      "ENTITY_PROFILE calls=%zu input_bytes=%zu processed_bytes=%zu "
+      "ascii_bytes=%zu utf8_sequences=%zu utf8_bytes=%zu invalid_utf8=%zu "
+      "nul_stops=%zu ampersands=%zu entity_candidates=%zu "
+      "named_lookups=%zu numeric_attempts=%zu translated=%zu "
+      "unknown_entities=%zu padding_events=%zu padding_bytes=%zu\n",
+      calls, inputBytes, processedBytes, ordinaryASCIIBytes,
+      utf8Sequences, utf8Bytes, invalidUTF8, nulStops, ampersands,
+      entityCandidates, namedLookups, numericAttempts, translated,
+      unknownEntities, paddingEvents, paddingBytes);
+  }
+};
+
+EntityNormalizeCounts *entityNormalizeProfile() {
+  static const bool enabled = [] {
+    const char *flag = std::getenv("IB_PROFILE_ENTITIES");
+    return flag && *flag && std::strcmp(flag, "0") != 0;
+  }();
+  if (!enabled) return nullptr;
+  static thread_local EntityNormalizeCounts counts;
+  return &counts;
+}
+} // namespace
+
 #if 1
 
 void HTMLEntities::normalize(char *input, size_t len) const
 {
   if (!input || len == 0)
     return;
+
+  EntityNormalizeCounts *counts = entityNormalizeProfile();
+  if (counts) { ++counts->calls; counts->inputBytes += len; }
 
   char       *src = input;
   char       *dst = input;
@@ -660,6 +702,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
        */
       if (*src == '\0')
         {
+          if (counts) { ++counts->nulStops; ++counts->processedBytes; }
           size_t room = (size_t)(end - dst);
           size_t spaces = pendingPad + 1;
 
@@ -670,6 +713,20 @@ void HTMLEntities::normalize(char *input, size_t len) const
             memset(dst, ' ', spaces);
 
           return;
+        }
+
+      // With no deferred entity contraction, ordinary ASCII is already
+      // normalized. Avoid Unicode term classification and the general
+      // entity/padding machinery for this overwhelmingly common case.
+      // Preserve the original path for '&', NUL, UTF-8 and pending padding.
+      if (!pendingPad && (unsigned char)*src < 0x80 && *src != '&')
+        {
+          if (counts) {
+            ++counts->ordinaryASCIIBytes;
+            ++counts->processedBytes;
+          }
+          *dst++ = *src++;
+          continue;
         }
 
       char          output[4];
@@ -684,6 +741,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
        */
       if (*src == '&')
         {
+          if (counts) ++counts->ampersands;
           char entity[12];
 
           const size_t entityLen =
@@ -692,6 +750,11 @@ void HTMLEntities::normalize(char *input, size_t len) const
           if (entityLen)
             {
               bool translated = false;
+              if (counts) {
+                ++counts->entityCandidates;
+                if (entity[0] == '#') ++counts->numericAttempts;
+                else ++counts->namedLookups;
+              }
 
               /*
                * UTF-8 mode:
@@ -745,6 +808,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
 
               if (translated)
                 {
+                  if (counts) ++counts->translated;
                   srcLen = entityLen;
 
                   if (_is_globalUTF8)
@@ -775,6 +839,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
                 }
               else
                 {
+                  if (counts) ++counts->unknownEntities;
                   /*
                    * Unknown/bogus entity:
                    *
@@ -789,6 +854,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
             }
           else
             {
+              if (counts) ++counts->unknownEntities;
               /*
                * Not actually a well-formed entity.
                */
@@ -818,6 +884,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
 
           if (srcLen)
             {
+              if (counts) { ++counts->utf8Sequences; counts->utf8Bytes += srcLen; }
               outLen = srcLen;
 
               for (size_t i = 0; i < srcLen; ++i)
@@ -825,6 +892,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
             }
           else
             {
+              if (counts) ++counts->invalidUTF8;
               /*
                * Malformed UTF-8 byte in UTF-8 mode.
                *
@@ -842,6 +910,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
           /*
            * ASCII, or historical single-byte mode.
            */
+          if (counts) ++counts->ordinaryASCIIBytes;
           cp = (unsigned char)*src;
           output[0] = *src;
           srcLen = 1;
@@ -909,6 +978,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
 
           if (pad)
             {
+              if (counts) { ++counts->paddingEvents; counts->paddingBytes += pad; }
               memset(dst, ' ', pad);
               dst += pad;
             }
@@ -933,6 +1003,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
           }
       }
 
+      if (counts) counts->processedBytes += srcLen;
       src += srcLen;
     }
 
@@ -948,6 +1019,7 @@ void HTMLEntities::normalize(char *input, size_t len) const
       if (pendingPad > room)
         pendingPad = room;
 
+      if (counts) { ++counts->paddingEvents; counts->paddingBytes += pendingPad; }
       memset(dst, ' ', pendingPad);
       dst += pendingPad;
     }

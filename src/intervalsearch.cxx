@@ -955,7 +955,8 @@ PIRSET INDEX::DateSearch(const DOUBLE fKey, const STRING& FieldName,
           }
 	} // Date Range defined
 	iresult.SetMdtIndex(w);
-	iresult.SetHitTable ( FieldCache->FcInField(Gp, fp) );
+	iresult.SetHitTable (IRESULT::hit_type(FieldCache->FcInField(Gp, fp),
+                      MakeTypedSourceId(FIELDTYPE::numericalrange)));
 
 	pirset->FastAddEntry(iresult);
       }
@@ -1121,7 +1122,8 @@ PIRSET INDEX::IntervalSearch(const DOUBLE fKey, const STRING& FieldName,
           }
 	} // Date Range defined
 	iresult.SetMdtIndex(w);
-	iresult.SetHitTable ( FieldCache->FcInField(Gp, fp) );
+	iresult.SetHitTable (IRESULT::hit_type(FieldCache->FcInField(Gp, fp),
+                      MakeTypedSourceId(FIELDTYPE::numericalrange)));
 
 	pirset->FastAddEntry(iresult);
       }

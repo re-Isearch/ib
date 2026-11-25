@@ -331,6 +331,16 @@ FILE *FPT::ffreopen(const STRING& filename, const CHR *mode, FILE *stream)
 
 PFILE FPT::ffopen (const STRING& FileName, const CHR* Type)
 {
+  return ffopenPositioned(FileName, Type, true);
+}
+
+PFILE FPT::ffopenPositioned (const STRING& FileName, const CHR* Type)
+{
+  return ffopenPositioned(FileName, Type, false);
+}
+
+PFILE FPT::ffopenPositioned (const STRING& FileName, const CHR* Type, bool rewindRead)
+{
   if (Table == NULL)
     {
       FILE *fp =  ::fopen(FileName.c_str(), Type);
@@ -392,7 +402,7 @@ PFILE FPT::ffopen (const STRING& FileName, const CHR* Type)
 	  // If same OpenMode, use the cached information
 	  if (Om[0] == 'r')
 	    {
-	      if (Fp)
+	      if (Fp && rewindRead)
 		fseek (Fp, 0, SEEK_SET);
 	    } 
 	  else

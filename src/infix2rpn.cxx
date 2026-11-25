@@ -225,6 +225,29 @@ bool INFIX2RPN::Parse (const STRING& StrInput, STRING *StrOutput)
 
   StrOutput->Trim();
 
+  // A standalone binary operator is not a term. Explain how to search for
+  // the literal word instead of reporting only a generic parse failure.
+  if (!InputParsedOK() && ErrorMessage.IsEmpty())
+    {
+      STRING literal(StrInput);
+      literal.Trim();
+      const int standalone_op = string2op(literal);
+      if (standalone_op == UnNOT || literal == "!")
+        {
+          Error.form("'%s' is a unary operator without an operand; "
+                     "quote it as \"%s\" to search for the literal term",
+                     literal.c_str(), literal.c_str());
+          RegisterError(Error);
+        }
+      else if (standalone_op != NOP && standalone_op != LeftParen)
+        {
+          Error.form("'%s' is a binary operator without operands; "
+                     "quote it as \"%s\" to search for the word",
+                     literal.c_str(), literal.c_str());
+          RegisterError(Error);
+        }
+    }
+
 #if 0
   cerr << "OUT = " << *StrOutput << endl;
 #endif

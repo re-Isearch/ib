@@ -23,6 +23,7 @@ public:
   FPT(size_t TableSize);
 
   FILE *ffopen(const STRING& FileName, const CHR* Type);
+  FILE *ffopenPositioned(const STRING& FileName, const CHR* Type);
   FILE *ffreopen(const STRING& Filename, const CHR* mode, FILE *stream);
   INT   ffclose(FILE *FilePointer);
 
@@ -59,6 +60,7 @@ public:
   }
   ~FPT();
 private:
+  FILE *ffopenPositioned(const STRING& FileName, const CHR* Type, bool rewindRead);
   void   Init(size_t TableSize);
   size_t Lookup(const STRING& FileName) const;
   size_t Lookup(const FILE *FilePointer) const;

@@ -110,16 +110,12 @@ int CHARSET::CompareSIS(const UCHR *left, size_t leftLength,
                         const UCHR *right, size_t rightLength) const
 {
   const size_t length = leftLength < rightLength ? leftLength : rightLength;
-  if (isUTF8()) {
-    const int diff = length ? memcmp(left, right, length) : 0;
-    if (diff) return diff;
-  } else {
-    for (size_t i = 0; i < length; ++i) {
-      const int a = cclass[left[i]], b = cclass[right[i]];
-      if (a != b) return a-b;
-      if (!a) break;
-    }
-  }
+  // SIS-to-SIS comparisons operate on already-normalized stored keys.
+  // Both TermSort_SIMD (unsigned radix) and TermSort (strncmp) order those
+  // keys by bytes. Do not fold through cclass here: that table belongs to
+  // query-to-SIS comparison and can reorder mis-encoded 8-bit input.
+  const int diff = length ? memcmp(left, right, length) : 0;
+  if (diff) return diff;
   return (leftLength > rightLength) - (leftLength < rightLength);
 }
 
@@ -1703,17 +1699,32 @@ BYTE Charset2Id (const char *name)
 {
   BYTE set = 1; // ISO 8859-1
 
-  const char *lc_ctype = name ? name : getenv("LANG");
-
-  if (lc_ctype == NULL)
+  // An explicit charset takes precedence. Otherwise follow the process
+  // locale's LC_CTYPE selection: LC_ALL, LC_CTYPE, then LANG. Treat empty
+  // environment values as unset (macOS commonly exports LANG="").
+  const char *lc_ctype = name && *name ? name : nullptr;
+  if (!lc_ctype)
     {
-      if ((lc_ctype = getenv("LC_CTYPE")) == NULL)
+      const char *variables[] = {"LC_ALL", "LC_CTYPE", "LANG"};
+      for (const char *variable : variables)
+        {
+          const char *value = getenv(variable);
+          if (value && *value)
+            {
+              lc_ctype = value;
+              break;
+            }
+        }
+    }
+  if (!lc_ctype)
+    {
 #ifdef HAVE_LOCALE
-	lc_ctype = setlocale(LC_CTYPE,NULL);
+      lc_ctype = setlocale(LC_CTYPE, NULL);
 #else
-	return set;
+      return set;
 #endif
     }
+  if (!lc_ctype || !*lc_ctype) return set;
   if ((set = Charset2Id ((STRING)lc_ctype)) != 0xFF)
     {
       return set;
