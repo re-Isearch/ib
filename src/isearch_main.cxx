@@ -591,6 +591,8 @@ int _Isearch_main (int argc, char **argv)
   INT    DropHits = 0;
   bool Reduce = false;
   bool DebugFlag = false;
+  const char *LogDestination = NULL;
+  int RequestedLogLevel = -1;
   bool ShowRusage = false;
   bool ShowRating = false;
   bool QuitFlag = false;
@@ -656,16 +658,13 @@ int _Isearch_main (int argc, char **argv)
           if (Flag.Equals ("-log") || Flag.Equals("-e"))
             {
               if (Flag.Equals("-e"))
-                log_init(LOG_PANIC|LOG_FATAL|LOG_ERROR|LOG_ERRNO);
+                RequestedLogLevel = LOG_PANIC|LOG_FATAL|LOG_ERROR|LOG_ERRNO;
               if (++x >= argc)
                 {
                   message_log(LOG_FATAL, "Usage: No log file specified after %s.", Flag.c_str());
                   return 2;
                 }
-              if (strcmp(argv[x], "-") == 0)
-                log_init(stderr);
-              else
-                log_init("", argv[x]);
+              LogDestination = argv[x];
               LastUsed = x;
             }
           else if (Flag.Equals("-syslog"))
@@ -1342,7 +1341,7 @@ int _Isearch_main (int argc, char **argv)
                   message_log (LOG_FATAL, "Usage: No level specified after -level.");
                   return 2;
                 }
-              log_init((int)(strtol (argv[x], NULL, 10) & 0xFF));
+              RequestedLogLevel = (int)(strtol(argv[x], NULL, 10) & 0xFF);
               LastUsed = x;
             }
 
@@ -1417,6 +1416,17 @@ int _Isearch_main (int argc, char **argv)
     }		/* while() */
 
   __Register_IB_Application(argv0, stdout, DebugFlag);
+
+  // Registration initializes the logger to stdout. Apply CLI overrides last.
+  if (RequestedLogLevel >= 0)
+    log_init(RequestedLogLevel);
+  if (LogDestination)
+    {
+      if (strcmp(LogDestination, "-") == 0)
+        log_init(stderr);
+      else
+        log_init("", LogDestination);
+    }
 
   clock_t start = clock();
 
