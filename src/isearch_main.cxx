@@ -2284,7 +2284,7 @@ again:
               if (ShowXML)
                 cout << "<HIT TERM=\"" << tstring << "\">";
               else
-                cout << "Evidence: [\033[3m" << tstring << "\033[23m] ";
+                cout << (TabFormat ? "# " : "") << "Evidence: [\033[3m" << tstring << "\033[23m] ";
 	      if (string.IsEmpty())
 		cout << "** Unavailable **";
               else
