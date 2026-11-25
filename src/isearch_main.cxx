@@ -351,7 +351,9 @@ static void HelpUsage(const char *progname)
 	"  -t[erse]         // Print terse results." << endl <<
 	"  -tab             // Use Terse tab format." << endl <<
 	"  -scan field      // scan service." << endl <<
-	"  -shell           // Interactive mode." << endl <<
+	"  -shell           // Interactive IRSET shell mode." << endl <<
+	"  -noshell         // Disable IRSET shell mode (the default)." << endl <<
+	"  -agent           // IRSET shell with terse tabular evidence (-t -tab -show -advice 500)." << endl <<
 	"  -rpn             // Interpret as an RPN query." << endl <<
 	"  -infix           // Interpret as an InFix-Notation query." << endl <<
 	"                   //   Additional Unary Ops:  ! for NOT, field/  for WITHIN:field" << endl <<
@@ -598,6 +600,7 @@ int _Isearch_main (int argc, char **argv)
   bool QuitFlag = false;
   bool VerboseFlag = false;
   bool ShellFlag = false;
+  bool AgentMode = false;
   bool ByteRangeFlag = false;
   bool KeyFlag = false;
   bool DoctypeFlag = false;
@@ -1254,6 +1257,24 @@ int _Isearch_main (int argc, char **argv)
 	      ShellFlag = true;
 	      LastUsed = x;
 	    }
+          else if (Flag.Equals("-noshell"))
+            {
+              ShellFlag = false;
+              LastUsed = x;
+            }
+          else if (Flag.Equals("-agent"))
+            {
+              AgentMode = true;
+              ShellFlag = true;
+              ShowHitContent = true;
+              Terse = true;
+              TabFormat = true;
+              ShowHeadline = true;
+              Headline = BRIEF_MAGIC;
+              FilenameOnly = false;
+              maxAdvice = 500;
+              LastUsed = x;
+            }
 	  else if (Flag.Equals ("-byterange"))
 	    {
 	      ByteRangeFlag = true;
@@ -1427,8 +1448,8 @@ int _Isearch_main (int argc, char **argv)
       else
         log_init("", LogDestination);
     }
-  else if (ShowXML)
-    log_init(stderr); // Keep diagnostics out of XML on stdout.
+  else if (ShowXML || AgentMode)
+    log_init(stderr); // Keep machine-oriented stdout free of diagnostics.
 
   clock_t start = clock();
 
@@ -3218,7 +3239,19 @@ namespace
       "query",
       "-shell",
       NULL,
-      "Enter interactive search mode."
+      "Enter interactive IRSET shell mode."
+    },
+    {
+      "query",
+      "-noshell",
+      NULL,
+      "Disable IRSET shell mode (the default)."
+    },
+    {
+      "query",
+      "-agent",
+      NULL,
+      "Use IRSET shell with terse tabular results, hit evidence, and advice length 500."
     },
     {
       "query",
