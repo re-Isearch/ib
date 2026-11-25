@@ -161,8 +161,8 @@ void FCHITS::Append(const FCHITS& other)
       return;
     }
 
-  Reserve(Buffer.size() + other.Buffer.size());
-
+  // Avoid exact-capacity reservations on repeated small appends: keep
+  // vector's amortized geometric growth while AddEntryFast merges hits.
   for (const hit_type& fc : other.Buffer)
     AddEntryFast(fc);
 }
@@ -170,8 +170,7 @@ void FCHITS::Append(const FCHITS& other)
 
 void FCHITS::Append(const FCT& other)
 {
-    Reserve(Buffer.size() + other.GetTotalEntries());
-
+    // Same for legacy FCT appends: do not force one allocation per hit.
     for (const FC& fc : other)
         AddEntryFast(hit_type(fc, FCSOURCE_NONE));
 }
