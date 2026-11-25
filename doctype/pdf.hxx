@@ -25,6 +25,8 @@ public:
 
    off_t RunPipe(FILE *fp, const STRING& Source);
 
+   void ParseRecords(const RECORD& FileRecord) override;
+
    void ParseFields(RECORD *RecordPtr);
 
    void Present (const RESULT& ResultRecord,
