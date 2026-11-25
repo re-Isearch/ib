@@ -82,10 +82,24 @@ switching tables or repeating the search. Field order and cursor updates are
 still applied for each hit. Merely lying inside a previously found container
 does not qualify for reuse: another hit may lie in a nested child field.
 
+The resolver also keeps one complete resolution. It intersects the exact
+regions for every visited field, including range-hint rejections and cached
+misses. A later hit inside this intersection can reuse the final container
+without walking the field descriptors. Its incoming last-field cursor must
+also match; the cached resolution restores the same outgoing cursor. A cached
+absence returns the current input hit rather than a previous hit's coordinates.
+Changes to the range hints invalidate this proof. An unavailable or unreadable
+field table prevents complete reuse so a failed read remains eligible for the
+normal retry path.
+
 This cache lasts for one operation, uses the existing coordinate tables, and
 preserves exact unbounded PEER semantics. It does not select a maximum distance.
 Cached runs are limited to 64 coordinates per field; longer runs use the normal
-search and traversal without retaining the run.
+search and traversal without retaining the run. The complete-resolution cache
+adds one fixed-size decision regardless of the number of fields or duplicate
+coordinates. It can reuse a long run's final decision within the proven region
+without keeping the run itself. All cache guards are runtime state; index file
+formats remain unchanged.
 
 On 64-bit hosts the operation can temporarily exceed the field cache's normal
 512 MiB mapping budget. These are file-backed virtual mappings, with pages read
@@ -115,7 +129,7 @@ The counters describe the full join, before the displayed result limit:
 | `records` | Records present in both input sets. |
 | `left_hits`, `right_hits` | Input hit counts across those shared records. |
 | `positional_hits` | For bounded PEER, left hits with a right hit satisfying the byte gap and ordering before checking containers. For unbounded PEER, all left hits in shared records. |
-| `container_lookups` | Actual calls to the container resolver after the positional filter. Zero for a database without structural fields. |
+| `container_lookups` | Calls to the container resolver after the positional filter, including complete cached resolutions. Zero for a database without structural fields. |
 | `matched_records`, `pairs` | Records and hit pairs passing the complete bounded PEER relationship. |
 | `elapsed_ms` | Wall time inside this bounded join, including copies, sorting and hit-table assembly. |
 | `container_ms` | Wall time spent inside container resolver calls. |
@@ -126,6 +140,7 @@ The counters describe the full join, before the displayed result limit:
 | `field_cache_hits` | Mapping-pool hits when switching tables; staying on the current table needs no pool lookup. |
 | `field_map_failures` | Mapping attempts that failed; prepared lookups can use the stream backend. |
 | `field_result_hits` | Per-field searches avoided by reusing an exact coordinate region, including cached misses. |
+| `container_result_hits` | Complete resolutions reused within a proven region and with the same incoming cursor, avoiding the entire field-descriptor walk. These calls do not add per-field tests or result hits. |
 
 These timings exclude the earlier term searches and later result presentation.
 They include the overhead of the diagnostic clock reads; ordinary searches do
@@ -150,8 +165,12 @@ mapping and filename reuse, checks scope cleanup and stream reads, and exercises
 the resolver through bounded, unbounded and ordered PEER operations. Sequential
 lookups exercise reuse across nested children, gaps and field boundaries;
 extreme coordinates, changing hit lengths and long duplicate runs are covered.
+Randomized field tables and access histories also compare complete-resolution
+reuse against the scalar oracle. Changed cursors, updated or cleared range
+hints, cached absences and recovery from an unavailable table are checked.
 
 For an optional synthetic comparison with many sparse fields, run
-`peer_resolver_test --benchmark`. It reports field tests, actual table searches
-and resolver wall time for 16,384 driver hits across 324 fields. These figures
-measure the fixture, rather than predicting timings for a particular corpus.
+`peer_resolver_test --benchmark`. It reports field tests, actual table searches,
+complete resolution reuses and resolver wall time for 16,384 driver hits across
+324 fields. These figures measure the fixture, rather than predicting timings
+for a particular corpus.

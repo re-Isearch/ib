@@ -139,6 +139,7 @@ public:
     if (FcRanges.size() <= (size_t)n) FcRanges.resize(n + 1);
     FcRanges[n].Add(fc);
     FcRangesChanged = true;
+    ++FcRangeRevision;
     return true;
   }
   bool UpdateFcRange(const STRING& FieldName, const FC& Fc) {
@@ -148,6 +149,7 @@ public:
   bool SaveFcRanges(const STRING& FileName);
 
   bool GetFcRange(INT FileNumber, FC *RangePtr) const;
+  size_t GetFcRangeRevision() const { return FcRangeRevision; }
 
   bool GetFcRange(const STRING& FieldName, FC *RangePtr) const {
     return GetFcRange(GetFileNumber(FieldName), RangePtr);
@@ -161,6 +163,7 @@ private:
   std::vector<DFD_FC_RANGE> FcRanges;
   void        ClearFcRanges(bool markChanged = false);
   bool        FcRangesChanged {false};
+  size_t      FcRangeRevision = 0; // Runtime cache guard, never serialized.
 
   size_t      FieldExists(const STRING& FieldName, STRING *Val) const;
   INT         GetNewFileNumber() const;
