@@ -98,7 +98,7 @@ size_t FCACHE::LoadFieldCache(const STRING& fieldName, bool useDisk,
         {
           if (!useDisk)
             {
-              BaseAddress = Sessions.GetMemoryBase(Fn, MapRandom);
+              BaseAddress = Sessions.GetMemoryBase(Fn, MapNormal);
 
 #if 0
 const size_t sessSize = Sessions.Size(Fn);
